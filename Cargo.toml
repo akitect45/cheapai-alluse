@@ -1,0 +1,59 @@
+[package]
+name = "alluse"
+version = "1.0.0"
+edition = "2024"
+rust-version = "1.85"
+default-run = "alluse"
+description = "Cross-Platform Personal AI Assistant (macOS Apple Silicon, Linux AMD64/ARM64, Windows AMD64/ARM64) — Full Computer Use, Embedded Multi-Tab Browser Use, Vault & AllScript Engine"
+license = "MIT"
+repository = "https://github.com/akitect45/cheapai-alluse"
+homepage = "https://cheapai.im/alluse"
+
+[[bin]]
+name = "alluse"
+path = "src/main.rs"
+
+[[bin]]
+name = "alluse-setup"
+path = "src/bin/alluse_setup.rs"
+
+[dependencies]
+anyhow = "1.0"
+base64 = "0.22"
+dpi = "0.1"
+flate2 = "1.1"
+futures-util = "0.3"
+hmac = "0.12"
+http = "1.1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "ico", "gif"] }
+raw-window-handle = "0.6"
+regex = "1.13"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "gzip"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+tao = "0.37"
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "process", "time", "io-util", "io-std", "fs", "sync", "net", "signal"] }
+toml = "0.8"
+urlencoding = "2.1"
+uuid = { version = "1.28", features = ["v4"] }
+wry = { version = "0.57", default-features = false, features = ["os-webview", "devtools", "x11"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
+
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.39"
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Com",
+    "Win32_UI_WindowsAndMessaging",
+] }
+windows-core = "0.62"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true

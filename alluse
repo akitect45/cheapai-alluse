@@ -1,0 +1,145 @@
+#!/usr/bin/env sh
+# ==============================================================================
+# AllUse Universal POSIX Root Launcher (macOS Apple Silicon/Intel & Linux x64/ARM64)
+# ==============================================================================
+
+set -e
+
+SOURCE_PATH="$0"
+while [ -L "$SOURCE_PATH" ]; do
+    SOURCE_DIR="$(CDPATH= cd -- "$(dirname -- "$SOURCE_PATH")" && pwd)"
+    LINK_TARGET="$(readlink "$SOURCE_PATH")"
+    case "$LINK_TARGET" in
+        /*) SOURCE_PATH="$LINK_TARGET" ;;
+        *) SOURCE_PATH="$SOURCE_DIR/$LINK_TARGET" ;;
+    esac
+done
+ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$SOURCE_PATH")" && pwd)"
+GITHUB_REPO="${ALLUSE_GITHUB_REPO:-akitect45/cheapai-alluse}"
+
+PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:$HOME/.local/bin:$PATH"
+export PATH
+
+is_valid_native_binary() {
+    BIN_CAND="$1"
+    if [ ! -f "$BIN_CAND" ]; then
+        return 1
+    fi
+    SZ="$(wc -c < "$BIN_CAND" 2>/dev/null | tr -d '[:space:]' || echo 0)"
+    if [ "${SZ:-0}" -lt 1048576 ]; then
+        return 1
+    fi
+    if command -v od >/dev/null 2>&1; then
+        MAGIC_HEX="$(od -An -tx1 -N4 "$BIN_CAND" 2>/dev/null | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+        case "$MAGIC_HEX" in
+            7f454c46|cffaedfe|feedfacf|cafebabe|bebafeca|cefaedfe|feedface)
+                return 0
+                ;;
+            *)
+                return 1
+                ;;
+        esac
+    fi
+    return 0
+}
+
+# 1. Delegate to Node universal launcher if Node.js is installed
+if command -v node >/dev/null 2>&1 && [ -f "$ROOT_DIR/bin/alluse.js" ]; then
+    exec node "$ROOT_DIR/bin/alluse.js" "$@"
+fi
+
+# 2. If native release binary is already built and executable, launch directly
+if [ -x "$ROOT_DIR/target/release/alluse" ] && is_valid_native_binary "$ROOT_DIR/target/release/alluse"; then
+    exec "$ROOT_DIR/target/release/alluse" "$@"
+fi
+
+if [ -x "$ROOT_DIR/data/backups/alluse_golden" ] && is_valid_native_binary "$ROOT_DIR/data/backups/alluse_golden"; then
+    exec "$ROOT_DIR/data/backups/alluse_golden" "$@"
+fi
+
+# 3. Detect POSIX platform key (darwin-arm64, darwin-x64, linux-x64, linux-arm64)
+OS_RAW="$(uname -s 2>/dev/null || echo Unknown)"
+ARCH_RAW="$(uname -m 2>/dev/null || echo Unknown)"
+
+case "$OS_RAW" in
+    Darwin)
+        OS_NAME="darwin"
+        if [ "$ARCH_RAW" = "x86_64" ] && sysctl -n hw.optional.arm64 2>/dev/null | grep -q "1"; then
+            ARCH_RAW="arm64"
+        fi
+        ;;
+    Linux)
+        OS_NAME="linux"
+        ;;
+    *)
+        OS_NAME="unknown"
+        ;;
+esac
+
+case "$ARCH_RAW" in
+    arm64|aarch64)
+        ARCH_NAME="arm64"
+        ;;
+    x86_64|amd64)
+        ARCH_NAME="x64"
+        ;;
+    *)
+        ARCH_NAME="unknown"
+        ;;
+esac
+
+PLATFORM_KEY="${OS_NAME}-${ARCH_NAME}"
+RELEASE_BIN="$ROOT_DIR/target/release/alluse"
+
+try_download_prebuilt_posix() {
+    if [ "$OS_NAME" = "unknown" ] || [ "$ARCH_NAME" = "unknown" ]; then
+        return 1
+    fi
+    mkdir -p "$ROOT_DIR/target/release"
+    TMP_BIN="$RELEASE_BIN.part"
+    rm -f "$TMP_BIN"
+
+    CANDIDATES="alluse-$PLATFORM_KEY"
+    if [ "$PLATFORM_KEY" = "darwin-x64" ]; then
+        CANDIDATES="alluse-darwin-x64 alluse-darwin-arm64"
+    fi
+
+    for ASSET in $CANDIDATES; do
+        URL="https://github.com/$GITHUB_REPO/releases/latest/download/$ASSET"
+        echo "[AllUse] Checking prebuilt release binary ($ASSET) from github.com/$GITHUB_REPO..."
+        DL_OK=0
+        if command -v curl >/dev/null 2>&1; then
+            if curl -fsSL --retry 2 --connect-timeout 15 -o "$TMP_BIN" "$URL" 2>/dev/null; then
+                DL_OK=1
+            fi
+        elif command -v wget >/dev/null 2>&1; then
+            if wget -q -T 15 -O "$TMP_BIN" "$URL" 2>/dev/null; then
+                DL_OK=1
+            fi
+        fi
+
+        if [ "$DL_OK" = "1" ] && is_valid_native_binary "$TMP_BIN"; then
+            mv "$TMP_BIN" "$RELEASE_BIN"
+            chmod 755 "$RELEASE_BIN"
+            echo "[AllUse] Downloaded prebuilt binary to target/release/alluse"
+            return 0
+        fi
+        rm -f "$TMP_BIN"
+    done
+    return 1
+}
+
+if ! try_download_prebuilt_posix; then
+    if [ -f "$HOME/.cargo/env" ]; then
+        # shellcheck disable=SC1090
+        . "$HOME/.cargo/env"
+    fi
+    if [ -d "$HOME/.cargo/bin" ]; then
+        PATH="$HOME/.cargo/bin:$PATH"
+        export PATH
+    fi
+    echo "[AllUse] Building native release binary via cargo..."
+    (cd "$ROOT_DIR" && cargo build --release)
+fi
+
+exec "$RELEASE_BIN" "$@"

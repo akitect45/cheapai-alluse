@@ -1,0 +1,3007 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="color-scheme" content="dark light" />
+<title>CheapAI AllUse Setup</title>
+<link rel="icon" type="image/png" href="/assets/cheapai_logo_icon.png" />
+<style>
+  @font-face {
+    font-family: 'Pretendard Variable';
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
+    src: url('/assets/PretendardVariable.woff2') format('woff2');
+  }
+
+  /* ─────────────────────────────────────────────────────────────────────────
+   * CheapAI AllUse Cross-Platform Setup — Strict Monochrome Design System
+   * 100% Achromatic Palette (Zero Blue Tint, Zero Emojis, Zero External CDN)
+   * Optimized for ~680x500 Frameless Custom Titlebar Desktop Window
+   * ───────────────────────────────────────────────────────────────────────── */
+  :root,
+  [data-theme="dark"] {
+    --bg-frame: #0d0d0d;
+    --bg-sidebar: #141414;
+    --bg-canvas: #171717;
+    --bg-elevated: #212121;
+    --bg-bubble: #2a2a2a;
+    --bg-hover: rgba(255, 255, 255, 0.06);
+    --bg-active: rgba(255, 255, 255, 0.11);
+    --bg-input: #1e1e1e;
+    --border: #282828;
+    --border-subtle: #202020;
+    --border-strong: #454545;
+    --border-focus: #686868;
+    --text: #ececec;
+    --text-secondary: #9b9b9b;
+    --text-muted: #6e6e6e;
+    --accent: #ffffff;
+    --accent-hover: #e0e0e0;
+    --accent-fg: #0d0d0d;
+    --code-bg: #111111;
+    --overlay: rgba(0, 0, 0, 0.68);
+    --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.35);
+    --shadow-md: 0 14px 36px rgba(0, 0, 0, 0.62);
+  }
+
+  [data-theme="light"] {
+    --bg-frame: #f2f2f2;
+    --bg-sidebar: #f7f7f7;
+    --bg-canvas: #ffffff;
+    --bg-elevated: #f0f0f0;
+    --bg-bubble: #e6e6e6;
+    --bg-hover: rgba(0, 0, 0, 0.05);
+    --bg-active: rgba(0, 0, 0, 0.09);
+    --bg-input: #f5f5f5;
+    --border: #e3e3e3;
+    --border-subtle: #ededed;
+    --border-strong: #b8b8b8;
+    --border-focus: #737373;
+    --text: #141414;
+    --text-secondary: #595959;
+    --text-muted: #808080;
+    --accent: #141414;
+    --accent-hover: #2c2c2c;
+    --accent-fg: #ffffff;
+    --code-bg: #f4f4f4;
+    --overlay: rgba(0, 0, 0, 0.32);
+    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.06);
+    --shadow-md: 0 12px 30px rgba(0, 0, 0, 0.14);
+  }
+
+  :root {
+    --font-sans: 'Pretendard Variable', 'Segoe UI Variable', 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'Cascadia Mono', 'Cascadia Code', Consolas, 'SFMono-Regular', Menlo, monospace;
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 12px;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background: var(--bg-frame);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 1.5;
+    letter-spacing: -0.011em;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  button, input {
+    font-family: inherit;
+    font-size: inherit;
+    color: inherit;
+  }
+
+  /* Thin monochrome scrollbars only inside bounded scrollable regions */
+  :root,
+  [data-theme="dark"] {
+    color-scheme: dark;
+  }
+  [data-theme="light"] {
+    color-scheme: light;
+  }
+  .stage-scroll,
+  .log-body,
+  .modal-list {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+    overscroll-behavior: contain;
+  }
+  @supports not (scrollbar-color: auto) {
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: var(--border-strong);
+      border-radius: 3px;
+    }
+  }
+
+  .window-shell {
+    width: 100%;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-frame);
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+
+  /* ── Custom Frameless Titlebar (38px) ──────────────────────────────────── */
+  .titlebar {
+    height: 38px;
+    min-height: 38px;
+    max-height: 38px;
+    flex-shrink: 0;
+    background: var(--bg-frame);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 6px 0 12px;
+    gap: 8px;
+    cursor: default;
+  }
+
+  .tb-brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    pointer-events: none;
+  }
+
+  .brand-mark {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    overflow: hidden;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+  }
+
+  .brand-mark img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: none;
+  }
+
+  .brand-mark.has-img img {
+    display: block;
+  }
+
+  .brand-mark.has-img svg {
+    display: none;
+  }
+
+  .brand-mark svg {
+    width: 12px;
+    height: 12px;
+    color: var(--text);
+  }
+
+  .tb-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+    letter-spacing: -0.015em;
+  }
+
+  .tb-badges {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+  }
+
+  .pill-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 18px;
+    padding: 0 6px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    font-size: 10.5px;
+    font-weight: 500;
+    font-family: var(--font-mono);
+    white-space: nowrap;
+  }
+
+  .pill-badge.strong {
+    border-color: var(--border-strong);
+    color: var(--text);
+  }
+
+  .tb-drag-spacer {
+    flex: 1 1 auto;
+    height: 100%;
+    min-width: 24px;
+  }
+
+  .tb-controls {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+
+  .tb-btn {
+    height: 26px;
+    min-width: 28px;
+    padding: 0 7px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 600;
+    transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  }
+
+  .tb-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text);
+    border-color: var(--border);
+  }
+
+  .tb-btn.close-btn:hover {
+    background: var(--accent);
+    color: var(--accent-fg);
+    border-color: var(--accent);
+  }
+
+  .tb-btn svg {
+    width: 13px;
+    height: 13px;
+    flex-shrink: 0;
+  }
+
+  /* ── Main Workbench Body (Left Stepper Rail + Right Wizard Stage) ──────── */
+  .app-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    overflow: hidden;
+  }
+
+  .sidebar-rail {
+    width: 168px;
+    min-width: 168px;
+    flex-shrink: 0;
+    background: var(--bg-sidebar);
+    border-right: 1px solid var(--border);
+    padding: 16px 12px 12px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+
+  .rail-heading {
+    font-size: 10.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    padding: 0 6px 10px;
+  }
+
+  .stepper-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .stepper-item {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 7px 8px;
+    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 500;
+    transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  }
+
+  .stepper-item.is-active {
+    background: var(--bg-active);
+    border-color: var(--border);
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .stepper-item.is-done {
+    color: var(--text-secondary);
+  }
+
+  .stepper-dot {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 1px solid var(--border-strong);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-family: var(--font-mono);
+    flex-shrink: 0;
+    color: var(--text-muted);
+  }
+
+  .stepper-item.is-active .stepper-dot {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-fg);
+    font-weight: 700;
+  }
+
+  .stepper-item.is-done .stepper-dot {
+    background: var(--bg-elevated);
+    border-color: var(--border-strong);
+    color: var(--text);
+  }
+
+  .stepper-dot svg {
+    width: 11px;
+    height: 11px;
+  }
+
+  .rail-meta {
+    border-top: 1px solid var(--border);
+    padding-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .meta-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    font-size: 11px;
+  }
+
+  .meta-k {
+    color: var(--text-muted);
+  }
+
+  .meta-v {
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    text-align: right;
+  }
+
+  /* ── Right Canvas & Fixed Footer ───────────────────────────────────────── */
+  .stage-pane {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-canvas);
+  }
+
+  .stage-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 15px 22px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .screen {
+    display: none;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .screen.is-active {
+    display: flex;
+  }
+
+  .screen > * {
+    flex-shrink: 0;
+  }
+
+  .stage-footer {
+    height: 54px;
+    min-height: 54px;
+    flex-shrink: 0;
+    border-top: 1px solid var(--border);
+    background: var(--bg-canvas);
+    padding: 0 22px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .footer-left,
+  .footer-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* ── Typography & Cards ────────────────────────────────────────────────── */
+  .screen-header {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .screen-title {
+    margin: 0;
+    font-size: 17px;
+    font-weight: 700;
+    letter-spacing: -0.025em;
+    color: var(--text);
+  }
+
+  .screen-subtitle {
+    margin: 0;
+    font-size: 12.5px;
+    color: var(--text-secondary);
+    line-height: 1.45;
+  }
+
+  .card {
+    flex-shrink: 0;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .card.compact {
+    padding: 10px 12px;
+    gap: 6px;
+  }
+
+  .card.emphasis {
+    border-color: var(--border-strong);
+  }
+
+  .card-label {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .hero-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .hero-emblem {
+    width: 42px;
+    height: 42px;
+    border-radius: 10px;
+    border: 1px solid var(--border-strong);
+    background: var(--bg-frame);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    overflow: hidden;
+  }
+
+  .hero-emblem img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: none;
+  }
+
+  .hero-emblem.has-img img {
+    display: block;
+  }
+
+  .hero-emblem.has-img svg {
+    display: none;
+  }
+
+  .hero-emblem svg {
+    width: 22px;
+    height: 22px;
+    color: var(--text);
+  }
+
+  .hero-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .hero-name {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: -0.02em;
+  }
+
+  .hero-desc {
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+
+  /* ── Environment Grid & Notice Banners ─────────────────────────────────── */
+  .env-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .env-chip {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .env-chip-left {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+  }
+
+  .env-chip-left svg {
+    width: 14px;
+    height: 14px;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+  }
+
+  .env-chip-label {
+    font-size: 11.5px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+  }
+
+  .env-chip-val {
+    font-size: 11.5px;
+    font-weight: 600;
+    font-family: var(--font-mono);
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .notice-banner {
+    flex-shrink: 0;
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+    padding: 9px 12px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-strong);
+    background: var(--bg-bubble);
+    color: var(--text);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .notice-banner.subtle {
+    background: var(--bg-elevated);
+    border-color: var(--border);
+    color: var(--text-secondary);
+  }
+
+  .notice-banner.high-contrast {
+    border-color: var(--text);
+    background: var(--bg-bubble);
+  }
+
+  .notice-banner svg {
+    width: 15px;
+    height: 15px;
+    margin-top: 1px;
+    flex-shrink: 0;
+    color: var(--text);
+  }
+
+  .notice-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .notice-title {
+    font-weight: 600;
+    color: var(--text);
+    font-size: 12px;
+  }
+
+  .notice-sub {
+    color: var(--text-secondary);
+    font-size: 11.5px;
+    word-break: break-word;
+  }
+
+  .mono {
+    font-family: var(--font-mono);
+  }
+
+  .selectable {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  /* ── Buttons ───────────────────────────────────────────────────────────── */
+  .btn {
+    height: 32px;
+    padding: 0 14px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    color: var(--text);
+    font-size: 12.5px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: background 120ms ease, border-color 120ms ease, opacity 120ms ease;
+  }
+
+  .btn:hover:not(:disabled) {
+    background: var(--bg-bubble);
+    border-color: var(--border-strong);
+  }
+
+  .btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .btn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-fg);
+  }
+
+  .btn.primary:hover:not(:disabled) {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+  }
+
+  .btn.ghost {
+    background: transparent;
+    border-color: transparent;
+    color: var(--text-secondary);
+  }
+
+  .btn.ghost:hover:not(:disabled) {
+    background: var(--bg-hover);
+    color: var(--text);
+    border-color: var(--border);
+  }
+
+  .btn.sm {
+    height: 28px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+
+  .btn svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+  }
+
+  /* ── Inputs & Path Row ─────────────────────────────────────────────────── */
+  .path-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .text-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 32px;
+    padding: 0 10px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--bg-input);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    outline: none;
+    user-select: text;
+    -webkit-user-select: text;
+    transition: border-color 120ms ease;
+  }
+
+  .text-input:focus {
+    border-color: var(--border-focus);
+  }
+
+  .text-input[readonly] {
+    color: var(--text-secondary);
+  }
+
+  /* ── Custom Monochrome Checkboxes & Tasks Grid ─────────────────────────── */
+  .tasks-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .task-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 7px 9px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--bg-canvas);
+    cursor: pointer;
+    transition: border-color 120ms ease, background 120ms ease;
+  }
+
+  .task-item:hover:not(.is-disabled) {
+    border-color: var(--border-strong);
+    background: var(--bg-hover);
+  }
+
+  .task-item.is-disabled {
+    opacity: 0.52;
+    cursor: not-allowed;
+  }
+
+  .task-item.span-2 {
+    grid-column: 1 / -1;
+  }
+
+  .check-wrap {
+    position: relative;
+    width: 15px;
+    height: 15px;
+    margin-top: 2px;
+    flex-shrink: 0;
+  }
+
+  .check-wrap input {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    opacity: 0;
+    cursor: inherit;
+  }
+
+  .check-box {
+    width: 15px;
+    height: 15px;
+    border-radius: 4px;
+    border: 1px solid var(--border-strong);
+    background: var(--bg-input);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--accent-fg);
+    transition: background 120ms ease, border-color 120ms ease;
+  }
+
+  .check-wrap input:checked + .check-box {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .check-wrap input:focus-visible + .check-box {
+    outline: 2px solid var(--border-focus);
+    outline-offset: 1px;
+  }
+
+  .check-box svg {
+    width: 11px;
+    height: 11px;
+    opacity: 0;
+  }
+
+  .check-wrap input:checked + .check-box svg {
+    opacity: 1;
+  }
+
+  .task-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+  }
+
+  .task-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.3;
+  }
+
+  .task-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.3;
+  }
+
+  /* ── Progress Bar, Steps & Collapsible Logs ────────────────────────────── */
+  .progress-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .progress-phase {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .progress-pct {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+  }
+
+  .progress-track {
+    width: 100%;
+    height: 6px;
+    border-radius: 999px;
+    background: var(--bg-bubble);
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    width: 0%;
+    border-radius: 999px;
+    background: var(--accent);
+    transition: width 150ms ease;
+  }
+
+  .steps-list {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .step-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 5px 9px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--bg-canvas);
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+
+  .step-row.state-running {
+    border-color: var(--border-strong);
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .step-row.state-done {
+    color: var(--text);
+  }
+
+  .step-row.state-error {
+    border-color: var(--text);
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .step-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .step-icon {
+    width: 15px;
+    height: 15px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .step-icon svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .spin {
+    animation: spin 0.9s linear infinite;
+  }
+
+  .step-state-pill {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    flex-shrink: 0;
+  }
+
+  .log-drawer {
+    flex-shrink: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-elevated);
+    overflow: hidden;
+  }
+
+  .log-toggle {
+    width: 100%;
+    height: 32px;
+    padding: 0 12px;
+    border: 0;
+    background: transparent;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .log-toggle:hover {
+    background: var(--bg-hover);
+    color: var(--text);
+  }
+
+  .log-toggle-left {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .log-toggle svg {
+    width: 13px;
+    height: 13px;
+    transition: transform 140ms ease;
+  }
+
+  .log-drawer.is-open .log-chevron {
+    transform: rotate(90deg);
+  }
+
+  .log-body {
+    display: none;
+    border-top: 1px solid var(--border);
+    background: var(--code-bg);
+    max-height: 104px;
+    overflow-y: auto;
+    padding: 8px 10px;
+  }
+
+  .log-drawer.is-open .log-body {
+    display: block;
+  }
+
+  .log-lines {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.45;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    word-break: break-all;
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  /* ── Uninstall & Finish Emphasis ───────────────────────────────────────── */
+  .wipe-card {
+    cursor: pointer;
+    transition: border-color 140ms ease, background 140ms ease;
+  }
+
+  .wipe-card.is-armed {
+    border-color: var(--text);
+    background: var(--bg-bubble);
+  }
+
+  .finish-center {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 16px;
+  }
+
+  .finish-badge {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: var(--accent-fg);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .finish-badge svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .hidden {
+    display: none !important;
+  }
+
+  /* ── In-App Folder Browser Modal ───────────────────────────────────────── */
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: var(--overlay);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+    padding: 18px;
+  }
+
+  .modal-backdrop.is-open {
+    display: flex;
+  }
+
+  .modal-dialog {
+    width: 492px;
+    max-width: 100%;
+    height: 368px;
+    max-height: calc(100vh - 36px);
+    background: var(--bg-canvas);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .modal-header {
+    height: 40px;
+    flex-shrink: 0;
+    padding: 0 12px 0 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .modal-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  .modal-nav {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+    background: var(--bg-sidebar);
+  }
+
+  .modal-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .dir-entry {
+    width: 100%;
+    padding: 7px 10px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    cursor: pointer;
+    text-align: left;
+    font-size: 12.5px;
+  }
+
+  .dir-entry:hover {
+    background: var(--bg-hover);
+    border-color: var(--border);
+  }
+
+  .dir-entry-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .dir-entry-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .dir-entry svg {
+    width: 14px;
+    height: 14px;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+  }
+
+  .modal-empty {
+    padding: 28px 16px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .modal-footer {
+    height: 48px;
+    flex-shrink: 0;
+    padding: 0 12px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    background: var(--bg-canvas);
+  }
+
+  .modal-current-hint {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* ── Modern Web Guidance: Cross-WebView Progressive Polish ────────────── */
+  @supports selector(:focus-visible) {
+    :where(button, [role="button"], .btn, .tb-btn, .dir-entry, .log-toggle, .wipe-card, .text-input, input, select, textarea):focus-visible {
+      outline: 2px solid var(--border-focus);
+      outline-offset: 2px;
+    }
+  }
+  @supports selector(:user-invalid) {
+    :where(.text-input, input, select, textarea):is(:user-invalid) {
+      border-color: var(--text);
+    }
+  }
+  h1, h2, h3,
+  .screen-title,
+  .modal-title {
+    text-wrap: balance;
+  }
+  p,
+  .screen-subtitle,
+  .task-desc,
+  .modal-empty {
+    text-wrap: pretty;
+  }
+  .modal-backdrop {
+    overscroll-behavior: contain;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    @supports (transition-behavior: allow-discrete) {
+      .modal-backdrop {
+        opacity: 0;
+        transition-property: opacity, display;
+        transition-duration: 160ms;
+        transition-timing-function: ease;
+        transition-behavior: allow-discrete;
+      }
+      .modal-backdrop.is-open {
+        opacity: 1;
+        @starting-style {
+          opacity: 0;
+        }
+      }
+      .modal-backdrop .modal-dialog {
+        transform: translateY(6px) scale(0.98);
+        opacity: 0;
+        transition-property: transform, opacity;
+        transition-duration: 180ms;
+        transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+      }
+      .modal-backdrop.is-open .modal-dialog {
+        transform: translateY(0) scale(1);
+        opacity: 1;
+        @starting-style {
+          transform: translateY(6px) scale(0.98);
+          opacity: 0;
+        }
+      }
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .modal-backdrop,
+    .modal-dialog {
+      transition-duration: 0.01s !important;
+    }
+  }
+</style>
+</head>
+<body>
+<div class="window-shell">
+  <!-- Custom Frameless Titlebar (38px) -->
+  <header class="titlebar" id="titlebar">
+    <div class="tb-brand">
+      <div class="brand-mark" id="tb-brand-mark">
+        <img src="/assets/cheapai_logo_icon.png" alt="" id="tb-logo-img" />
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 2L3 7v10l9 5 9-5V7l-9-5z" />
+          <path d="M12 22V12" />
+          <path d="M21 7l-9 5-9-5" />
+        </svg>
+      </div>
+      <span class="tb-title" id="tb-product-title">CheapAI AllUse Setup</span>
+      <div class="tb-badges">
+        <span class="pill-badge" id="tb-version-badge">v1.0.0</span>
+        <span class="pill-badge" id="tb-platform-badge">win32 · arm64</span>
+        <span class="pill-badge strong hidden" id="tb-dev-badge">DEV PREVIEW</span>
+      </div>
+    </div>
+
+    <div class="tb-drag-spacer" aria-hidden="true"></div>
+
+    <div class="tb-controls" id="titlebar-controls" data-no-drag>
+      <button type="button" class="tb-btn" id="btn-lang" title="Language / 언어">EN</button>
+      <button type="button" class="tb-btn" id="btn-theme" title="Theme / 테마" aria-label="Toggle theme">
+        <svg id="icon-theme-sun" class="hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+        </svg>
+        <svg id="icon-theme-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z" />
+        </svg>
+      </button>
+      <button type="button" class="tb-btn" id="btn-min" title="Minimize" aria-label="Minimize">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M5 12h14" />
+        </svg>
+      </button>
+      <button type="button" class="tb-btn close-btn" id="btn-close" title="Close" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M6 6l12 12M18 6L6 18" />
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="app-body">
+    <!-- Left Rail Stepper -->
+    <aside class="sidebar-rail">
+      <div>
+        <div class="rail-heading" id="rail-heading">SETUP STEPS</div>
+        <nav class="stepper-list" id="stepper-list" aria-label="Wizard steps"></nav>
+      </div>
+
+      <div class="rail-meta">
+        <div class="meta-row">
+          <span class="meta-k" id="meta-os-label">OS</span>
+          <span class="meta-v" id="meta-os-val">-</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-k" id="meta-arch-label">ARCH</span>
+          <span class="meta-v" id="meta-arch-val">-</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-k" id="meta-mode-label">MODE</span>
+          <span class="meta-v" id="meta-mode-val">install</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content Stage -->
+    <main class="stage-pane">
+      <div class="stage-scroll">
+        <!-- 1) Welcome / Mode -->
+        <section class="screen is-active" id="screen-welcome">
+          <div class="screen-header">
+            <h1 class="screen-title" id="welcome-title">CheapAI AllUse 설치 마법사</h1>
+            <p class="screen-subtitle" id="welcome-subtitle">오프라인 독립 실행 패키지로 안전하고 깔끔하게 설치합니다.</p>
+          </div>
+
+          <div class="card">
+            <div class="hero-row">
+              <div class="hero-emblem" id="hero-emblem">
+                <img src="/assets/cheapai_logo_icon.png" alt="" id="hero-logo-img" />
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 2L3 7v10l9 5 9-5V7l-9-5z" />
+                  <path d="M12 22V12" />
+                  <path d="M21 7l-9 5-9-5" />
+                </svg>
+              </div>
+              <div class="hero-text">
+                <div class="hero-name" id="hero-product-name">CheapAI AllUse</div>
+                <div class="hero-desc" id="hero-product-desc">멀티모달 AI 데스크톱 워크벤치 · 로컬 브라우저 &amp; 자동화 런타임</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="env-grid">
+            <div class="env-chip">
+              <div class="env-chip-left">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="4" width="18" height="14" rx="2" />
+                  <path d="M8 20h8M12 18v2" />
+                </svg>
+                <span class="env-chip-label" id="env-target-label">대상 환경</span>
+              </div>
+              <span class="env-chip-val" id="env-target-val">windows / arm64</span>
+            </div>
+
+            <div class="env-chip">
+              <div class="env-chip-left">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="4" y="4" width="16" height="16" rx="2" />
+                  <path d="M9 9h6v6H9z" />
+                </svg>
+                <span class="env-chip-label" id="env-native-label">호스트 CPU</span>
+              </div>
+              <span class="env-chip-val" id="env-native-val">arm64</span>
+            </div>
+
+            <div class="env-chip">
+              <div class="env-chip-left">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M9 12l2 2 4-4" />
+                </svg>
+                <span class="env-chip-label" id="env-runtime-label">WebView2 런타임</span>
+              </div>
+              <span class="env-chip-val" id="env-runtime-val">준비됨</span>
+            </div>
+
+            <div class="env-chip">
+              <div class="env-chip-left">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                </svg>
+                <span class="env-chip-label" id="env-pkg-label">패키지 모드</span>
+              </div>
+              <span class="env-chip-val" id="env-pkg-val">install</span>
+            </div>
+          </div>
+
+          <div class="notice-banner high-contrast hidden" id="banner-arch-warn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+              <path d="M12 9v4M12 17h.01" />
+            </svg>
+            <div class="notice-text">
+              <span class="notice-title" id="arch-warn-title">아키텍처 호환성 경고</span>
+              <span class="notice-sub" id="arch-warn-desc"></span>
+            </div>
+          </div>
+
+          <div class="notice-banner subtle hidden" id="banner-dev-preview">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 16v-4M12 8h.01" />
+            </svg>
+            <div class="notice-text">
+              <span class="notice-title" id="dev-preview-title">개발 프리뷰 모드 (Dev Preview)</span>
+              <span class="notice-sub" id="dev-preview-desc">내장 배포 페이로드 없이 UI/IPC 흐름을 점검하는 프리뷰 상태입니다.</span>
+            </div>
+          </div>
+
+          <div class="notice-banner hidden" id="banner-existing">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+            </svg>
+            <div class="notice-text">
+              <span class="notice-title" id="existing-title">기존 설치 감지됨</span>
+              <span class="notice-sub mono selectable" id="existing-desc"></span>
+            </div>
+          </div>
+        </section>
+
+        <!-- 2) Customize -->
+        <section class="screen" id="screen-customize">
+          <div class="screen-header">
+            <h1 class="screen-title" id="cust-title">설치 경로 및 옵션 구성</h1>
+            <p class="screen-subtitle" id="cust-subtitle">설치 위치와 시스템 통합 작업을 확인하고 설치를 시작하세요.</p>
+          </div>
+
+          <div class="card compact">
+            <div class="card-label">
+              <span id="cust-dir-label">설치 폴더</span>
+              <span class="mono" style="font-size:10.5px; color:var(--text-muted);" id="cust-dir-hint"></span>
+            </div>
+            <div class="path-row">
+              <input type="text" class="text-input" id="install-dir-input" spellcheck="false" />
+              <button type="button" class="btn sm" id="btn-browse">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                </svg>
+                <span id="btn-browse-label">찾아보기</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="card compact">
+            <div class="card-label">
+              <span id="cust-tasks-label">추가 통합 작업</span>
+            </div>
+            <div class="tasks-grid" id="tasks-grid">
+              <label class="task-item" id="wrap-task-desktop">
+                <span class="check-wrap">
+                  <input type="checkbox" id="task-desktop" />
+                  <span class="check-box">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+                  </span>
+                </span>
+                <span class="task-meta">
+                  <span class="task-name" id="lbl-task-desktop">바탕화면 바로가기</span>
+                  <span class="task-hint" id="hint-task-desktop">Desktop 아이콘 생성</span>
+                </span>
+              </label>
+
+              <label class="task-item" id="wrap-task-startMenu">
+                <span class="check-wrap">
+                  <input type="checkbox" id="task-startMenu" />
+                  <span class="check-box">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+                  </span>
+                </span>
+                <span class="task-meta">
+                  <span class="task-name" id="lbl-task-startMenu">시작 메뉴 등록</span>
+                  <span class="task-hint" id="hint-task-startMenu">앱 런처 및 시작 메뉴 등록</span>
+                </span>
+              </label>
+
+              <label class="task-item" id="wrap-task-path">
+                <span class="check-wrap">
+                  <input type="checkbox" id="task-path" />
+                  <span class="check-box">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+                  </span>
+                </span>
+                <span class="task-meta">
+                  <span class="task-name" id="lbl-task-path">CLI PATH 추가</span>
+                  <span class="task-hint" id="hint-task-path">터미널에서 alluse 직접 실행</span>
+                </span>
+              </label>
+
+              <label class="task-item" id="wrap-task-contextMenu">
+                <span class="check-wrap">
+                  <input type="checkbox" id="task-contextMenu" />
+                  <span class="check-box">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+                  </span>
+                </span>
+                <span class="task-meta">
+                  <span class="task-name" id="lbl-task-contextMenu">탐색기 우클릭 메뉴</span>
+                  <span class="task-hint" id="hint-task-contextMenu">폴더에서 CheapAI AllUse 열기</span>
+                </span>
+              </label>
+
+              <label class="task-item span-2" id="wrap-task-fileAssoc">
+                <span class="check-wrap">
+                  <input type="checkbox" id="task-fileAssoc" />
+                  <span class="check-box">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+                  </span>
+                </span>
+                <span class="task-meta">
+                  <span class="task-name" id="lbl-task-fileAssoc">.allscript 파일 연결</span>
+                  <span class="task-hint" id="hint-task-fileAssoc">AllUse 자동화 스크립트(.allscript) 기본 실행 앱 연결</span>
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <div class="notice-banner high-contrast hidden" id="cust-error-banner">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M15 9l-6 6M9 9l6 6" />
+            </svg>
+            <div class="notice-text">
+              <span class="notice-title" id="cust-error-title">요청 실패</span>
+              <span class="notice-sub" id="cust-error-msg"></span>
+            </div>
+          </div>
+        </section>
+
+        <!-- 3) Progress -->
+        <section class="screen" id="screen-progress">
+          <div class="screen-header">
+            <h1 class="screen-title" id="prog-title">설치 진행 중</h1>
+            <p class="screen-subtitle" id="prog-subtitle">파일 무결성을 검증하고 로컬 런타임을 구성하는 중입니다.</p>
+          </div>
+
+          <div class="card compact">
+            <div class="progress-head">
+              <span class="progress-phase" id="prog-phase">준비 중...</span>
+              <span class="progress-pct" id="prog-pct">0%</span>
+            </div>
+            <div class="progress-track">
+              <div class="progress-fill" id="prog-fill"></div>
+            </div>
+          </div>
+
+          <div class="steps-list" id="prog-steps-list"></div>
+
+          <div class="notice-banner high-contrast hidden" id="prog-error-card">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+              <path d="M12 9v4M12 17h.01" />
+            </svg>
+            <div class="notice-text">
+              <span class="notice-title" id="prog-error-title">작업 중 오류가 발생했습니다</span>
+              <span class="notice-sub mono selectable" id="prog-error-msg"></span>
+            </div>
+          </div>
+
+          <div class="log-drawer" id="log-drawer">
+            <button type="button" class="log-toggle" id="btn-toggle-logs" aria-expanded="false">
+              <span class="log-toggle-left">
+                <svg class="log-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M9 18l6-6-6-6" />
+                </svg>
+                <span id="log-toggle-label">실시간 로그</span>
+              </span>
+              <span class="mono" style="font-size:11px; color:var(--text-muted);" id="log-count">(0)</span>
+            </button>
+            <div class="log-body" id="log-body">
+              <pre class="log-lines" id="log-lines"></pre>
+            </div>
+          </div>
+        </section>
+
+        <!-- 4) Uninstall -->
+        <section class="screen" id="screen-uninstall">
+          <div class="screen-header">
+            <h1 class="screen-title" id="uninst-title">CheapAI AllUse 제거</h1>
+            <p class="screen-subtitle" id="uninst-subtitle">설치된 프로그램 파일과 바로가기를 깔끔하게 제거합니다.</p>
+          </div>
+
+          <div class="card compact">
+            <div class="card-label">
+              <span id="uninst-dir-label">제거 대상 경로</span>
+            </div>
+            <div class="path-row">
+              <input type="text" class="text-input" id="uninstall-dir-input" spellcheck="false" />
+            </div>
+          </div>
+
+          <label class="card wipe-card emphasis" id="wipe-card">
+            <div style="display:flex; align-items:flex-start; gap:10px;">
+              <span class="check-wrap" style="margin-top:2px;">
+                <input type="checkbox" id="chk-wipe-data" />
+                <span class="check-box">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+                </span>
+              </span>
+              <div style="display:flex; flex-direction:column; gap:4px; min-width:0;">
+                <span class="task-name" id="wipe-label">사용자 데이터까지 영구 삭제 (~/.alluse)</span>
+                <span class="notice-sub" id="wipe-safety-note">기본값: ~/.alluse 대화 DB · DPAPI 금고(Vault) · API 설정을 안전하게 보존합니다</span>
+              </div>
+            </div>
+          </label>
+
+          <div class="notice-banner subtle" id="uninst-preserve-banner">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+              <path d="M9 12l2 2 4-4" />
+            </svg>
+            <div class="notice-text">
+              <span class="notice-title" id="uninst-shield-title">데이터 보호 모드 활성</span>
+              <span class="notice-sub" id="uninst-shield-desc">프로그램 바이너리와 레지스트리/바로가기만 제거되며 재설치 시 기존 대화가 그대로 유지됩니다.</span>
+            </div>
+          </div>
+
+          <div class="notice-banner high-contrast hidden" id="uninst-error-banner">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M15 9l-6 6M9 9l6 6" />
+            </svg>
+            <div class="notice-text">
+              <span class="notice-title" id="uninst-error-title">제거 요청 실패</span>
+              <span class="notice-sub" id="uninst-error-msg"></span>
+            </div>
+          </div>
+        </section>
+
+        <!-- 5) Finish -->
+        <section class="screen" id="screen-finish">
+          <div class="screen-header">
+            <h1 class="screen-title" id="fin-title">설치가 완료되었습니다</h1>
+            <p class="screen-subtitle" id="fin-subtitle">이제 CheapAI AllUse를 바로 시작할 수 있습니다.</p>
+          </div>
+
+          <div class="card finish-center" style="flex-direction:row;">
+            <div class="finish-badge">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M20 6L9 17l-5-5" />
+              </svg>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:3px; min-width:0;">
+              <div class="hero-name" id="fin-box-title">설치 완료</div>
+              <div class="notice-sub mono selectable" id="fin-path-text">-</div>
+            </div>
+          </div>
+
+          <div class="notice-banner subtle hidden" id="fin-data-note">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
+            <div class="notice-text">
+              <span class="notice-title" id="fin-data-title">사용자 데이터 상태</span>
+              <span class="notice-sub" id="fin-data-desc"></span>
+            </div>
+          </div>
+
+          <label class="card compact" id="fin-launch-card" style="cursor:pointer;">
+            <div style="display:flex; align-items:center; gap:9px;">
+              <span class="check-wrap" style="margin-top:0;">
+                <input type="checkbox" id="chk-launch-after" checked />
+                <span class="check-box">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+                </span>
+              </span>
+              <span class="task-name" id="fin-launch-label">CheapAI AllUse 실행</span>
+            </div>
+          </label>
+        </section>
+      </div>
+
+      <!-- Fixed Action Footer -->
+      <footer class="stage-footer">
+        <div class="footer-left" id="footer-left"></div>
+        <div class="footer-right" id="footer-right"></div>
+      </footer>
+    </main>
+  </div>
+</div>
+
+<!-- In-App Folder Browser Modal -->
+<div class="modal-backdrop" id="browse-modal" role="dialog" aria-modal="true" aria-labelledby="browse-modal-title">
+  <div class="modal-dialog">
+    <div class="modal-header">
+      <span class="modal-title" id="browse-modal-title">설치 폴더 선택</span>
+      <button type="button" class="tb-btn" id="btn-browse-close" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M6 6l12 12M18 6L6 18" />
+        </svg>
+      </button>
+    </div>
+
+    <div class="modal-nav">
+      <button type="button" class="btn sm" id="btn-browse-up">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 19V5M5 12l7-7 7 7" />
+        </svg>
+        <span id="btn-browse-up-label">상위</span>
+      </button>
+      <input type="text" class="text-input" id="browse-path-input" spellcheck="false" />
+      <button type="button" class="btn sm" id="btn-browse-go">이동</button>
+    </div>
+
+    <div class="modal-list" id="browse-entries"></div>
+
+    <div class="modal-footer">
+      <span class="modal-current-hint" id="browse-current-hint"></span>
+      <button type="button" class="btn sm ghost" id="btn-browse-cancel">취소</button>
+      <button type="button" class="btn sm primary" id="btn-browse-select">이 폴더 선택</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  const I18N = {
+    ko: {
+      titlebarProduct: 'CheapAI AllUse Setup',
+      railHeading: '진행 단계',
+      metaOs: 'OS',
+      metaArch: '아키텍처',
+      metaMode: '모드',
+      stepsInstall: [
+        { id: 'welcome', label: '시작 · 환경' },
+        { id: 'customize', label: '경로 · 옵션' },
+        { id: 'progress', label: '설치 진행' },
+        { id: 'finish', label: '완료' }
+      ],
+      stepsUninstall: [
+        { id: 'uninstall', label: '제거 설정' },
+        { id: 'progress', label: '제거 진행' },
+        { id: 'finish', label: '완료' }
+      ],
+      welcomeTitle: 'CheapAI AllUse 설치 마법사',
+      welcomeSubtitle: '외부 네트워크 의존성 없는 독립 오프라인 마법사로 깔끔하게 설치합니다.',
+      heroDesc: '멀티모달 AI 데스크톱 워크벤치 · 로컬 브라우저 & 자동화 런타임',
+      envTarget: '대상 환경',
+      envNative: '호스트 CPU',
+      envPkg: '패키지 모드',
+      rtWinLabel: 'WebView2 런타임',
+      rtLinuxLabel: '리눅스 GUI 의존성',
+      rtMacLabel: 'WKWebView 런타임',
+      rtReady: '준비됨',
+      rtWinBootstrap: '설치 시 자동 구성',
+      rtLinuxCheck: '패키지 점검 권장',
+      archWarnTitle: '아키텍처 불일치 경고',
+      archWarnDesc: '현재 호스트({native})와 패키지 대상({arch})이 다릅니다. 성능 저하 또는 실행 호환성 문제가 발생할 수 있습니다.',
+      devPreviewTitle: '개발 프리뷰 모드 (Dev Preview)',
+      devPreviewDesc: '내장 배포 페이로드 없이 로컬 UI·IPC 계약만 테스트하는 상태입니다.',
+      existingTitle: '기존 설치 감지됨',
+      existingSummary: '설치된 버전: {ver} · 위치: {dir}',
+      custTitle: '설치 경로 및 옵션 구성',
+      custSubtitle: '설치 폴더와 시스템 통합 작업을 선택한 뒤 설치를 시작하세요.',
+      custDirLabel: '설치 폴더',
+      custDirHintWin: '사용자 로컬 앱 경로 권장',
+      custDirHintUnix: '사용자 홈 앱 디렉터리',
+      browseBtn: '찾아보기',
+      tasksLabel: '추가 통합 작업',
+      taskDesktop: '바탕화면 바로가기',
+      taskDesktopHintWin: 'Desktop 바로가기(.lnk) 생성',
+      taskDesktopHintLinux: '~/Desktop .desktop 바로가기 생성',
+      taskDesktopHintMac: 'macOS는 ~/Applications 번들을 사용합니다',
+      taskStartMenu: '시작 메뉴 등록',
+      taskStartMenuHintWin: 'Windows 시작 메뉴 프로그램 등록',
+      taskStartMenuHintLinux: '애플리케이션 메뉴(.desktop) 등록',
+      taskStartMenuHintMac: 'macOS ~/Applications 자동 등록',
+      taskPath: 'CLI PATH 추가',
+      taskPathHintWin: '사용자 PATH 환경변수에 alluse 등록',
+      taskPathHintUnix: '~/.local/bin/alluse 심볼릭 링크 생성',
+      taskContext: '탐색기 우클릭 메뉴',
+      taskContextHintWin: '폴더/배경 컨텍스트 메뉴에서 열기',
+      taskContextHintNonWin: 'Windows 전용 옵션입니다',
+      taskFileAssoc: '.allscript 파일 연결',
+      taskFileAssocHintWin: '.allscript 스크립트 파일 기본 앱 연결',
+      taskFileAssocHintNonWin: 'Windows 전용 옵션입니다',
+      custErrTitle: '설치 시작 실패',
+      emptyDirErr: '설치 폴더 경로를 입력해 주세요.',
+      emptyUninstDirErr: '제거 대상 폴더 경로를 입력해 주세요.',
+      progInstallTitle: 'CheapAI AllUse 설치 중',
+      progInstallSub: '패키지 서명·해시를 검증하고 파일을 안전하게 배치하고 있습니다.',
+      progUninstallTitle: 'CheapAI AllUse 제거 중',
+      progUninstallSub: '선택한 구성 요소와 시스템 등록 항목을 정리하고 있습니다.',
+      progErrorHeadline: '작업 중단됨',
+      progPhaseInit: '작업을 시작하는 중...',
+      progErrorTitle: '오류가 발생했습니다',
+      logLabel: '실시간 로그',
+      stepWaiting: '대기',
+      stepPending: '대기',
+      stepRunning: '진행 중',
+      stepDone: '완료',
+      stepError: '실패',
+      uninstTitle: 'CheapAI AllUse 제거',
+      uninstSubtitle: '프로그램 파일과 바로가기를 제거합니다. 개인 대화 데이터 보존 여부를 선택할 수 있습니다.',
+      uninstDirLabel: '제거 대상 경로',
+      wipeLabel: '사용자 데이터까지 영구 삭제 (~/.alluse)',
+      wipePreserveText: '기본값: ~/.alluse 대화 DB · DPAPI 금고(Vault) · API 설정을 안전하게 보존합니다',
+      wipeDangerText: '주의: 체크 시 ~/.alluse 아래 모든 대화 DB, DPAPI 금고(Vault), API 설정 및 캐시가 영구 삭제되며 복구할 수 없습니다.',
+      shieldSafeTitle: '데이터 보호 활성 (기본값)',
+      shieldSafeDesc: '프로그램 본체·레지스트리·바로가기만 제거되며 재설치 시 기존 대화 기록과 설정이 유지됩니다.',
+      shieldDangerTitle: '전체 데이터 삭제 예정',
+      shieldDangerDesc: '제거 실행 시 ~/.alluse 사용자 데이터 디렉터리까지 함께 영구 삭제됩니다.',
+      uninstErrTitle: '제거 시작 실패',
+      finInstallTitle: '설치가 완료되었습니다',
+      finInstallSub: 'CheapAI AllUse 설치가 성공적으로 완료되었습니다.',
+      finInstallBox: '설치 완료 경로',
+      finUninstallTitle: '제거가 완료되었습니다',
+      finUninstallSub: 'CheapAI AllUse 제거 작업이 정상적으로 끝났습니다.',
+      finUninstallBox: '제거 완료 대상',
+      finDataTitle: '사용자 데이터 상태',
+      finDataPreserved: '~/.alluse 대화 DB, DPAPI 금고(Vault) 및 API 설정이 안전하게 보존되었습니다.',
+      finDataWiped: '사용자 요청에 따라 ~/.alluse 데이터 디렉터리가 함께 삭제되었습니다.',
+      finLaunchLabel: 'CheapAI AllUse 실행',
+      browseModalTitle: '설치 폴더 선택',
+      browseUp: '상위',
+      browseGo: '이동',
+      browseCancel: '취소',
+      browseSelect: '이 폴더 선택',
+      browseEmpty: '하위 폴더가 없습니다.',
+      browseLoading: '폴더 목록을 불러오는 중...',
+      browseErr: '폴더를 읽지 못했습니다: ',
+      btnContinue: '설치 계속',
+      btnRepairUpgrade: '복구 / 업그레이드',
+      btnGoUninstall: '제거하기',
+      btnBack: '이전',
+      btnStartInstall: '설치 시작',
+      btnSubmitting: '요청 중...',
+      btnStartUninstall: '제거 시작',
+      btnCloseWindow: '닫기',
+      btnBackCustomize: '설정으로 돌아가기',
+      btnBackUninstall: '제거 화면으로 돌아가기',
+      btnFinish: '완료',
+      btnFinishing: '마무리 중...',
+      offlineNotice: '로컬 셋업 서버에 연결되지 않았습니다. 프리뷰 화면으로 표시됩니다.'
+    },
+    en: {
+      titlebarProduct: 'CheapAI AllUse Setup',
+      railHeading: 'WIZARD STEPS',
+      metaOs: 'OS',
+      metaArch: 'ARCH',
+      metaMode: 'MODE',
+      stepsInstall: [
+        { id: 'welcome', label: 'Welcome' },
+        { id: 'customize', label: 'Customize' },
+        { id: 'progress', label: 'Progress' },
+        { id: 'finish', label: 'Finish' }
+      ],
+      stepsUninstall: [
+        { id: 'uninstall', label: 'Uninstall' },
+        { id: 'progress', label: 'Progress' },
+        { id: 'finish', label: 'Finish' }
+      ],
+      welcomeTitle: 'CheapAI AllUse Setup',
+      welcomeSubtitle: 'Self-contained offline installer with SHA-256 verified payload extraction.',
+      heroDesc: 'Multimodal AI Desktop Workbench · Local Browser & Automation Runtime',
+      envTarget: 'Target',
+      envNative: 'Host CPU',
+      envPkg: 'Payload Mode',
+      rtWinLabel: 'WebView2 Runtime',
+      rtLinuxLabel: 'Linux Dependencies',
+      rtMacLabel: 'WKWebView',
+      rtReady: 'Ready',
+      rtWinBootstrap: 'Bootstrap Needed',
+      rtLinuxCheck: 'Check Required',
+      archWarnTitle: 'Architecture Mismatch Warning',
+      archWarnDesc: 'Host native CPU ({native}) differs from installer target ({arch}). Native performance or compatibility may be degraded.',
+      devPreviewTitle: 'Dev Preview Mode',
+      devPreviewDesc: 'Running without an embedded installer payload for UI and IPC inspection.',
+      existingTitle: 'Existing Installation Detected',
+      existingSummary: 'Installed version: {ver} · Location: {dir}',
+      custTitle: 'Customize Installation',
+      custSubtitle: 'Choose your install location and optional system integrations.',
+      custDirLabel: 'Install Location',
+      custDirHintWin: 'Recommended per-user directory',
+      custDirHintUnix: 'User application directory',
+      browseBtn: 'Browse',
+      tasksLabel: 'Additional Tasks',
+      taskDesktop: 'Desktop Shortcut',
+      taskDesktopHintWin: 'Create Desktop shortcut (.lnk)',
+      taskDesktopHintLinux: 'Create ~/Desktop .desktop entry',
+      taskDesktopHintMac: 'macOS installs into ~/Applications bundle',
+      taskStartMenu: 'Start Menu Entry',
+      taskStartMenuHintWin: 'Register Windows Start Menu entry',
+      taskStartMenuHintLinux: 'Register desktop applications menu',
+      taskStartMenuHintMac: 'Registered automatically in ~/Applications',
+      taskPath: 'Add CLI to PATH',
+      taskPathHintWin: 'Add alluse directory to User PATH',
+      taskPathHintUnix: 'Link CLI binary to ~/.local/bin/alluse',
+      taskContext: 'Context Menu Entry',
+      taskContextHintWin: 'Open folders in CheapAI AllUse',
+      taskContextHintNonWin: 'Windows only option',
+      taskFileAssoc: 'Associate .allscript Files',
+      taskFileAssocHintWin: 'Open .allscript automation files with AllUse',
+      taskFileAssocHintNonWin: 'Windows only option',
+      custErrTitle: 'Failed to Start Installation',
+      emptyDirErr: 'Please specify an installation directory.',
+      emptyUninstDirErr: 'Please specify a target directory to uninstall.',
+      progInstallTitle: 'Installing CheapAI AllUse',
+      progInstallSub: 'Verifying package integrity and deploying runtime files.',
+      progUninstallTitle: 'Uninstalling CheapAI AllUse',
+      progUninstallSub: 'Removing installed binaries and system integrations.',
+      progErrorHeadline: 'Operation Failed',
+      progPhaseInit: 'Starting operation...',
+      progErrorTitle: 'An error occurred',
+      logLabel: 'Live Logs',
+      stepWaiting: 'Preparing execution steps...',
+      stepPending: 'pending',
+      stepRunning: 'running',
+      stepDone: 'done',
+      stepError: 'error',
+      uninstTitle: 'Uninstall CheapAI AllUse',
+      uninstSubtitle: 'Cleanly remove installed binaries and shortcuts while keeping your data safe.',
+      uninstDirLabel: 'Target Directory',
+      wipeLabel: 'Permanently delete user data (~/.alluse)',
+      wipePreserveText: 'Default: Safely preserves ~/.alluse chat DB, DPAPI Vault, and API settings.',
+      wipeDangerText: 'Warning: Checking this permanently deletes all chat DBs, DPAPI Vault keys, API settings, and caches in ~/.alluse.',
+      shieldSafeTitle: 'Data Preservation Enabled (Default)',
+      shieldSafeDesc: 'Only application binaries, shortcuts, and registry entries are removed. Existing chats stay intact.',
+      shieldDangerTitle: 'Full Data Wipe Selected',
+      shieldDangerDesc: 'Proceeding will permanently erase the ~/.alluse user data directory.',
+      uninstErrTitle: 'Failed to Start Uninstall',
+      finInstallTitle: 'Installation Complete',
+      finInstallSub: 'CheapAI AllUse has been installed on your system.',
+      finInstallBox: 'Installed Executable / Location',
+      finUninstallTitle: 'Removal Complete',
+      finUninstallSub: 'CheapAI AllUse has been removed from your system.',
+      finUninstallBox: 'Removed Target',
+      finDataTitle: 'User Data Status',
+      finDataPreserved: '~/.alluse chat DB, DPAPI Vault, and API settings were safely preserved.',
+      finDataWiped: 'The ~/.alluse user data directory was deleted as requested.',
+      finLaunchLabel: 'Launch CheapAI AllUse',
+      browseModalTitle: 'Select Install Folder',
+      browseUp: 'Up',
+      browseGo: 'Go',
+      browseCancel: 'Cancel',
+      browseSelect: 'Select This Folder',
+      browseEmpty: 'No subdirectories found.',
+      browseLoading: 'Loading directories...',
+      browseErr: 'Failed to browse directory: ',
+      btnContinue: 'Continue Install',
+      btnRepairUpgrade: 'Repair / Upgrade',
+      btnGoUninstall: 'Uninstall',
+      btnBack: 'Back',
+      btnStartInstall: 'Install Now',
+      btnSubmitting: 'Starting...',
+      btnStartUninstall: 'Uninstall Now',
+      btnCloseWindow: 'Close',
+      btnBackCustomize: 'Back to Options',
+      btnBackUninstall: 'Back to Uninstall',
+      btnFinish: 'Finish',
+      btnFinishing: 'Closing...',
+      offlineNotice: 'Local setup server unreachable; rendering UI preview.'
+    }
+  };
+
+  const state = {
+    lang: 'ko',
+    theme: 'dark',
+    offline: false,
+    screen: 'welcome', // 'welcome' | 'customize' | 'progress' | 'uninstall' | 'finish'
+    progressMode: 'install', // 'install' | 'uninstall'
+    progressStatus: 'idle', // 'idle' | 'running' | 'done' | 'error'
+    lastWipeData: false,
+    submitting: false,
+    pollTimer: null,
+    pollInFlight: false,
+    pollToken: 0,
+    finishTimer: null,
+    browse: {
+      open: false,
+      path: '',
+      parent: null,
+      entries: []
+    },
+    apiState: {
+      productName: 'CheapAI AllUse',
+      version: '1.0.0',
+      os: 'windows',
+      arch: 'arm64',
+      nativeArch: 'arm64',
+      archCompatible: true,
+      lang: 'ko',
+      theme: 'dark',
+      payloadMode: 'dev',
+      defaultInstallDir: '',
+      existingInstall: null,
+      webview2Installed: true,
+      linuxDepsOk: true,
+      tasks: {
+        desktop: true,
+        startMenu: true,
+        path: true,
+        contextMenu: false,
+        fileAssoc: true
+      }
+    },
+    lastProgress: {
+      status: 'idle',
+      mode: 'install',
+      percent: 0,
+      phase: '',
+      steps: [],
+      logs: [],
+      error: null,
+      installedExe: null
+    }
+  };
+
+  const $ = (id) => document.getElementById(id);
+
+  function t(key, vars) {
+    const dict = I18N[state.lang] || I18N.ko;
+    let out = dict[key] !== undefined ? dict[key] : (I18N.ko[key] || '');
+    if (vars && typeof out === 'string') {
+      Object.keys(vars).forEach((k) => {
+        out = out.replace(new RegExp('\\{' + k + '\\}', 'g'), String(vars[k] != null ? vars[k] : ''));
+      });
+    }
+    return out;
+  }
+
+  function fmtMode(mode) {
+    return mode || 'install';
+  }
+
+  async function apiGet(url) {
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) {
+      let msg = 'HTTP ' + res.status;
+      try {
+        const body = await res.json();
+        if (body && body.error) msg = body.error;
+      } catch (_) {}
+      throw new Error(msg);
+    }
+    return res.json();
+  }
+
+  async function apiPost(url, payload) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {})
+    });
+    const raw = await res.text();
+    let parsed = null;
+    if (raw) {
+      try { parsed = JSON.parse(raw); } catch (_) {}
+    }
+    if (!res.ok) {
+      throw new Error((parsed && parsed.error) || raw || ('HTTP ' + res.status));
+    }
+    return parsed || {};
+  }
+
+  function wireLogoImage(imgId, boxId) {
+    const img = $(imgId);
+    const box = $(boxId);
+    if (!img || !box) return;
+    const sync = () => {
+      if (img.complete && img.naturalWidth > 0) {
+        box.classList.add('has-img');
+      } else {
+        box.classList.remove('has-img');
+      }
+    };
+    img.addEventListener('load', sync);
+    img.addEventListener('error', () => box.classList.remove('has-img'));
+    sync();
+  }
+
+  function applyTheme(theme) {
+    const norm = theme === 'light' ? 'light' : 'dark';
+    state.theme = norm;
+    document.documentElement.setAttribute('data-theme', norm);
+    const sun = $('icon-theme-sun');
+    const moon = $('icon-theme-moon');
+    if (norm === 'dark') {
+      sun.classList.remove('hidden');
+      moon.classList.add('hidden');
+    } else {
+      sun.classList.add('hidden');
+      moon.classList.remove('hidden');
+    }
+  }
+
+  function buildTasksPayload() {
+    return {
+      desktop: Boolean($('task-desktop').checked),
+      startMenu: Boolean($('task-startMenu').checked),
+      path: Boolean($('task-path').checked),
+      contextMenu: Boolean($('task-contextMenu').checked),
+      fileAssoc: Boolean($('task-fileAssoc').checked)
+    };
+  }
+
+  function syncTaskCheckboxStates() {
+    const os = state.apiState.os;
+    const isWin = os === 'windows';
+    const isMac = os === 'macos';
+    const disabledMap = {
+      desktop: isMac,
+      startMenu: isMac,
+      path: false,
+      contextMenu: !isWin,
+      fileAssoc: !isWin
+    };
+
+    const spec = [
+      {
+        id: 'desktop',
+        nameKey: 'taskDesktop',
+        hint: isWin ? t('taskDesktopHintWin') : (isMac ? t('taskDesktopHintMac') : t('taskDesktopHintLinux'))
+      },
+      {
+        id: 'startMenu',
+        nameKey: 'taskStartMenu',
+        hint: isWin ? t('taskStartMenuHintWin') : (isMac ? t('taskStartMenuHintMac') : t('taskStartMenuHintLinux'))
+      },
+      {
+        id: 'path',
+        nameKey: 'taskPath',
+        hint: isWin ? t('taskPathHintWin') : t('taskPathHintUnix')
+      },
+      {
+        id: 'contextMenu',
+        nameKey: 'taskContext',
+        hint: isWin ? t('taskContextHintWin') : t('taskContextHintNonWin')
+      },
+      {
+        id: 'fileAssoc',
+        nameKey: 'taskFileAssoc',
+        hint: isWin ? t('taskFileAssocHintWin') : t('taskFileAssocHintNonWin')
+      }
+    ];
+
+    spec.forEach((item) => {
+      const input = $('task-' + item.id);
+      const wrap = $('wrap-task-' + item.id);
+      const lbl = $('lbl-task-' + item.id);
+      const hint = $('hint-task-' + item.id);
+      const disabled = Boolean(disabledMap[item.id]);
+      if (input) input.disabled = disabled;
+      if (wrap) wrap.classList.toggle('is-disabled', disabled);
+      if (lbl) lbl.textContent = t(item.nameKey);
+      if (hint) hint.textContent = item.hint;
+    });
+  }
+
+  function renderStepper() {
+    const dict = I18N[state.lang] || I18N.ko;
+    const isUninstFlow = state.screen === 'uninstall' ||
+      ((state.screen === 'progress' || state.screen === 'finish') && state.progressMode === 'uninstall');
+    const steps = isUninstFlow ? dict.stepsUninstall : dict.stepsInstall;
+    const list = $('stepper-list');
+    const activeIdx = Math.max(0, steps.findIndex((s) => s.id === state.screen));
+
+    while (list.firstChild) list.removeChild(list.firstChild);
+    steps.forEach((s, idx) => {
+      const item = document.createElement('div');
+      const isDone = idx < activeIdx || (state.screen === 'finish' && s.id === 'finish');
+      const isActive = s.id === state.screen;
+      item.className = 'stepper-item' + (isActive ? ' is-active' : '') + (isDone && !isActive ? ' is-done' : '');
+
+      const dot = document.createElement('span');
+      dot.className = 'stepper-dot';
+      if (isDone && !isActive) {
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('fill', 'none');
+        svg.setAttribute('stroke', 'currentColor');
+        svg.setAttribute('stroke-width', '2.5');
+        svg.setAttribute('stroke-linecap', 'round');
+        svg.setAttribute('stroke-linejoin', 'round');
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', 'M20 6L9 17l-5-5');
+        svg.appendChild(path);
+        dot.appendChild(svg);
+      } else {
+        dot.textContent = String(idx + 1);
+      }
+
+      const txt = document.createElement('span');
+      txt.textContent = s.label;
+
+      item.appendChild(dot);
+      item.appendChild(txt);
+      list.appendChild(item);
+    });
+  }
+
+  function syncWipeCardUi() {
+    const checked = Boolean($('chk-wipe-data').checked);
+    const card = $('wipe-card');
+    const note = $('wipe-safety-note');
+    const shieldTitle = $('uninst-shield-title');
+    const shieldDesc = $('uninst-shield-desc');
+
+    card.classList.toggle('is-armed', checked);
+    note.textContent = checked ? t('wipeDangerText') : t('wipePreserveText');
+    note.style.color = checked ? 'var(--text)' : 'var(--text-secondary)';
+    note.style.fontWeight = checked ? '600' : '400';
+
+    shieldTitle.textContent = checked ? t('shieldDangerTitle') : t('shieldSafeTitle');
+    shieldDesc.textContent = checked ? t('shieldDangerDesc') : t('shieldSafeDesc');
+  }
+
+  function renderProgressView() {
+    const p = state.lastProgress;
+    const isUninstall = (p.mode || state.progressMode) === 'uninstall';
+    const pct = Math.max(0, Math.min(100, Number(p.percent || 0)));
+
+    $('prog-title').textContent = isUninstall ? t('progUninstallTitle') : t('progInstallTitle');
+    $('prog-subtitle').textContent = p.status === 'error'
+      ? t('progErrorHeadline')
+      : (isUninstall ? t('progUninstallSub') : t('progInstallSub'));
+    $('prog-phase').textContent = p.phase || t('progPhaseInit');
+    $('prog-pct').textContent = pct + '%';
+    $('prog-fill').style.width = pct + '%';
+
+    const stepsContainer = $('prog-steps-list');
+    while (stepsContainer.firstChild) stepsContainer.removeChild(stepsContainer.firstChild);
+
+    const steps = Array.isArray(p.steps) ? p.steps : [];
+    if (steps.length === 0) {
+      const placeholder = document.createElement('div');
+      placeholder.className = 'step-row state-running';
+      placeholder.textContent = t('stepWaiting');
+      stepsContainer.appendChild(placeholder);
+    } else {
+      steps.forEach((step) => {
+        const st = step.state || 'pending';
+        const row = document.createElement('div');
+        row.className = 'step-row state-' + st;
+
+        const left = document.createElement('div');
+        left.className = 'step-left';
+
+        const iconBox = document.createElement('span');
+        iconBox.className = 'step-icon';
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('fill', 'none');
+        svg.setAttribute('stroke', 'currentColor');
+        svg.setAttribute('stroke-width', '2');
+        svg.setAttribute('stroke-linecap', 'round');
+        svg.setAttribute('stroke-linejoin', 'round');
+
+        if (st === 'done') {
+          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          path.setAttribute('d', 'M20 6L9 17l-5-5');
+          svg.appendChild(path);
+        } else if (st === 'running') {
+          svg.setAttribute('class', 'spin');
+          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          path.setAttribute('d', 'M21 12a9 9 0 1 1-6.219-8.56');
+          svg.appendChild(path);
+        } else if (st === 'error') {
+          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          path.setAttribute('d', 'M18 6L6 18M6 6l12 12');
+          svg.appendChild(path);
+        } else {
+          const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          circle.setAttribute('cx', '12');
+          circle.setAttribute('cy', '12');
+          circle.setAttribute('r', '5');
+          svg.appendChild(circle);
+        }
+        iconBox.appendChild(svg);
+
+        const labelSpan = document.createElement('span');
+        labelSpan.textContent = state.lang === 'en'
+          ? (step.labelEn || step.labelKo || step.id || '')
+          : (step.labelKo || step.labelEn || step.id || '');
+
+        left.appendChild(iconBox);
+        left.appendChild(labelSpan);
+
+        const statePill = document.createElement('span');
+        statePill.className = 'step-state-pill';
+        const stateKey = st === 'done'
+          ? 'stepDone'
+          : (st === 'running' ? 'stepRunning' : (st === 'error' ? 'stepError' : 'stepPending'));
+        statePill.textContent = t(stateKey);
+
+        row.appendChild(left);
+        row.appendChild(statePill);
+        stepsContainer.appendChild(row);
+      });
+    }
+
+    const errCard = $('prog-error-card');
+    if (p.status === 'error' && p.error) {
+      $('prog-error-title').textContent = t('progErrorTitle');
+      $('prog-error-msg').textContent = p.error;
+      errCard.classList.remove('hidden');
+    } else {
+      errCard.classList.add('hidden');
+    }
+
+    const logs = Array.isArray(p.logs) ? p.logs : [];
+    $('log-toggle-label').textContent = t('logLabel');
+    $('log-count').textContent = '(' + logs.length + ')';
+    const logLinesEl = $('log-lines');
+    const logBody = $('log-body');
+    const wasNearBottom = logBody.scrollHeight - logBody.scrollTop - logBody.clientHeight < 28;
+    logLinesEl.textContent = logs.join('\n');
+    if (wasNearBottom) {
+      logBody.scrollTop = logBody.scrollHeight;
+    }
+  }
+
+  function renderFinishView() {
+    const p = state.lastProgress;
+    const isUninstall = (p.mode || state.progressMode) === 'uninstall';
+    const installDirVal = ($('install-dir-input').value || state.apiState.defaultInstallDir || '').trim();
+    const uninstDirVal = ($('uninstall-dir-input').value || state.apiState.defaultInstallDir || '').trim();
+
+    $('fin-title').textContent = isUninstall ? t('finUninstallTitle') : t('finInstallTitle');
+    $('fin-subtitle').textContent = isUninstall ? t('finUninstallSub') : t('finInstallSub');
+    $('fin-box-title').textContent = isUninstall ? t('finUninstallBox') : t('finInstallBox');
+    $('fin-path-text').textContent = isUninstall
+      ? (uninstDirVal || '-')
+      : (p.installedExe || installDirVal || '-');
+
+    const dataNote = $('fin-data-note');
+    const launchCard = $('fin-launch-card');
+    const chkLaunch = $('chk-launch-after');
+
+    if (isUninstall) {
+      $('fin-data-title').textContent = t('finDataTitle');
+      $('fin-data-desc').textContent = state.lastWipeData ? t('finDataWiped') : t('finDataPreserved');
+      dataNote.classList.remove('hidden');
+      launchCard.classList.add('hidden');
+      chkLaunch.checked = false;
+    } else {
+      dataNote.classList.add('hidden');
+      launchCard.classList.remove('hidden');
+      $('fin-launch-label').textContent = t('finLaunchLabel');
+    }
+  }
+
+  function renderFooter() {
+    const left = $('footer-left');
+    const right = $('footer-right');
+    while (left.firstChild) left.removeChild(left.firstChild);
+    while (right.firstChild) right.removeChild(right.firstChild);
+
+    const makeBtn = (label, cls, disabled, onClick) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn ' + cls;
+      btn.disabled = Boolean(disabled);
+      btn.textContent = label;
+      btn.addEventListener('click', onClick);
+      return btn;
+    };
+
+    if (state.screen === 'welcome') {
+      left.appendChild(makeBtn(t('btnCloseWindow'), 'ghost', false, () => {
+        apiPost('/api/window', { action: 'close' }).catch(() => {});
+      }));
+      const existing = state.apiState.existingInstall;
+      if (existing && existing.installed) {
+        right.appendChild(makeBtn(t('btnGoUninstall'), '', false, () => {
+          navigate('uninstall');
+        }));
+        right.appendChild(makeBtn(t('btnRepairUpgrade'), 'primary', false, () => {
+          navigate('customize');
+        }));
+      } else {
+        right.appendChild(makeBtn(t('btnContinue'), 'primary', false, () => {
+          navigate('customize');
+        }));
+      }
+    } else if (state.screen === 'customize') {
+      left.appendChild(makeBtn(t('btnBack'), 'ghost', state.submitting, () => {
+        navigate('welcome');
+      }));
+      right.appendChild(makeBtn(state.submitting ? t('btnSubmitting') : t('btnStartInstall'), 'primary', state.submitting, () => {
+        startInstall();
+      }));
+    } else if (state.screen === 'progress') {
+      if (state.progressStatus === 'error') {
+        const backTarget = state.progressMode === 'uninstall' ? 'uninstall' : 'customize';
+        const backLabel = state.progressMode === 'uninstall' ? t('btnBackUninstall') : t('btnBackCustomize');
+        left.appendChild(makeBtn(backLabel, '', false, () => {
+          navigate(backTarget);
+        }));
+        right.appendChild(makeBtn(t('btnCloseWindow'), 'primary', false, () => {
+          apiPost('/api/window', { action: 'close' }).catch(() => {});
+        }));
+      } else {
+        const note = document.createElement('span');
+        note.className = 'mono';
+        note.style.cssText = 'font-size:11px; color:var(--text-muted);';
+        note.textContent = state.progressMode === 'uninstall' ? 'UNINSTALLING' : 'INSTALLING';
+        left.appendChild(note);
+      }
+    } else if (state.screen === 'uninstall') {
+      if (state.apiState.payloadMode === 'uninstall') {
+        left.appendChild(makeBtn(t('btnCloseWindow'), 'ghost', state.submitting, () => {
+          apiPost('/api/window', { action: 'close' }).catch(() => {});
+        }));
+      } else {
+        left.appendChild(makeBtn(t('btnBack'), 'ghost', state.submitting, () => {
+          navigate('welcome');
+        }));
+      }
+      right.appendChild(makeBtn(state.submitting ? t('btnSubmitting') : t('btnStartUninstall'), 'primary', state.submitting, () => {
+        startUninstall();
+      }));
+    } else if (state.screen === 'finish') {
+      right.appendChild(makeBtn(state.submitting ? t('btnFinishing') : t('btnFinish'), 'primary', state.submitting, () => {
+        submitFinish();
+      }));
+    }
+  }
+
+  function renderAllText() {
+    const s = state.apiState;
+    document.documentElement.lang = state.lang;
+
+    $('btn-lang').textContent = state.lang === 'ko' ? 'EN' : 'KO';
+    $('tb-product-title').textContent = (s.productName ? s.productName + ' Setup' : t('titlebarProduct'));
+    $('tb-version-badge').textContent = 'v' + (s.version || '1.0.0');
+    $('tb-platform-badge').textContent = (s.os || 'windows') + ' · ' + (s.arch || 'arm64');
+    $('tb-dev-badge').classList.toggle('hidden', s.payloadMode !== 'dev');
+
+    $('rail-heading').textContent = t('railHeading');
+    $('meta-os-label').textContent = t('metaOs');
+    $('meta-os-val').textContent = s.os || '-';
+    $('meta-arch-label').textContent = t('metaArch');
+    $('meta-arch-val').textContent = s.arch || '-';
+    $('meta-mode-label').textContent = t('metaMode');
+    $('meta-mode-val').textContent = fmtMode(s.payloadMode);
+
+    // Welcome view
+    $('welcome-title').textContent = t('welcomeTitle');
+    $('welcome-subtitle').textContent = t('welcomeSubtitle');
+    $('hero-product-name').textContent = s.productName || 'CheapAI AllUse';
+    $('hero-product-desc').textContent = t('heroDesc');
+
+    $('env-target-label').textContent = t('envTarget');
+    $('env-target-val').textContent = (s.os || '-') + ' / ' + (s.arch || '-');
+    $('env-native-label').textContent = t('envNative');
+    $('env-native-val').textContent = s.nativeArch || '-';
+    $('env-pkg-label').textContent = t('envPkg');
+    $('env-pkg-val').textContent = fmtMode(s.payloadMode);
+
+    if (s.os === 'windows') {
+      $('env-runtime-label').textContent = t('rtWinLabel');
+      $('env-runtime-val').textContent = s.webview2Installed ? t('rtReady') : t('rtWinBootstrap');
+    } else if (s.os === 'linux') {
+      $('env-runtime-label').textContent = t('rtLinuxLabel');
+      $('env-runtime-val').textContent = s.linuxDepsOk ? t('rtReady') : t('rtLinuxCheck');
+    } else {
+      $('env-runtime-label').textContent = t('rtMacLabel');
+      $('env-runtime-val').textContent = t('rtReady');
+    }
+
+    const archBanner = $('banner-arch-warn');
+    if (s.archCompatible === false) {
+      $('arch-warn-title').textContent = t('archWarnTitle');
+      $('arch-warn-desc').textContent = t('archWarnDesc', { native: s.nativeArch, arch: s.arch });
+      archBanner.classList.remove('hidden');
+    } else {
+      archBanner.classList.add('hidden');
+    }
+
+    const devBanner = $('banner-dev-preview');
+    $('dev-preview-title').textContent = t('devPreviewTitle');
+    $('dev-preview-desc').textContent = state.offline ? t('offlineNotice') : t('devPreviewDesc');
+    devBanner.classList.toggle('hidden', s.payloadMode !== 'dev');
+
+    const existingBanner = $('banner-existing');
+    if (s.existingInstall && s.existingInstall.installed) {
+      $('existing-title').textContent = t('existingTitle');
+      $('existing-desc').textContent = t('existingSummary', {
+        ver: s.existingInstall.version || '-',
+        dir: s.existingInstall.installDir || s.defaultInstallDir || '-'
+      });
+      existingBanner.classList.remove('hidden');
+    } else {
+      existingBanner.classList.add('hidden');
+    }
+
+    // Customize view
+    $('cust-title').textContent = t('custTitle');
+    $('cust-subtitle').textContent = t('custSubtitle');
+    $('cust-dir-label').textContent = t('custDirLabel');
+    $('cust-dir-hint').textContent = s.os === 'windows' ? t('custDirHintWin') : t('custDirHintUnix');
+    $('btn-browse-label').textContent = t('browseBtn');
+    $('cust-tasks-label').textContent = t('tasksLabel');
+    $('cust-error-title').textContent = t('custErrTitle');
+    syncTaskCheckboxStates();
+
+    // Uninstall view
+    $('uninst-title').textContent = t('uninstTitle');
+    $('uninst-subtitle').textContent = t('uninstSubtitle');
+    $('uninst-dir-label').textContent = t('uninstDirLabel');
+    $('wipe-label').textContent = t('wipeLabel');
+    $('uninst-error-title').textContent = t('uninstErrTitle');
+    syncWipeCardUi();
+
+    // Browse modal labels
+    $('browse-modal-title').textContent = t('browseModalTitle');
+    $('btn-browse-up-label').textContent = t('browseUp');
+    $('btn-browse-go').textContent = t('browseGo');
+    $('btn-browse-cancel').textContent = t('browseCancel');
+    $('btn-browse-select').textContent = t('browseSelect');
+
+    renderStepper();
+    renderProgressView();
+    renderFinishView();
+    renderFooter();
+  }
+
+  function navigate(nextScreen) {
+    if (state.finishTimer) {
+      clearTimeout(state.finishTimer);
+      state.finishTimer = null;
+    }
+    if (nextScreen !== 'progress') {
+      stopPolling();
+    }
+    state.screen = nextScreen;
+    ['welcome', 'customize', 'progress', 'uninstall', 'finish'].forEach((id) => {
+      const el = $('screen-' + id);
+      if (el) el.classList.toggle('is-active', id === nextScreen);
+    });
+    renderStepper();
+    if (nextScreen === 'progress') renderProgressView();
+    if (nextScreen === 'finish') renderFinishView();
+    renderFooter();
+  }
+
+  function stopPolling() {
+    state.pollToken += 1;
+    state.pollInFlight = false;
+    if (state.pollTimer) {
+      clearTimeout(state.pollTimer);
+      state.pollTimer = null;
+    }
+  }
+
+  function startPolling() {
+    stopPolling();
+    const activeToken = state.pollToken;
+    schedulePoll(activeToken, 0);
+  }
+
+  function schedulePoll(token, delayMs) {
+    if (token !== state.pollToken || state.screen !== 'progress') return;
+    state.pollTimer = setTimeout(() => {
+      pollOnce(token);
+    }, delayMs);
+  }
+
+  async function pollOnce(token) {
+    if (token !== state.pollToken || state.pollInFlight || state.screen !== 'progress') return;
+    state.pollInFlight = true;
+    try {
+      const data = await apiGet('/api/progress');
+      if (token !== state.pollToken) return;
+
+      state.lastProgress = data;
+      state.progressMode = data.mode || state.progressMode;
+      state.progressStatus = data.status || 'running';
+      renderProgressView();
+
+      if (data.status === 'done') {
+        stopPolling();
+        if (state.progressMode === 'install') {
+          $('chk-launch-after').checked = true;
+        }
+        state.finishTimer = setTimeout(() => {
+          state.finishTimer = null;
+          navigate('finish');
+        }, 220);
+        return;
+      }
+
+      if (data.status === 'error') {
+        stopPolling();
+        renderFooter();
+        return;
+      }
+    } catch (err) {
+      if (token !== state.pollToken) return;
+      state.lastProgress = {
+        ...state.lastProgress,
+        status: 'error',
+        error: err && err.message ? err.message : String(err)
+      };
+      state.progressStatus = 'error';
+      stopPolling();
+      renderProgressView();
+      renderFooter();
+      return;
+    } finally {
+      state.pollInFlight = false;
+    }
+    schedulePoll(token, 150);
+  }
+
+  async function startInstall() {
+    if (state.submitting) return;
+    const installDir = $('install-dir-input').value.trim();
+    const errBanner = $('cust-error-banner');
+    if (!installDir) {
+      $('cust-error-msg').textContent = t('emptyDirErr');
+      errBanner.classList.remove('hidden');
+      return;
+    }
+    errBanner.classList.add('hidden');
+
+    state.submitting = true;
+    renderFooter();
+    try {
+      await apiPost('/api/install', {
+        installDir,
+        tasks: buildTasksPayload()
+      });
+      state.progressMode = 'install';
+      state.progressStatus = 'running';
+      state.lastProgress = {
+        status: 'running',
+        mode: 'install',
+        percent: 0,
+        phase: t('progPhaseInit'),
+        steps: [],
+        logs: [],
+        error: null,
+        installedExe: null
+      };
+      navigate('progress');
+      startPolling();
+    } catch (err) {
+      $('cust-error-msg').textContent = err && err.message ? err.message : String(err);
+      errBanner.classList.remove('hidden');
+    } finally {
+      state.submitting = false;
+      renderFooter();
+    }
+  }
+
+  async function startUninstall() {
+    if (state.submitting) return;
+    const installDir = ($('uninstall-dir-input').value || state.apiState.defaultInstallDir || '').trim();
+    const wipeData = Boolean($('chk-wipe-data').checked);
+    const errBanner = $('uninst-error-banner');
+    if (!installDir) {
+      $('uninst-error-msg').textContent = t('emptyUninstDirErr');
+      errBanner.classList.remove('hidden');
+      return;
+    }
+    errBanner.classList.add('hidden');
+
+    state.submitting = true;
+    state.lastWipeData = wipeData;
+    renderFooter();
+    try {
+      await apiPost('/api/uninstall', {
+        installDir,
+        wipeData
+      });
+      state.progressMode = 'uninstall';
+      state.progressStatus = 'running';
+      state.lastProgress = {
+        status: 'running',
+        mode: 'uninstall',
+        percent: 0,
+        phase: t('progPhaseInit'),
+        steps: [],
+        logs: [],
+        error: null,
+        installedExe: null
+      };
+      navigate('progress');
+      startPolling();
+    } catch (err) {
+      $('uninst-error-msg').textContent = err && err.message ? err.message : String(err);
+      errBanner.classList.remove('hidden');
+    } finally {
+      state.submitting = false;
+      renderFooter();
+    }
+  }
+
+  async function submitFinish() {
+    if (state.submitting) return;
+    const isUninstall = (state.lastProgress.mode || state.progressMode) === 'uninstall';
+    const launch = isUninstall ? false : Boolean($('chk-launch-after').checked);
+
+    state.submitting = true;
+    renderFooter();
+    try {
+      await apiPost('/api/finish', { launch });
+    } catch (_) {
+      // Backend closes the window directly in native mode.
+    } finally {
+      state.submitting = false;
+      renderFooter();
+    }
+  }
+
+  // ── Folder Browser Modal ────────────────────────────────────────────────
+  function renderBrowseEntries(errMsg) {
+    const list = $('browse-entries');
+    while (list.firstChild) list.removeChild(list.firstChild);
+
+    if (errMsg) {
+      const div = document.createElement('div');
+      div.className = 'modal-empty';
+      div.textContent = t('browseErr') + errMsg;
+      list.appendChild(div);
+      return;
+    }
+
+    const entries = state.browse.entries || [];
+    if (entries.length === 0) {
+      const div = document.createElement('div');
+      div.className = 'modal-empty';
+      div.textContent = t('browseEmpty');
+      list.appendChild(div);
+      return;
+    }
+
+    entries.forEach((entry) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'dir-entry';
+
+      const left = document.createElement('span');
+      left.className = 'dir-entry-left';
+
+      const folderSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      folderSvg.setAttribute('viewBox', '0 0 24 24');
+      folderSvg.setAttribute('fill', 'none');
+      folderSvg.setAttribute('stroke', 'currentColor');
+      folderSvg.setAttribute('stroke-width', '1.8');
+      folderSvg.setAttribute('stroke-linecap', 'round');
+      folderSvg.setAttribute('stroke-linejoin', 'round');
+      const fPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      fPath.setAttribute('d', 'M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z');
+      folderSvg.appendChild(fPath);
+
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'dir-entry-name';
+      nameSpan.textContent = entry.name || entry.path;
+
+      left.appendChild(folderSvg);
+      left.appendChild(nameSpan);
+
+      const chev = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      chev.setAttribute('viewBox', '0 0 24 24');
+      chev.setAttribute('fill', 'none');
+      chev.setAttribute('stroke', 'currentColor');
+      chev.setAttribute('stroke-width', '2');
+      chev.setAttribute('stroke-linecap', 'round');
+      chev.setAttribute('stroke-linejoin', 'round');
+      const cPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      cPath.setAttribute('d', 'M9 18l6-6-6-6');
+      chev.appendChild(cPath);
+
+      btn.appendChild(left);
+      btn.appendChild(chev);
+      btn.addEventListener('click', () => browseTo(entry.path));
+      list.appendChild(btn);
+    });
+  }
+
+  async function browseTo(targetDir) {
+    const list = $('browse-entries');
+    while (list.firstChild) list.removeChild(list.firstChild);
+    const loading = document.createElement('div');
+    loading.className = 'modal-empty';
+    loading.textContent = t('browseLoading');
+    list.appendChild(loading);
+
+    try {
+      const data = await apiPost('/api/browse', { currentDir: targetDir || '' });
+      state.browse.path = data.path || targetDir || '';
+      state.browse.parent = data.parent || null;
+      state.browse.entries = Array.isArray(data.entries) ? data.entries : [];
+      $('browse-path-input').value = state.browse.path;
+      $('browse-current-hint').textContent = state.browse.path;
+      $('btn-browse-up').disabled = !state.browse.parent || state.browse.parent === state.browse.path;
+      renderBrowseEntries(null);
+    } catch (err) {
+      $('btn-browse-up').disabled = true;
+      renderBrowseEntries(err && err.message ? err.message : String(err));
+    }
+  }
+
+  function openBrowseModal() {
+    state.browse.open = true;
+    $('browse-modal').classList.add('is-open');
+    const initial = $('install-dir-input').value.trim() || state.apiState.defaultInstallDir || '';
+    $('browse-path-input').value = initial;
+    $('browse-current-hint').textContent = initial;
+    browseTo(initial);
+  }
+
+  function closeBrowseModal() {
+    state.browse.open = false;
+    $('browse-modal').classList.remove('is-open');
+  }
+
+  function confirmBrowseModal() {
+    const chosen = (state.browse.path || $('browse-path-input').value || '').trim();
+    if (chosen) {
+      $('install-dir-input').value = chosen;
+      $('cust-error-banner').classList.add('hidden');
+    }
+    closeBrowseModal();
+  }
+
+  // ── Titlebar & Global Controls ──────────────────────────────────────────
+  function bindEvents() {
+    wireLogoImage('tb-logo-img', 'tb-brand-mark');
+    wireLogoImage('hero-logo-img', 'hero-emblem');
+
+    $('titlebar').addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      if (e.target.closest('#titlebar-controls, [data-no-drag]')) return;
+      e.preventDefault();
+      apiPost('/api/window', { action: 'drag' }).catch(() => {});
+    });
+
+    $('btn-lang').addEventListener('click', () => {
+      state.lang = state.lang === 'ko' ? 'en' : 'ko';
+      renderAllText();
+    });
+
+    $('btn-theme').addEventListener('click', () => {
+      applyTheme(state.theme === 'dark' ? 'light' : 'dark');
+    });
+
+    $('btn-min').addEventListener('click', () => {
+      apiPost('/api/window', { action: 'minimize' }).catch(() => {});
+    });
+
+    $('btn-close').addEventListener('click', () => {
+      apiPost('/api/window', { action: 'close' }).catch(() => {});
+    });
+
+    $('btn-browse').addEventListener('click', openBrowseModal);
+    $('btn-browse-close').addEventListener('click', closeBrowseModal);
+    $('btn-browse-cancel').addEventListener('click', closeBrowseModal);
+    $('btn-browse-select').addEventListener('click', confirmBrowseModal);
+    $('btn-browse-up').addEventListener('click', () => {
+      if (state.browse.parent) browseTo(state.browse.parent);
+    });
+    $('btn-browse-go').addEventListener('click', () => {
+      browseTo($('browse-path-input').value.trim());
+    });
+    $('browse-path-input').addEventListener('keydown', (e) => {
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        browseTo($('browse-path-input').value.trim());
+      }
+    });
+    $('browse-modal').addEventListener('click', (e) => {
+      if (e.target === $('browse-modal')) closeBrowseModal();
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && state.browse.open) {
+        e.preventDefault();
+        closeBrowseModal();
+      }
+    });
+
+    $('btn-toggle-logs').addEventListener('click', () => {
+      const drawer = $('log-drawer');
+      const open = drawer.classList.toggle('is-open');
+      $('btn-toggle-logs').setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+
+    $('chk-wipe-data').addEventListener('change', syncWipeCardUi);
+  }
+
+  async function init() {
+    bindEvents();
+    applyTheme('dark');
+    // Default wipeData to unchecked strictly
+    $('chk-wipe-data').checked = false;
+
+    try {
+      const s = await apiGet('/api/state');
+      state.apiState = {
+        ...state.apiState,
+        ...s,
+        tasks: {
+          desktop: Boolean(s.tasks && s.tasks.desktop !== undefined ? s.tasks.desktop : true),
+          startMenu: Boolean(s.tasks && s.tasks.startMenu !== undefined ? s.tasks.startMenu : true),
+          path: Boolean(s.tasks && s.tasks.path !== undefined ? s.tasks.path : true),
+          contextMenu: Boolean(s.tasks && s.tasks.contextMenu),
+          fileAssoc: Boolean(s.tasks && s.tasks.fileAssoc !== undefined ? s.tasks.fileAssoc : true)
+        }
+      };
+      if (s.lang === 'en' || s.lang === 'ko') {
+        state.lang = s.lang;
+      }
+      applyTheme(s.theme === 'light' ? 'light' : 'dark');
+    } catch (_) {
+      // Offline preview fallback preserves full interactive layout even without backend.
+      state.offline = true;
+    }
+
+    const s = state.apiState;
+    const existingDir = s.existingInstall && s.existingInstall.installed && s.existingInstall.installDir
+      ? s.existingInstall.installDir
+      : '';
+    const defaultDir = existingDir || s.defaultInstallDir || '';
+    $('install-dir-input').value = defaultDir;
+    $('uninstall-dir-input').value = defaultDir;
+
+    $('task-desktop').checked = Boolean(s.tasks.desktop);
+    $('task-startMenu').checked = Boolean(s.tasks.startMenu);
+    $('task-path').checked = Boolean(s.tasks.path);
+    $('task-contextMenu').checked = Boolean(s.tasks.contextMenu);
+    $('task-fileAssoc').checked = Boolean(s.tasks.fileAssoc);
+    $('chk-wipe-data').checked = false;
+    $('chk-launch-after').checked = true;
+
+    renderAllText();
+
+    if (s.payloadMode === 'uninstall') {
+      state.progressMode = 'uninstall';
+      navigate('uninstall');
+    } else {
+      navigate('welcome');
+    }
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>

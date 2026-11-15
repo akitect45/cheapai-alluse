@@ -1,0 +1,71 @@
+{
+  "name": "alluse",
+  "version": "1.0.0",
+  "description": "Cross-Platform Native Desktop & Browser AI Agent — Embedded Multi-Tab WebView, 60FPS Computer Use, Hardware-Backed Vault, Media Studio & Security Workbench",
+  "license": "MIT",
+  "homepage": "https://github.com/akitect45/cheapai-alluse",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/akitect45/cheapai-alluse.git"
+  },
+  "bugs": {
+    "url": "https://github.com/akitect45/cheapai-alluse/issues"
+  },
+  "bin": {
+    "alluse": "./bin/alluse.js"
+  },
+  "files": [
+    "assets/",
+    "bin/",
+    "scripts/",
+    "src/",
+    "Cargo.toml",
+    "Cargo.lock",
+    "build.rs",
+    "build.ps1",
+    "build.sh",
+    "alluse",
+    "alluse.ps1",
+    "alluse.cmd",
+    "install.sh",
+    "install.ps1",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "start": "node ./bin/alluse.js",
+    "web": "node ./bin/alluse.js --web",
+    "headless": "node ./bin/alluse.js --headless",
+    "build": "node ./bin/alluse.js --build",
+    "doctor": "node ./bin/alluse.js --doctor",
+    "verify": "node ./bin/alluse.js --verify",
+    "heal": "node ./bin/alluse.js --heal",
+    "test": "cargo test",
+    "icons": "python scripts/generate-icons.py",
+    "package:installer": "node scripts/package-installer.mjs",
+    "release:manifest": "node scripts/generate-release-manifest.mjs",
+    "test:installer-scripts": "python scripts/generate-icons.py --self-test && node scripts/package-installer.mjs --self-test && node scripts/generate-release-manifest.mjs --self-test"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "arm64",
+    "x64"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "computer-use",
+    "browser-use",
+    "cua",
+    "ai-agent",
+    "webview",
+    "pentest",
+    "cross-platform",
+    "rust"
+  ]
+}

@@ -1,0 +1,396 @@
+name: Build & Publish Cross-Platform Releases
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag/version (e.g. v1.0.0)"
+        required: false
+        default: ""
+      base_url:
+        description: "Override base download URL for updates-manifest.json"
+        required: false
+        default: ""
+      draft:
+        description: "Create GitHub Release as draft"
+        type: boolean
+        required: false
+        default: false
+      prerelease:
+        description: "Mark GitHub Release as prerelease"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform_key }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 1. macOS Apple Silicon (darwin-arm64)
+          - os: macos-15
+            target: aarch64-apple-darwin
+            os_pkg: macos
+            arch_key: arm64
+            platform_key: darwin-arm64
+            raw_asset: alluse-darwin-arm64
+            bin_name: alluse
+            setup_name: alluse-setup
+
+          # 2. macOS Intel (darwin-x64, built via universal Apple Xcode SDK on macos-15)
+          - os: macos-15
+            target: x86_64-apple-darwin
+            os_pkg: macos
+            arch_key: x64
+            platform_key: darwin-x64
+            raw_asset: alluse-darwin-x64
+            bin_name: alluse
+            setup_name: alluse-setup
+
+          # 3. Linux x64 (linux-x64)
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            os_pkg: linux
+            arch_key: x64
+            platform_key: linux-x64
+            raw_asset: alluse-linux-x64
+            bin_name: alluse
+            setup_name: alluse-setup
+
+          # 4. Linux ARM64 (linux-arm64)
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            os_pkg: linux
+            arch_key: arm64
+            platform_key: linux-arm64
+            raw_asset: alluse-linux-arm64
+            bin_name: alluse
+            setup_name: alluse-setup
+
+          # 5. Windows 11 ARM64 (win32-arm64)
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            os_pkg: windows
+            arch_key: arm64
+            platform_key: win32-arm64
+            raw_asset: alluse-win32-arm64.exe
+            bin_name: alluse.exe
+            setup_name: alluse-setup.exe
+            webview_dll_arch: arm64
+            webview_dll_asset: WebView2Loader-arm64.dll
+
+          # 6. Windows 10/11 x64 (win32-x64)
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            os_pkg: windows
+            arch_key: x64
+            platform_key: win32-x64
+            raw_asset: alluse-win32-x64.exe
+            bin_name: alluse.exe
+            setup_name: alluse-setup.exe
+            webview_dll_arch: x64
+            webview_dll_asset: WebView2Loader-x64.dll
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Pillow (with pure-Python fallback if unavailable)
+        run: python -m pip install --disable-pip-version-check pillow || true
+
+      - name: Install Linux system dependencies (GTK3 + WebKitGTK 4.1 + CUA tools)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            build-essential \
+            libglib2.0-dev \
+            libcairo2-dev \
+            libpango1.0-dev \
+            libgdk-pixbuf-2.0-dev \
+            libatk1.0-dev \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libwebkit2gtk-4.1-dev \
+            libdbus-1-dev \
+            libx11-dev \
+            libxdo-dev \
+            libayatana-appindicator3-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust Cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: release-v2-${{ matrix.target }}
+
+      - name: Resolve release version
+        id: ver
+        shell: bash
+        run: |
+          RAW="${{ github.ref_name }}"
+          if [[ "$RAW" != v* ]]; then
+            RAW="${{ inputs.version }}"
+          fi
+          if [ -z "$RAW" ]; then
+            RAW="$(node -e "console.log(require('./package.json').version)")"
+          fi
+          VERSION="${RAW#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Run packaging script self-tests & generate installer icons
+        shell: bash
+        run: |
+          npm run test:installer-scripts
+          python scripts/generate-icons.py --out-dir target/installer-icons
+
+      - name: Build alluse and alluse-setup release binaries
+        run: cargo build --release --target ${{ matrix.target }} --bin alluse --bin alluse-setup
+
+      - name: Compile unit test binaries
+        shell: bash
+        run: |
+          if [ "${{ matrix.platform_key }}" = "linux-x64" ]; then
+            cargo test --release --target ${{ matrix.target }} --bin alluse-setup --no-run
+          else
+            cargo test --release --target ${{ matrix.target }} --bin alluse --bin alluse-setup --no-run
+          fi
+
+      - name: Run unit tests & CLI smoke checks
+        shell: bash
+        run: |
+          CAN_EXEC=1
+          if [ "${{ matrix.platform_key }}" = "darwin-x64" ] && ! arch -x86_64 /usr/bin/true 2>/dev/null; then
+            CAN_EXEC=0
+            echo "Rosetta 2 not active; skipping x86_64-apple-darwin test execution"
+          fi
+          if [ "$CAN_EXEC" = "1" ]; then
+            if [ "${{ matrix.platform_key }}" != "linux-x64" ]; then
+              cargo test --release --target ${{ matrix.target }} --bin alluse -- --test-threads=1
+            fi
+            cargo test --release --target ${{ matrix.target }} --bin alluse-setup -- --test-threads=1
+            "./target/${{ matrix.target }}/release/${{ matrix.bin_name }}" --version
+            "./target/${{ matrix.target }}/release/${{ matrix.bin_name }}" --help
+            "./target/${{ matrix.target }}/release/${{ matrix.setup_name }}" --version
+            "./target/${{ matrix.target }}/release/${{ matrix.setup_name }}" --help
+          fi
+
+      - name: Package custom installer (macOS)
+        if: matrix.os_pkg == 'macos'
+        shell: bash
+        run: |
+          VERSION="${{ steps.ver.outputs.version }}"
+          ARCH="${{ matrix.arch_key }}"
+          TRIPLE="${{ matrix.target }}"
+          mkdir -p dist dist/stage
+          codesign --force --sign - "target/${TRIPLE}/release/alluse"
+          cp "target/${TRIPLE}/release/alluse" "dist/${{ matrix.raw_asset }}"
+          chmod +x "dist/${{ matrix.raw_asset }}"
+
+          node scripts/package-installer.mjs \
+            --os macos \
+            --arch "$ARCH" \
+            --version "$VERSION" \
+            --macos-app \
+            --stub "target/${TRIPLE}/release/alluse-setup" \
+            --icon target/installer-icons/AppIcon.icns \
+            --input "target/${TRIPLE}/release/alluse:alluse" \
+            --input "target/installer-icons/AppIcon.icns:AppIcon.icns" \
+            --input "LICENSE:LICENSE" \
+            --out "dist/stage/AllUse Installer.app"
+
+          codesign --force --deep --sign - "dist/stage/AllUse Installer.app"
+          node scripts/package-installer.mjs --verify "dist/stage/AllUse Installer.app/Contents/Resources/payload.pak"
+          tar -C dist/stage -czf "dist/AllUse-Setup-${VERSION}-darwin-${ARCH}.app.tar.gz" "AllUse Installer.app"
+          DMG_OUT="dist/AllUse-Setup-${VERSION}-darwin-${ARCH}.dmg"
+          for attempt in 1 2 3 4; do
+            rm -f "$DMG_OUT"
+            if hdiutil create -volname "CheapAI AllUse Setup" -srcfolder dist/stage -ov -format UDZO "$DMG_OUT"; then
+              break
+            fi
+            if [ "$attempt" -eq 4 ]; then
+              echo "hdiutil create failed after 4 attempts" >&2
+              exit 1
+            fi
+            sleep 3
+          done
+          rm -rf dist/stage
+
+      - name: Package custom installer (Linux)
+        if: matrix.os_pkg == 'linux'
+        shell: bash
+        run: |
+          VERSION="${{ steps.ver.outputs.version }}"
+          ARCH="${{ matrix.arch_key }}"
+          TRIPLE="${{ matrix.target }}"
+          mkdir -p dist dist/tar
+          cp "target/${TRIPLE}/release/alluse" "dist/${{ matrix.raw_asset }}"
+          chmod +x "dist/${{ matrix.raw_asset }}"
+
+          RUN_OUT="dist/AllUse-Setup-${VERSION}-linux-${ARCH}.run"
+          node scripts/package-installer.mjs \
+            --os linux \
+            --arch "$ARCH" \
+            --version "$VERSION" \
+            --stub "target/${TRIPLE}/release/alluse-setup" \
+            --input "target/${TRIPLE}/release/alluse:alluse" \
+            --input "target/installer-icons/alluse.png:alluse.png" \
+            --input "LICENSE:LICENSE" \
+            --out "$RUN_OUT"
+          chmod 755 "$RUN_OUT"
+          "$RUN_OUT" --verify-payload
+
+          cp "target/${TRIPLE}/release/alluse" dist/tar/alluse
+          chmod +x dist/tar/alluse
+          cp target/installer-icons/alluse.png dist/tar/alluse.png
+          cp README.md LICENSE install.sh dist/tar/
+          tar -C dist/tar -czf "dist/alluse-${VERSION}-linux-${ARCH}.tar.gz" .
+          rm -rf dist/tar
+
+      - name: Package custom installer (Windows)
+        if: matrix.os_pkg == 'windows'
+        shell: pwsh
+        run: |
+          $VERSION = "${{ steps.ver.outputs.version }}"
+          $ARCH = "${{ matrix.arch_key }}"
+          $TRIPLE = "${{ matrix.target }}"
+          New-Item -ItemType Directory -Force -Path dist, dist\bundle | Out-Null
+
+          $binSrc = "target\${TRIPLE}\release\alluse.exe"
+          $setupSrc = "target\${TRIPLE}\release\alluse-setup.exe"
+          Copy-Item $binSrc "dist\${{ matrix.raw_asset }}" -Force
+          Copy-Item $binSrc "dist\bundle\alluse.exe" -Force
+
+          $dllPath = $null
+          if (Test-Path "target\${TRIPLE}\release\WebView2Loader.dll") {
+            $dllPath = "target\${TRIPLE}\release\WebView2Loader.dll"
+          } else {
+            $found = Get-ChildItem -Path "target\${TRIPLE}\release\build" -Filter "WebView2Loader.dll" -Recurse -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -like "*\out\${{ matrix.webview_dll_arch }}\WebView2Loader.dll" } |
+              Select-Object -First 1
+            if ($found) { $dllPath = $found.FullName }
+          }
+          if (-not $dllPath -or -not (Test-Path $dllPath)) {
+            throw "WebView2Loader.dll for ${{ matrix.webview_dll_arch }} not found"
+          }
+          Copy-Item $dllPath "dist\${{ matrix.webview_dll_asset }}" -Force
+          Copy-Item $dllPath "dist\bundle\WebView2Loader.dll" -Force
+
+          $setupOut = "dist\AllUse-Setup-${VERSION}-win32-${ARCH}.exe"
+          node scripts/package-installer.mjs `
+            --os windows `
+            --arch "$ARCH" `
+            --version "$VERSION" `
+            --stub "$setupSrc" `
+            --input "${binSrc}:alluse.exe" `
+            --input "${dllPath}:WebView2Loader.dll" `
+            --input "target\installer-icons\alluse.ico:alluse.ico" `
+            --input "LICENSE:LICENSE" `
+            --out "$setupOut"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          & ".\$setupOut" --verify-payload
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          if ("$ARCH" -eq "x64") {
+            Copy-Item $setupOut "dist\AllUse-Setup-${VERSION}.exe" -Force
+          }
+
+          Copy-Item README.md, LICENSE, install.ps1 -Destination "dist\bundle\" -Force
+          Compress-Archive -Path "dist\bundle\*" -DestinationPath "dist\alluse-win32-${ARCH}.zip" -Force
+          Remove-Item -Recurse -Force "dist\bundle"
+
+      - name: Upload target artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifact-${{ matrix.platform_key }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Generate 6-Target Manifest & Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Download all 6 platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Generate updates-manifest.json and SHA256SUMS.txt
+        id: meta
+        run: |
+          RAW_TAG="${{ github.ref_name }}"
+          if [[ "$RAW_TAG" != v* ]]; then
+            RAW_TAG="${{ inputs.version }}"
+          fi
+          if [ -z "$RAW_TAG" ]; then
+            RAW_TAG="v$(node -e "console.log(require('./package.json').version)")"
+          fi
+          VERSION="${RAW_TAG#v}"
+          TAG="v${VERSION}"
+          BASE_URL="${{ inputs.base_url }}"
+          if [ -z "$BASE_URL" ]; then
+            BASE_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+          node scripts/generate-release-manifest.mjs \
+            --version "$VERSION" \
+            --dir release-assets \
+            --base-url "$BASE_URL"
+
+          cat release-assets/SHA256SUMS.txt
+          cat release-assets/updates-manifest.json
+
+      - name: Upload unified release bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: alluse-release-${{ steps.meta.outputs.tag }}
+          path: release-assets/*
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: CheapAI AllUse ${{ steps.meta.outputs.tag }}
+          draft: ${{ inputs.draft || false }}
+          prerelease: ${{ inputs.prerelease || false }}
+          generate_release_notes: true
+          files: release-assets/*
