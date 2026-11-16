@@ -20,12 +20,15 @@ path = "src/bin/alluse_setup.rs"
 [dependencies]
 anyhow = "1.0"
 base64 = "0.22"
+calamine = "0.35"
 dpi = "0.1"
 flate2 = "1.1"
 futures-util = "0.3"
 hmac = "0.12"
 http = "1.1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "ico", "gif"] }
+lopdf = "0.34"
+quick-xml = "0.37"
 raw-window-handle = "0.6"
 regex = "1.13"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "gzip"] }
@@ -39,6 +42,7 @@ toml = "0.8"
 urlencoding = "2.1"
 uuid = { version = "1.28", features = ["v4"] }
 wry = { version = "0.57", default-features = false, features = ["os-webview", "devtools", "x11"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"
@@ -49,6 +53,8 @@ windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
     "Win32_System_Com",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_Common",
     "Win32_UI_WindowsAndMessaging",
 ] }
 windows-core = "0.62"

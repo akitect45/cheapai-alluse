@@ -11,6 +11,7 @@
 pub mod agent;
 pub mod allscript;
 pub mod artex;
+pub mod attachments;
 pub mod browser;
 pub mod config;
 pub mod crew;
@@ -1111,6 +1112,105 @@ fn default_browser_user_agent() -> &'static str {
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    }
+}
+
+#[cfg(windows)]
+fn install_ui_webview_native_drop_listener(webview: &WebView) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        ICoreWebView2File, ICoreWebView2FileSystemHandle, ICoreWebView2WebMessageReceivedEventArgs2,
+    };
+    use webview2_com::WebMessageReceivedEventHandler;
+    use windows::Win32::System::Com::CoTaskMemFree;
+    use windows_core::{Interface as _, PWSTR};
+
+    unsafe {
+        let Ok(core) = webview.controller().CoreWebView2() else {
+            return;
+        };
+        let mut token = 0i64;
+        let handler = WebMessageReceivedEventHandler::create(Box::new(|_sender, args| {
+            let Some(args) = args else {
+                return Ok(());
+            };
+            let mut msg_pwstr = PWSTR::null();
+            if args.WebMessageAsJson(&mut msg_pwstr).is_err() || msg_pwstr.is_null() {
+                return Ok(());
+            }
+            let raw_json = msg_pwstr.to_string().unwrap_or_default();
+            CoTaskMemFree(Some(msg_pwstr.0 as *const core::ffi::c_void));
+
+            let parsed = serde_json::from_str::<serde_json::Value>(&raw_json).ok().and_then(|v| {
+                if let Some(s) = v.as_str() {
+                    serde_json::from_str::<serde_json::Value>(s).ok()
+                } else {
+                    Some(v)
+                }
+            });
+            let Some(payload) = parsed else {
+                return Ok(());
+            };
+            if payload.get("type").and_then(|v| v.as_str()) != Some("alluse_native_drop") {
+                return Ok(());
+            }
+            let req_id = payload
+                .get("req_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let target = payload
+                .get("target")
+                .and_then(|v| v.as_str())
+                .unwrap_or("chat")
+                .to_string();
+
+            let mut paths: Vec<String> = Vec::new();
+            if let Ok(args2) = args.cast::<ICoreWebView2WebMessageReceivedEventArgs2>() {
+                if let Ok(coll) = args2.AdditionalObjects() {
+                    let mut count = 0u32;
+                    let _ = coll.Count(&mut count);
+                    for i in 0..count {
+                        if let Ok(obj) = coll.GetValueAtIndex(i) {
+                            let mut path_pwstr = PWSTR::null();
+                            let got_path = if let Ok(file) = obj.cast::<ICoreWebView2File>() {
+                                file.Path(&mut path_pwstr).is_ok()
+                            } else if let Ok(handle) = obj.cast::<ICoreWebView2FileSystemHandle>() {
+                                handle.Path(&mut path_pwstr).is_ok()
+                            } else {
+                                false
+                            };
+                            if got_path && !path_pwstr.is_null() {
+                                let p = path_pwstr.to_string().unwrap_or_default();
+                                CoTaskMemFree(Some(path_pwstr.0 as *const core::ffi::c_void));
+                                let clean = p.trim();
+                                if !clean.is_empty() && !paths.iter().any(|x| x == clean) {
+                                    paths.push(clean.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            std::thread::spawn(move || {
+                let items = if target == "project_modal" {
+                    Vec::new()
+                } else {
+                    crate::attachments::stage_local_paths(&paths).unwrap_or_default()
+                };
+                crate::agent::emit_event(
+                    "native_drop_resolved",
+                    serde_json::json!({
+                        "req_id": req_id,
+                        "target": target,
+                        "paths": paths,
+                        "items": items,
+                    }),
+                );
+            });
+            Ok(())
+        }));
+        let _ = core.add_WebMessageReceived(&handler, &mut token);
     }
 }
 
@@ -2500,6 +2600,9 @@ fn main() -> Result<()> {
             });
         }
     };
+
+    #[cfg(windows)]
+    install_ui_webview_native_drop_listener(&ui_webview);
 
     let mut ui_session_id = crate::browser::default_browser_session_id();
     crate::browser::set_active_ui_browser_session_id(&ui_session_id);
