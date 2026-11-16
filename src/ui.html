@@ -43,6 +43,9 @@
     --accent-hover: #e0e0e0;
     --accent-fg: #0d0d0d;
     --code-bg: #111111;
+    --text-primary: var(--text);
+    --border-strong: rgba(255, 255, 255, 0.16);
+    --bg-main: var(--bg-canvas);
     --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.35);
     --shadow-md: 0 12px 32px rgba(0, 0, 0, 0.55);
   }
@@ -67,6 +70,9 @@
     --accent-hover: #2b2b2b;
     --accent-fg: #ffffff;
     --code-bg: #f5f5f5;
+    --text-primary: var(--text);
+    --border-strong: rgba(0, 0, 0, 0.16);
+    --bg-main: var(--bg-canvas);
     --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.06);
     --shadow-md: 0 10px 28px rgba(0, 0, 0, 0.12);
   }
@@ -4149,8 +4155,8 @@
     aspect-ratio: 4 / 3;
     border-radius: 10px;
     overflow: hidden;
-    border: 1.5px solid var(--border-strong);
-    background: #070709;
+    border: 1.5px solid var(--border);
+    background: var(--bg-elevated);
     cursor: pointer;
     user-select: none;
     content-visibility: auto;
@@ -4170,7 +4176,7 @@
     border-radius: 10px;
     background: var(--bg-sidebar);
     border: 1.5px solid var(--border-strong);
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+    box-shadow: var(--shadow-md);
     overflow: hidden;
     cursor: move;
     user-select: none;
@@ -4180,13 +4186,13 @@
   }
   .img-grid-tile.selected,
   .img-canvas-node-card.selected {
-    border-color: #ffffff;
-    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.24), 0 12px 28px rgba(0, 0, 0, 0.55);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--border-focus), var(--shadow-md);
   }
   .img-node-preview-box {
     position: relative;
     height: 164px;
-    background: #070709;
+    background: var(--bg-elevated);
     overflow: hidden;
   }
   .img-node-caption {
@@ -7182,6 +7188,87 @@
   .assistant-msg-copy-btn.is-copied .copy-icon-done {
     display: block;
   }
+
+  /* ── Studio Empty Canvas & Theater Theme Fixes (Light + Dark) ───────── */
+  .img-stage-card::before,
+  .vid-theater-card::before {
+    display: none !important;
+  }
+  .studio-canvas-wrap {
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    position: relative;
+    overflow: hidden;
+    cursor: grab;
+    user-select: none;
+    background-image: radial-gradient(rgba(255, 255, 255, 0.10) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+  [data-skin="light"] .studio-canvas-wrap,
+  [data-skin="lagoon"] .studio-canvas-wrap {
+    background-image: radial-gradient(rgba(15, 23, 42, 0.10) 1px, transparent 1px);
+  }
+  .studio-empty-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    text-align: center;
+    padding: 24px;
+  }
+  .studio-empty-card {
+    padding: 18px 24px;
+    border-radius: 14px;
+    border: 1px dashed rgba(255, 255, 255, 0.16);
+    background: rgba(24, 24, 28, 0.88);
+    color: var(--text);
+    max-width: 430px;
+    box-shadow: var(--shadow-sm);
+  }
+  [data-skin="light"] .studio-empty-card,
+  [data-skin="lagoon"] .studio-empty-card {
+    background: rgba(248, 249, 250, 0.96);
+    border-color: rgba(15, 23, 42, 0.16);
+    color: var(--text);
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.045);
+  }
+  .studio-empty-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 6px;
+  }
+  .studio-empty-desc {
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.55;
+  }
+  .vid-theater-stage {
+    position: relative;
+    width: 100%;
+    height: 340px;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #070709;
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.16s ease, border-color 0.16s ease;
+  }
+  .vid-theater-stage.is-empty {
+    background: #121215;
+    border: 1px dashed rgba(255, 255, 255, 0.16);
+  }
+  [data-skin="light"] .vid-theater-stage.is-empty,
+  [data-skin="lagoon"] .vid-theater-stage.is-empty {
+    background: #f8f9fa;
+    border-color: rgba(15, 23, 42, 0.16);
+  }
 </style>
 </head>
 <body>
@@ -9486,8 +9573,7 @@
               <div id="img-grid-view" class="img-grid-view" role="listbox" aria-label="저장된 이미지" aria-multiselectable="true"></div>
 
               <!-- Free Canvas (optional view) -->
-              <div id="img-infinite-canvas-wrap"
-                 style="flex:1; width:100%; height:100%; position:relative; overflow:hidden; cursor:grab; user-select:none; background-image:radial-gradient(rgba(255,255,255,0.10) 1px, transparent 1px); background-size:24px 24px;"
+              <div id="img-infinite-canvas-wrap" class="studio-canvas-wrap"
                  onmousedown="onImageCanvasMouseDown(event)"
                  onmousemove="onImageCanvasMouseMove(event)"
                  onmouseup="onImageCanvasMouseUp(event)"
@@ -9500,10 +9586,10 @@
               </div>
 
               <!-- Empty State Overlay -->
-              <div id="img-canvas-empty-hint" style="position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; pointer-events:none; text-align:center; padding:24px;">
-                <div style="padding:18px 24px; border-radius:12px; border:1px dashed var(--border-strong); background:rgba(15,15,18,0.84); max-width:430px;">
-                  <div style="font-size:13px; font-weight:600; color:var(--text-primary); margin-bottom:6px;">아직 이미지가 없습니다</div>
-                  <div style="font-size:12px; color:var(--text-secondary); line-height:1.55;">
+              <div id="img-canvas-empty-hint" class="studio-empty-overlay">
+                <div class="studio-empty-card">
+                  <div class="studio-empty-title">아직 이미지가 없습니다</div>
+                  <div class="studio-empty-desc">
                     왼쪽 입력칸에 만들고 싶은 장면을 적고 <b>[이미지 생성]</b>을 누르거나, 상단 <b>[내 파일 불러오기]</b>로 내 PC 사진을 올려보세요.
                   </div>
                 </div>
@@ -9864,7 +9950,7 @@
         <!-- Right Theater Player + Frame Extend/Capture + Storyboard Timeline -->
         <div style="display:flex; flex-direction:column; gap:10px; min-width:0;">
           <!-- Theater Video Player Card -->
-          <div class="card" style="margin:0; display:flex; flex-direction:column; gap:10px;">
+          <div class="card vid-theater-card" style="margin:0; display:flex; flex-direction:column; gap:10px;">
             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
               <div style="display:flex; align-items:center; gap:8px; min-width:0;">
                 <span style="font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" id="vid-theater-title">비디오 미리보기 플레이어</span>
@@ -9886,13 +9972,13 @@
               </div>
             </div>
 
-            <div style="position:relative; width:100%; height:340px; border-radius:10px; overflow:hidden; background:#050507; border:1px solid var(--border); display:flex; align-items:center; justify-content:center;">
+            <div id="vid-theater-box" class="vid-theater-stage is-empty">
               <video id="vid-theater-player" controls loop playsinline crossorigin="anonymous" style="width:100%; height:100%; object-fit:contain; display:none;"></video>
               <img id="vid-theater-poster-fallback" alt="Video Preview" crossorigin="anonymous" style="width:100%; height:100%; object-fit:contain; display:none;" />
               <canvas id="vid-frame-extract-canvas" style="display:none;"></canvas>
-              <div id="vid-theater-empty" style="text-align:center; color:var(--text-secondary); padding:24px; max-width:460px;">
-                <div style="font-size:13px; font-weight:600; color:var(--text-primary); margin-bottom:6px;">재생할 비디오가 아직 없습니다</div>
-                <div style="font-size:12px; line-height:1.55;">
+              <div id="vid-theater-empty" class="studio-empty-card" style="max-width:460px;">
+                <div class="studio-empty-title">재생할 비디오가 아직 없습니다</div>
+                <div class="studio-empty-desc">
                   왼쪽에서 설명을 적어 새 영상을 만들거나, 이미지 스튜디오에서 만든 그림을 보내 움직이는 영상으로 만들어 보세요.
                 </div>
               </div>
@@ -11886,7 +11972,9 @@ const UI_KO_TO_EN_EXACT = {
   '답변 복사': 'Copy response',
   '복사됨': 'Copied',
   '어시스턴트 답변': 'Assistant reply',
-  '복사할 텍스트가 없습니다.': 'No text to copy.'
+  '복사할 텍스트가 없습니다.': 'No text to copy.',
+  '아직 이미지가 없습니다': 'No images yet',
+  '재생할 비디오가 아직 없습니다': 'No video loaded yet'
 };
 
 const UI_EN_TO_KO_EXACT = (() => {
@@ -27283,6 +27371,8 @@ function pruneDeletedMediaAssetIdsFromUiState(rawIds, persistCanvas = true) {
     if (player) { player.pause(); player.removeAttribute('src'); player.style.display = 'none'; }
     if (poster) { poster.removeAttribute('src'); poster.style.display = 'none'; }
     if (empty) empty.style.display = 'block';
+    const box = document.getElementById('vid-theater-box');
+    if (box) box.classList.add('is-empty');
     if (vidStudioAssets.length > 0) {
       loadVideoAssetIntoTheater(vidStudioAssets[0].id);
     }
@@ -28607,6 +28697,8 @@ function loadVideoAssetIntoTheater(assetId) {
     }
   }
   if (empty) empty.style.display = 'none';
+  const theaterBox = document.getElementById('vid-theater-box');
+  if (theaterBox) theaterBox.classList.remove('is-empty');
   if (title) title.textContent = (asset.prompt || getMediaAssetDisplayFilename(asset) || '로컬 비디오').slice(0, 56);
   if (meta) {
     meta.textContent = `${asset.model} · ${asset.resolution || '720p'} · ${asset.duration_sec || 5}s · -${asset.v_credits_charged || 0} V`;
