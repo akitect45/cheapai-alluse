@@ -7761,7 +7761,7 @@
       </button>
 
       <div style="display:flex; justify-content:space-between; align-items:center; padding-top:8px; border-top:1px solid var(--border); margin-top:2px;">
-        <button class="btn ghost" style="font-size:12.5px; height:26px; padding:0 8px;" onclick="openCheapAiExternalUrl('https://cheapai.im/dashboard')">CheapAI 대시보드 열기 ↗</button>
+        <button class="btn ghost" style="font-size:12.5px; height:26px; padding:0 8px;" onclick="openCheapAiExternalUrl('https://cheapai.im/api/dashboard')">CheapAI 대시보드 열기 ↗</button>
         <div style="display:flex; gap:6px;">
           <button class="btn ghost" style="font-size:12.5px; height:26px; padding:0 8px;" onclick="closeCheapAiAuthOverlay(); openApiSettingsModal()">
             <svg class="solar-icon sm"><use href="#solar-settings"/></svg>
@@ -7806,7 +7806,7 @@
       <div class="field-group">
         <div style="display:flex; justify-content:space-between; align-items:center;">
           <span class="field-label">API Key (<code style="font-size:12px;">cai_...</code> 또는 호환 Bearer 키)</span>
-          <button class="btn ghost" style="height:26px; padding:0 6px; font-size:12.5px;" onclick="openCheapAiExternalUrl('https://cheapai.im/dashboard')">키 발급 페이지 ↗</button>
+          <button class="btn ghost" style="height:26px; padding:0 6px; font-size:12.5px;" onclick="openCheapAiExternalUrl('https://cheapai.im/api/dashboard#keys')">키 발급 페이지 ↗</button>
         </div>
         <input id="cheapai-auth-api-key" type="password" value="" placeholder="cai_xxxxxxxxxxxxxxxxxxxx" autocomplete="new-password" spellcheck="false" style="font-family:var(--font-mono);" />
       </div>
@@ -28520,7 +28520,7 @@ async function refreshVCreditBalanceUi(options = {}) {
 }
 
 function openVPassRechargeInBrowser() {
-  const url = 'https://cheapai.im/dashboard/recharge?tab=vcredits';
+  const url = 'https://cheapai.im/api/dashboard/recharge?tab=vcredits';
   if (typeof navigateBrowserTab === 'function') {
     if (typeof toggleBrowserSplit === 'function') {
       const shell = document.getElementById('left-split-shell');
