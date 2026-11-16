@@ -22,6 +22,7 @@ pub mod encoding;
 pub mod github;
 pub mod llm;
 pub mod media;
+pub mod oauth;
 pub mod search;
 pub mod self_heal;
 pub mod server;
