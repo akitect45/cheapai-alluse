@@ -28,6 +28,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: false
+
 jobs:
   build:
     name: Build (${{ matrix.platform_key }})
@@ -174,7 +178,7 @@ jobs:
       - name: Compile unit test binaries
         shell: bash
         run: |
-          if [ "${{ matrix.platform_key }}" = "linux-x64" ]; then
+          if [ "${{ matrix.os_pkg }}" = "linux" ]; then
             cargo test --release --target ${{ matrix.target }} --bin alluse-setup --no-run
           else
             cargo test --release --target ${{ matrix.target }} --bin alluse --bin alluse-setup --no-run
@@ -189,7 +193,7 @@ jobs:
             echo "Rosetta 2 not active; skipping x86_64-apple-darwin test execution"
           fi
           if [ "$CAN_EXEC" = "1" ]; then
-            if [ "${{ matrix.platform_key }}" != "linux-x64" ]; then
+            if [ "${{ matrix.os_pkg }}" != "linux" ]; then
               cargo test --release --target ${{ matrix.target }} --bin alluse -- --test-threads=1
             fi
             cargo test --release --target ${{ matrix.target }} --bin alluse-setup -- --test-threads=1
