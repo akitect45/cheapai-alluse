@@ -5973,6 +5973,36 @@
   .ext-oauth-code-row input { flex:1 1 auto; min-width:0; height:28px; padding:0 8px; font-size:11.5px; font-family:var(--font-mono); }
   .ext-oauth-code-row .btn { height:28px; padding:0 10px; font-size:11.5px; flex-shrink:0; }
   .ext-oauth-err { font-size:11.5px; color:#ef4444; line-height:1.35; overflow-wrap:anywhere; }
+  .ext-oauth-usage-wrap { display:flex; flex-direction:column; gap:6px; padding:7px 8px; border-radius:7px; background:var(--bg-input); border:1px solid var(--border); }
+  .ext-oauth-usage-head { display:flex; align-items:center; justify-content:space-between; gap:6px; font-size:11px; color:var(--text-secondary); }
+  .ext-oauth-plan-badge { display:inline-flex; align-items:center; height:17px; padding:0 6px; border-radius:999px; font-size:10.5px; font-weight:700; text-transform:uppercase; background:var(--bg-hover); border:1px solid var(--border); color:var(--text); }
+  .ext-oauth-win-row { display:flex; flex-direction:column; gap:3px; }
+  .ext-oauth-win-meta { display:flex; align-items:center; justify-content:space-between; gap:6px; font-size:11px; color:var(--text-secondary); font-variant-numeric:tabular-nums; }
+  .ext-oauth-win-label { font-weight:600; color:var(--text); }
+  .ext-oauth-win-bar { width:100%; height:5px; border-radius:999px; background:var(--border); overflow:hidden; }
+  .ext-oauth-win-fill { height:100%; border-radius:999px; background:var(--text); transition:width 0.2s ease; }
+  .ext-oauth-win-fill.is-warning { background:#eab308; }
+  .ext-oauth-win-fill.is-exhausted { background:#ef4444; }
+  .composer-oauth-usage-pill { display:inline-flex; align-items:center; gap:5px; height:24px; padding:0 8px; border-radius:999px; border:1px solid var(--border); background:var(--bg-elevated); color:var(--text-secondary); font-family:inherit; font-size:11.5px; font-weight:600; font-variant-numeric:tabular-nums; cursor:pointer; white-space:nowrap; transition:background 0.14s ease, border-color 0.14s ease, color 0.14s ease; }
+  .composer-oauth-usage-pill:hover { background:var(--bg-hover); color:var(--text); border-color:var(--border-strong); }
+  .composer-oauth-usage-pill[hidden] { display:none !important; }
+  .composer-oauth-usage-pill .ext-oauth-dot { width:6px; height:6px; background:var(--text-secondary); }
+  .composer-oauth-usage-pill.is-warning .ext-oauth-dot { background:#eab308; }
+  .composer-oauth-usage-pill.is-exhausted { border-color:rgba(239,68,68,0.42); color:var(--text); }
+  .composer-oauth-usage-pill.is-exhausted .ext-oauth-dot { background:#ef4444; }
+  .oauth-quota-bridge-banner { display:flex; flex-direction:column; gap:8px; margin-bottom:8px; padding:10px 12px; border-radius:12px; background:var(--bg-elevated); border:1px solid var(--border-strong); box-shadow:var(--shadow-sm); color:var(--text); }
+  .oauth-quota-bridge-banner[hidden] { display:none !important; }
+  .oauth-quota-bridge-banner.is-exhausted { border-color:rgba(239,68,68,0.45); }
+  .oauth-bridge-top { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; }
+  .oauth-bridge-msg-wrap { display:flex; align-items:flex-start; gap:8px; min-width:0; flex:1; }
+  .oauth-bridge-icon { width:22px; height:22px; border-radius:6px; background:var(--bg-input); border:1px solid var(--border); display:inline-flex; align-items:center; justify-content:center; color:var(--text); flex-shrink:0; margin-top:1px; }
+  .oauth-bridge-copy { display:flex; flex-direction:column; gap:3px; min-width:0; }
+  .oauth-bridge-meta { display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:700; color:var(--text-secondary); font-variant-numeric:tabular-nums; flex-wrap:wrap; }
+  .oauth-bridge-text { font-size:12.5px; line-height:1.45; color:var(--text); overflow-wrap:anywhere; }
+  .oauth-bridge-close { width:22px; height:22px; border-radius:6px; border:none; background:transparent; color:var(--text-muted); cursor:pointer; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; font-size:14px; line-height:1; }
+  .oauth-bridge-close:hover { background:var(--bg-hover); color:var(--text); }
+  .oauth-bridge-actions { display:flex; align-items:center; gap:6px; flex-wrap:wrap; padding-left:30px; }
+  .oauth-bridge-actions .btn { height:28px; padding:0 11px; font-size:12px; font-weight:600; }
   #cfg-auth-status-sub { font-size:12px; color:var(--text-secondary); line-height:1.45; overflow-wrap:anywhere; }
   .settings-url-head { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; flex-wrap:wrap; }
   .settings-url-head .field-label { min-width:0; line-height:1.4; }
@@ -8910,6 +8940,37 @@
             </button>
           </div>
 
+          <div class="oauth-quota-bridge-banner" id="oauth-quota-bridge-banner" hidden role="status" aria-live="polite">
+            <div class="oauth-bridge-top">
+              <div class="oauth-bridge-msg-wrap">
+                <span class="oauth-bridge-icon" aria-hidden="true">
+                  <svg class="solar-icon sm"><use href="#solar-pulse"/></svg>
+                </span>
+                <div class="oauth-bridge-copy">
+                  <div class="oauth-bridge-meta">
+                    <span id="oauth-bridge-stat">OAuth</span>
+                  </div>
+                  <div class="oauth-bridge-text" id="oauth-bridge-text"></div>
+                </div>
+              </div>
+              <button type="button" class="oauth-bridge-close" id="btn-oauth-bridge-close" onclick="dismissOAuthQuotaBridgeBanner()" aria-label="닫기" title="닫기">×</button>
+            </div>
+            <div class="oauth-bridge-actions">
+              <button type="button" class="btn primary" id="btn-oauth-bridge-pricing" onclick="openCheapAiPricingInBuiltInBrowser()">
+                <svg class="solar-icon sm"><use href="#solar-card"/></svg>
+                <span id="btn-oauth-bridge-pricing-label">CheapAI 바로 충전·구독하기</span>
+              </button>
+              <button type="button" class="btn" id="btn-oauth-bridge-switch" onclick="switchActiveConversationToCheapAi()">
+                <svg class="solar-icon sm"><use href="#solar-swap"/></svg>
+                <span id="btn-oauth-bridge-switch-label">CheapAI로 이 대화 바로 이어가기</span>
+              </button>
+              <button type="button" class="btn ghost" id="btn-oauth-bridge-sync-billing" hidden onclick="syncCheapAiBillingAfterBrowser()">
+                <svg class="solar-icon sm"><use href="#solar-refresh"/></svg>
+                <span id="btn-oauth-bridge-sync-label">잔액 동기화</span>
+              </button>
+            </div>
+          </div>
+
           <div class="composer-card" id="composer-card">
             <div class="composer-attachments-strip" id="composer-attachments-strip" hidden>
               <div class="composer-attachments-list" id="composer-attachments-list"></div>
@@ -8968,6 +9029,10 @@
                 </div>
               </div>
               <div class="composer-actions">
+                <button type="button" class="composer-oauth-usage-pill" id="composer-oauth-usage-pill" hidden onclick="openApiSettingsModal('account')" title="연결된 OAuth 사용량 상세 보기">
+                  <span class="ext-oauth-dot"></span>
+                  <span id="composer-oauth-usage-pill-text"></span>
+                </button>
                 <span class="stream-status-badge" id="stream-indicator">실행 중...</span>
                 <button class="send-btn" id="send-btn" onmousedown="event.stopPropagation()" oncontextmenu="event.preventDefault(); event.stopPropagation(); if(typeof closeCustomContextMenu==='function') closeCustomContextMenu(); var rt=typeof ensureThreadRuntime==='function'&&typeof currentThreadId!=='undefined'?ensureThreadRuntime(currentThreadId):null; if((rt&&rt.running)||this.classList.contains('is-stop-mode')||Object.keys(typeof threadRuntimeState!=='undefined'?threadRuntimeState:{}).some(function(k){return threadRuntimeState[k]&&threadRuntimeState[k].running})){ emergencyStop(event); } return false;" onclick="handleComposerPrimaryAction(event)" title="전송 (Enter)">
                   <svg class="solar-icon send-icon-up"><use href="#solar-arrow-up"/></svg>
@@ -10972,6 +11037,7 @@ function openApiSettingsModal(section = 'general') {
   }
   refreshCheapAiAuthStatusUi();
   if (typeof refreshExternalOAuthStatus === 'function') refreshExternalOAuthStatus();
+  if (typeof refreshExternalOAuthUsage === 'function') refreshExternalOAuthUsage(false);
   refreshModelsFromConnectedBaseUrl({ notify: true, useModalInputs: false });
   if (typeof syncUiOverlayCutoutWithHost === 'function') syncUiOverlayCutoutWithHost();
 }
@@ -12871,6 +12937,7 @@ async function initApp() {
     );
     refreshModelsFromConnectedBaseUrl({ silent: true });
     if (typeof refreshExternalOAuthStatus === 'function') refreshExternalOAuthStatus();
+    if (typeof refreshExternalOAuthUsage === 'function') refreshExternalOAuthUsage(false);
     if (!st.config.has_api_key) {
       openCheapAiAuthOverlay('options', st.auth || null);
     }
@@ -14190,9 +14257,9 @@ function handleRealtimeEvent(evt) {
     if (evt.type === 'subagent_envelope' && (evt.recipient_thread_id === currentThreadId || evt.sender_thread_id === currentThreadId) && !ensureThreadRuntime(currentThreadId).running) {
       loadMessages(currentThreadId);
     }
-  } else if (evt.type === 'oauth_updated') {
-    if (typeof ingestExternalOAuthStatus === 'function') ingestExternalOAuthStatus(evt);
-    refreshModelsFromConnectedBaseUrl({ silent: true });
+  } else if (evt.type === 'oauth_updated' || evt.type === 'oauth_usage_updated') {
+    if (typeof ingestExternalOAuthStatus === 'function') ingestExternalOAuthStatus(evt, evt.type);
+    if (evt.type === 'oauth_updated') refreshModelsFromConnectedBaseUrl({ silent: true });
   } else if (evt.type === 'workspace_state_updated' && evt.state) {
     if (workspaceStateReady && !draggedRailPanel && !persistWsTimer && (Date.now() - lastLocalWsPersistTs > 800)) {
       const normalized = normalizeWorkspaceStateObject(evt.state);
@@ -17074,6 +17141,7 @@ async function saveModelConfig() {
     if (msel) syncCustomSelectTrigger(msel);
     if (esel) syncCustomSelectTrigger(esel);
   }
+  if (typeof renderComposerOAuthUsageUi === 'function') renderComposerOAuthUsageUi();
   await api('/api/config', 'POST', { model, effort });
 }
 
@@ -17779,6 +17847,10 @@ async function refreshBrowserBarState() {
 }
 
 async function toggleBrowserSplit() {
+  const _wasBrowserOpen = Boolean(typeof currentSplitOpen !== 'undefined' && currentSplitOpen);
+  if (_wasBrowserOpen && window.__pendingCheapAiBillingSync && typeof syncCheapAiBillingAfterBrowser === 'function') {
+    setTimeout(() => { void syncCheapAiBillingAfterBrowser(); }, 180);
+  }
   const sid = getActiveBrowserSessionId();
   const st = await api('/api/browser/state?session_id=' + encodeURIComponent(sid));
   const nextOpen = !st.split_open;
@@ -28933,7 +29005,10 @@ function renderUsageRing() {
 
 function renderUsageTip() {
   const tip = document.getElementById('usage-ring-tip');
-  if (tip) tip.textContent = usageSummaryText(usageSnapshot);
+  if (!tip) return;
+  const baseText = usageSummaryText(usageSnapshot);
+  const extText = typeof externalOAuthUsageSummaryForTooltip === 'function' ? externalOAuthUsageSummaryForTooltip() : '';
+  tip.textContent = extText ? `${baseText} · ${extText}` : baseText;
 }
 
 function renderUsagePop() {
@@ -28978,6 +29053,9 @@ function renderUsagePop() {
     }
     if (snap.credits != null) row('크레딧', `${formatUsageCredits(snap.credits)}크레딧`);
     if (snap.vCredits != null) row('V크레딧', `${formatUsageCredits(snap.vCredits)} V`);
+  }
+  if (typeof appendExternalOAuthUsagePopRows === 'function') {
+    appendExternalOAuthUsagePopRows(row);
   }
   body.innerHTML = rows.join('');
   if (actionLabel) {
@@ -31858,13 +31936,15 @@ function externalOAuthBrandSvg(provider) {
   return '<svg class="solar-icon sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4 5.5 20h3l1.4-3.6h4.2L15.5 20h3L12 4Z"/><path d="M10.8 13.8 12 10.4l1.2 3.4h-2.4Z"/></svg>';
 }
 
-function ingestExternalOAuthStatus(payload) {
+function ingestExternalOAuthStatus(payload, eventType = '') {
   if (!payload || typeof payload !== 'object') return;
   const srcProviders = payload.providers || (payload.status && payload.status.providers) || null;
+  let freshExhaustedProvider = '';
   if (srcProviders && typeof srcProviders === 'object') {
     ['openai', 'claude'].forEach(p => {
       if (srcProviders[p] && typeof srcProviders[p] === 'object') {
-        const next = { ...externalOAuthState.providers[p], ...srcProviders[p], provider: p };
+        const prev = externalOAuthState.providers[p] || {};
+        const next = { ...prev, ...srcProviders[p], provider: p };
         externalOAuthState.providers[p] = next;
         if (next.authUrl) externalOAuthState.pendingUrls[p] = next.authUrl;
         if (next.connected) {
@@ -31874,15 +31954,32 @@ function ingestExternalOAuthStatus(payload) {
           externalOAuthState.codeDrafts[p] = '';
           externalOAuthState.errors[p] = '';
         }
+        if (next.usage && next.usage.exhausted && eventType === 'oauth_usage_updated') {
+          freshExhaustedProvider = p;
+        }
       }
     });
   } else if (payload.provider === 'openai' || payload.provider === 'claude') {
     const p = payload.provider;
-    externalOAuthState.providers[p] = { ...externalOAuthState.providers[p], ...payload };
-    if (payload.authUrl) externalOAuthState.pendingUrls[p] = payload.authUrl;
-    if (payload.sessionId) externalOAuthState.pendingSessionIds[p] = payload.sessionId;
+    if (payload.primaryWindow || payload.secondaryWindow || typeof payload.warning === 'boolean' || typeof payload.exhausted === 'boolean') {
+      externalOAuthState.providers[p] = { ...externalOAuthState.providers[p], usage: payload };
+      if (payload.exhausted && eventType === 'oauth_usage_updated') freshExhaustedProvider = p;
+    } else {
+      externalOAuthState.providers[p] = { ...externalOAuthState.providers[p], ...payload };
+      if (payload.authUrl) externalOAuthState.pendingUrls[p] = payload.authUrl;
+      if (payload.sessionId) externalOAuthState.pendingSessionIds[p] = payload.sessionId;
+    }
+  }
+  if (freshExhaustedProvider) {
+    // Re-expose banner immediately when a fresh 429/exhaustion arrives even if previously dismissed.
+    externalOAuthBridgeState.dismissedKeys.delete(freshExhaustedProvider + ':exhausted');
+    externalOAuthBridgeState.dismissedKeys.delete(freshExhaustedProvider + ':warning');
+    externalOAuthBridgeState.lastForcedProvider = freshExhaustedProvider;
   }
   renderExternalOAuthCards();
+  renderComposerOAuthUsageUi();
+  if (typeof renderUsageTip === 'function') renderUsageTip();
+  if (typeof usagePopOpen !== 'undefined' && usagePopOpen && typeof renderUsagePop === 'function') renderUsagePop();
 }
 
 async function refreshExternalOAuthStatus() {
@@ -31917,6 +32014,7 @@ function refreshExternalOAuthUiLocaleHeadersOnly() {
 function refreshExternalOAuthUiLocale() {
   refreshExternalOAuthUiLocaleHeadersOnly();
   ['openai', 'claude'].forEach(renderSingleExternalOAuthCard);
+  if (typeof renderComposerOAuthUsageUi === 'function') renderComposerOAuthUsageUi();
   if (lastCachedChatModelsList.length > 0) {
     const msel = document.getElementById('model-select');
     const cfgMid = document.getElementById('cfg-model-id');
@@ -31967,14 +32065,20 @@ function renderSingleExternalOAuthCard(provider) {
     const identity = st.email || st.accountId || extOAuthText('OAuth 계정 연결됨', 'OAuth account linked');
     const expStr = st.expiresAt ? new Date(Number(st.expiresAt) * 1000).toLocaleString() : '';
     const subMeta = st.email && st.accountId ? st.accountId : (expStr ? extOAuthText('만료: ', 'Expires: ') + expStr : '');
+    const usageHtml = renderExternalOAuthUsageBoxHtml(provider, st.usage);
     bodyHtml = `
       <div class="ext-oauth-account-info">
         <div class="ext-oauth-account-line" title="${escapeHtml(identity)}">${escapeHtml(identity)}</div>
         ${subMeta ? `<div class="ext-oauth-brand-sub" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(subMeta)}</div>` : ''}
       </div>
+      ${usageHtml}
       <div class="ext-oauth-actions">
         <button type="button" class="btn primary" id="oauth-use-${provider}" onclick="selectExternalOAuthModel('${provider}')" ${busy ? 'disabled' : ''}>
           <span>${escapeHtml(extOAuthText('이 계정 모델 선택', 'Use This Model'))}</span>
+        </button>
+        <button type="button" class="btn" id="oauth-refresh-usage-${provider}" onclick="refreshExternalOAuthUsage(true)" ${busy ? 'disabled' : ''}>
+          <svg class="solar-icon sm"><use href="#solar-refresh"/></svg>
+          <span>${escapeHtml(extOAuthText('사용량 새로고침', 'Refresh Usage'))}</span>
         </button>
         <button type="button" class="btn" id="oauth-disconnect-${provider}" onclick="disconnectExternalOAuth('${provider}')" ${busy ? 'disabled' : ''}>
           <span>${escapeHtml(extOAuthText('연결 해제', 'Disconnect'))}</span>
@@ -32209,7 +32313,340 @@ function openExternalOAuthFromOnboarding() {
   });
 }
 
+const externalOAuthBridgeState = {
+  dismissedKeys: new Set(),
+  lastForcedProvider: '',
+  billingSyncBound: false
+};
+
+function formatOAuthResetTimeLabel(rawReset) {
+  if (!rawReset) return '';
+  let d = null;
+  if (typeof rawReset === 'number' || /^\d+$/.test(String(rawReset).trim())) {
+    const n = Number(rawReset);
+    if (Number.isFinite(n) && n > 0) d = new Date(n > 1e12 ? n : n * 1000);
+  } else {
+    const parsed = Date.parse(String(rawReset));
+    if (!Number.isNaN(parsed)) d = new Date(parsed);
+  }
+  if (!d || Number.isNaN(d.getTime())) return String(rawReset);
+  const diffMs = d.getTime() - Date.now();
+  const hhmm = d.toLocaleTimeString(currentUiLang === 'en' ? 'en-US' : 'ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
+  if (diffMs > 20 * 3600 * 1000) {
+    const md = d.toLocaleDateString(currentUiLang === 'en' ? 'en-US' : 'ko-KR', { month: 'numeric', day: 'numeric' });
+    return `${md} ${hhmm}`;
+  }
+  return hhmm;
+}
+
+function renderOAuthUsageWindowRow(win, fallbackLabel, exhausted) {
+  if (!win || typeof win !== 'object') return '';
+  const used = Math.max(0, Math.min(100, Number(win.usedPercent ?? 0)));
+  const rem = Math.max(0, Math.min(100, Number(win.remainingPercent ?? Math.max(0, 100 - used))));
+  const usedRound = Math.round(used);
+  const remRound = Math.round(rem);
+  const winCode = String(win.label || fallbackLabel || '5h').toLowerCase();
+  const winTitle = winCode === '7d'
+    ? extOAuthText('7일 윈도우', '7d Window')
+    : extOAuthText('5시간 윈도우', '5h Window');
+  const resetStr = formatOAuthResetTimeLabel(win.resetAt);
+  const cls = (exhausted || used >= 100) ? 'is-exhausted' : (used >= 80 ? 'is-warning' : '');
+  const statText = extOAuthText(
+    `${usedRound}% 사용 · 잔여 ${remRound}%${resetStr ? ' · 리셋 ' + resetStr : ''}`,
+    `${usedRound}% used · ${remRound}% left${resetStr ? ' · Reset ' + resetStr : ''}`
+  );
+  return `
+    <div class="ext-oauth-win-row">
+      <div class="ext-oauth-win-meta">
+        <span class="ext-oauth-win-label">${escapeHtml(winTitle)}</span>
+        <span>${escapeHtml(statText)}</span>
+      </div>
+      <div class="ext-oauth-win-bar" role="progressbar" aria-valuenow="${usedRound}" aria-valuemin="0" aria-valuemax="100">
+        <div class="ext-oauth-win-fill ${cls}" style="width:${usedRound}%;"></div>
+      </div>
+    </div>
+  `;
+}
+
+function renderExternalOAuthUsageBoxHtml(provider, usage) {
+  if (!usage || typeof usage !== 'object') {
+    return `
+      <div class="ext-oauth-usage-wrap" id="oauth-usage-box-${provider}">
+        <div class="ext-oauth-usage-head">
+          <span>${escapeHtml(extOAuthText('실시간 사용량', 'Realtime Usage'))}</span>
+          <span>${escapeHtml(extOAuthText('조회 대기', 'Pending sync'))}</span>
+        </div>
+      </div>
+    `;
+  }
+  const rows = [
+    renderOAuthUsageWindowRow(usage.primaryWindow, '5h', usage.exhausted),
+    renderOAuthUsageWindowRow(usage.secondaryWindow, '7d', usage.exhausted)
+  ].filter(Boolean).join('');
+  const planBadge = usage.planType ? `<span class="ext-oauth-plan-badge">${escapeHtml(String(usage.planType))}</span>` : '';
+  const errHtml = usage.lastError ? `<div class="ext-oauth-brand-sub" style="color:#ef4444;">${escapeHtml(usage.lastError)}</div>` : '';
+  return `
+    <div class="ext-oauth-usage-wrap" id="oauth-usage-box-${provider}">
+      <div class="ext-oauth-usage-head">
+        <span>${escapeHtml(extOAuthText('실시간 구독 사용량', 'Subscription Usage'))}</span>
+        ${planBadge}
+      </div>
+      ${rows || `<div class="ext-oauth-brand-sub">${escapeHtml(extOAuthText('사용량 데이터 없음', 'No window data yet'))}</div>`}
+      ${errHtml}
+    </div>
+  `;
+}
+
+async function refreshExternalOAuthUsage(force = false) {
+  try {
+    const res = await api(`/api/oauth/usage?force=${force ? 1 : 0}`, 'GET');
+    if (res && res.ok !== false) {
+      ingestExternalOAuthStatus(res);
+    }
+  } catch (_) {}
+}
+
+function getActiveOAuthProviderFromModel() {
+  const curModel = String(document.getElementById('model-select')?.value || document.getElementById('cfg-model-id')?.value || '').trim();
+  if (curModel.startsWith('openai-oauth/')) return 'openai';
+  if (curModel.startsWith('claude-oauth/')) return 'claude';
+  return '';
+}
+
+function externalOAuthUsageSummaryForTooltip() {
+  const parts = [];
+  ['openai', 'claude'].forEach(p => {
+    const st = externalOAuthState.providers[p];
+    if (!st || !st.connected || !st.usage || !st.usage.primaryWindow) return;
+    const pct = Math.round(Number(st.usage.primaryWindow.usedPercent ?? 0));
+    const label = p === 'openai' ? 'OpenAI' : 'Claude';
+    parts.push(`${label} 5h ${pct}%`);
+  });
+  return parts.join(' · ');
+}
+
+function appendExternalOAuthUsagePopRows(rowFn) {
+  if (typeof rowFn !== 'function') return;
+  ['openai', 'claude'].forEach(p => {
+    const st = externalOAuthState.providers[p];
+    if (!st || !st.connected || !st.usage) return;
+    const label = p === 'openai' ? 'OpenAI OAuth' : 'Claude OAuth';
+    const pw = st.usage.primaryWindow;
+    if (pw) {
+      const rem = Math.round(Number(pw.remainingPercent ?? Math.max(0, 100 - Number(pw.usedPercent ?? 0))));
+      const rst = formatOAuthResetTimeLabel(pw.resetAt);
+      rowFn(`${label} (5h)`, extOAuthText(`${rem}% 남음`, `${rem}% left`), rst ? extOAuthText(`리셋 ${rst}`, `Reset ${rst}`) : '');
+    }
+  });
+}
+
+function renderComposerOAuthUsageUi() {
+  const pill = document.getElementById('composer-oauth-usage-pill');
+  const pillText = document.getElementById('composer-oauth-usage-pill-text');
+  const banner = document.getElementById('oauth-quota-bridge-banner');
+  const bannerStat = document.getElementById('oauth-bridge-stat');
+  const bannerText = document.getElementById('oauth-bridge-text');
+  const pricingLbl = document.getElementById('btn-oauth-bridge-pricing-label');
+  const switchLbl = document.getElementById('btn-oauth-bridge-switch-label');
+  const syncLbl = document.getElementById('btn-oauth-bridge-sync-label');
+  const syncBtn = document.getElementById('btn-oauth-bridge-sync-billing');
+  const closeBtn = document.getElementById('btn-oauth-bridge-close');
+
+  if (pricingLbl) pricingLbl.textContent = extOAuthText('CheapAI 바로 충전·구독하기', 'Recharge / Subscribe on CheapAI');
+  if (switchLbl) switchLbl.textContent = extOAuthText('CheapAI로 이 대화 바로 이어가기', 'Continue This Chat on CheapAI');
+  if (syncLbl) syncLbl.textContent = extOAuthText('잔액 동기화', 'Sync Balance');
+  if (closeBtn) {
+    closeBtn.setAttribute('aria-label', extOAuthText('닫기', 'Dismiss'));
+    closeBtn.title = extOAuthText('닫기', 'Dismiss');
+  }
+  if (syncBtn) syncBtn.hidden = !window.__pendingCheapAiBillingSync;
+
+  const activeProv = getActiveOAuthProviderFromModel();
+  const activeSt = activeProv ? externalOAuthState.providers[activeProv] : null;
+  const activeUsage = activeSt && activeSt.connected ? activeSt.usage : null;
+
+  if (pill && pillText) {
+    if (activeProv && activeSt && activeSt.connected) {
+      const nameLabel = activeProv === 'openai' ? 'OpenAI' : 'Claude';
+      const pw = activeUsage && activeUsage.primaryWindow;
+      const pct = pw ? Math.round(Number(pw.usedPercent ?? 0)) : null;
+      const isExh = Boolean(activeUsage && activeUsage.exhausted);
+      const isWarn = Boolean(activeUsage && activeUsage.warning && !isExh);
+      pill.classList.toggle('is-exhausted', isExh);
+      pill.classList.toggle('is-warning', isWarn);
+      if (isExh) {
+        pillText.textContent = extOAuthText(`${nameLabel} 5h · 한도 소진`, `${nameLabel} 5h · Limit reached`);
+      } else if (pct != null) {
+        pillText.textContent = extOAuthText(`${nameLabel} 5h · ${pct}% 사용`, `${nameLabel} 5h · ${pct}% used`);
+      } else {
+        pillText.textContent = extOAuthText(`${nameLabel} OAuth 연결됨`, `${nameLabel} OAuth linked`);
+      }
+      pill.hidden = false;
+    } else {
+      pill.hidden = true;
+    }
+  }
+
+  if (!banner) return;
+  const candidateProv = activeProv || externalOAuthBridgeState.lastForcedProvider;
+  const candSt = candidateProv ? externalOAuthState.providers[candidateProv] : null;
+  const candUsage = candSt && candSt.connected ? candSt.usage : null;
+  if (!candidateProv || !candUsage || (!candUsage.warning && !candUsage.exhausted)) {
+    banner.hidden = true;
+    return;
+  }
+
+  const stateKind = candUsage.exhausted ? 'exhausted' : 'warning';
+  const dismissKey = `${candidateProv}:${stateKind}`;
+  if (externalOAuthBridgeState.dismissedKeys.has(dismissKey)) {
+    banner.hidden = true;
+    return;
+  }
+
+  banner.classList.toggle('is-exhausted', Boolean(candUsage.exhausted));
+  const provLabel = candidateProv === 'openai' ? 'OpenAI OAuth' : 'Claude OAuth';
+  const pw = candUsage.primaryWindow;
+  const pctStr = pw ? `5h ${Math.round(Number(pw.usedPercent ?? 0))}%` : '';
+  const rstStr = pw && pw.resetAt ? formatOAuthResetTimeLabel(pw.resetAt) : '';
+  if (bannerStat) {
+    bannerStat.textContent = [
+      provLabel,
+      pctStr,
+      rstStr ? extOAuthText(`리셋 ${rstStr}`, `Reset ${rstStr}`) : ''
+    ].filter(Boolean).join(' · ');
+  }
+  if (bannerText) {
+    bannerText.textContent = candUsage.exhausted
+      ? extOAuthText(
+          '연결된 구독 한도가 소진되었습니다. 한도가 부족할 땐 CheapAI로 정가 대비 최대 20% 가격(최대 80% 절감)으로 끊김 없이 이어서 사용해 보세요.',
+          'Your linked subscription limit has been reached. Continue seamlessly with CheapAI at up to 20% of retail price (up to 80% off).'
+        )
+      : extOAuthText(
+          '연결된 구독 한도가 거의 소진되었습니다. 한도가 부족할 땐 CheapAI로 정가 대비 최대 20% 가격(최대 80% 절감)으로 끊김 없이 이어서 사용해 보세요.',
+          'Your linked subscription limit is almost reached. Continue seamlessly with CheapAI at up to 20% of retail price (up to 80% off).'
+        );
+  }
+  banner.hidden = false;
+}
+
+function dismissOAuthQuotaBridgeBanner() {
+  const activeProv = getActiveOAuthProviderFromModel() || externalOAuthBridgeState.lastForcedProvider;
+  const st = activeProv ? externalOAuthState.providers[activeProv] : null;
+  const u = st && st.usage;
+  if (activeProv && u) {
+    externalOAuthBridgeState.dismissedKeys.add(`${activeProv}:${u.exhausted ? 'exhausted' : 'warning'}`);
+  }
+  const banner = document.getElementById('oauth-quota-bridge-banner');
+  if (banner) banner.hidden = true;
+}
+
+async function syncCheapAiBillingAfterBrowser() {
+  window.__pendingCheapAiBillingSync = false;
+  const syncBtn = document.getElementById('btn-oauth-bridge-sync-billing');
+  if (syncBtn) syncBtn.hidden = true;
+  try {
+    await Promise.all([
+      typeof refreshVCreditBalanceUi === 'function' ? refreshVCreditBalanceUi({ syncModels: true }) : Promise.resolve(),
+      typeof refreshCheapAiAuthStatusUi === 'function' ? refreshCheapAiAuthStatusUi() : api('/api/auth/status'),
+      typeof refreshModelsFromConnectedBaseUrl === 'function' ? refreshModelsFromConnectedBaseUrl({ silent: true }) : Promise.resolve()
+    ]);
+    if (typeof showCustomToast === 'function') {
+      showCustomToast(extOAuthText('CheapAI 잔액과 모델 목록을 동기화했습니다.', 'Synced CheapAI balance and models.'), 'CHEAPAI');
+    }
+  } catch (_) {}
+}
+
+async function openCheapAiPricingInBuiltInBrowser() {
+  const url = currentUiLang === 'en' ? 'https://cheapai.im/en/pricing' : 'https://cheapai.im/pricing';
+  window.__pendingCheapAiBillingSync = true;
+  const syncBtn = document.getElementById('btn-oauth-bridge-sync-billing');
+  if (syncBtn) syncBtn.hidden = false;
+  if (!externalOAuthBridgeState.billingSyncBound) {
+    externalOAuthBridgeState.billingSyncBound = true;
+    window.addEventListener('focus', () => {
+      if (window.__pendingCheapAiBillingSync) {
+        void syncCheapAiBillingAfterBrowser();
+      }
+    });
+  }
+  try {
+    const sid = typeof getActiveBrowserSessionId === 'function' ? getActiveBrowserSessionId() : currentThreadId;
+    if (typeof currentSplitOpen === 'undefined' || !currentSplitOpen) {
+      if (typeof isStudioPanelMounted === 'function' && isStudioPanelMounted()) {
+        const tab = typeof getCurrentWorkspaceTab === 'function' ? getCurrentWorkspaceTab() : null;
+        if (tab) {
+          tab.split_mode = '1';
+          tab.slots[0] = 'chat';
+          workspaceState.focused_slot = 0;
+          tab.focused_slot = 0;
+          applyCurrentWorkspaceTabLayout(false);
+          renderWorkspaceTabsBar();
+          persistWorkspaceStateDebounced();
+        }
+      }
+      const splitRes = await api('/api/browser/action', 'POST', { action: 'set_split', session_id: sid, open: true });
+      if (splitRes && typeof renderBrowserBar === 'function') renderBrowserBar(splitRes);
+    }
+    if (typeof browserNewTab === 'function') {
+      await browserNewTab(url);
+    } else {
+      const navRes = await api('/api/browser/action', 'POST', { action: 'navigate', session_id: sid, url });
+      if (navRes && typeof renderBrowserBar === 'function') renderBrowserBar(navRes);
+    }
+  } catch (_) {
+    window.open(url, '_blank');
+  }
+}
+
+async function switchActiveConversationToCheapAi() {
+  const auth = await api('/api/auth/status');
+  const logoutBtn = document.getElementById('cfg-auth-logout-btn');
+  const signedIn = Boolean((auth && auth.signedIn) || (logoutBtn && logoutBtn.style.display !== 'none'));
+  if (!signedIn) {
+    if (typeof showCustomToast === 'function') {
+      showCustomToast(extOAuthText('CheapAI 계정을 먼저 연결하면 이 대화를 바로 이어갈 수 있습니다.', 'Sign in to CheapAI to continue this chat seamlessly.'), 'CHEAPAI');
+    }
+    if (typeof openCheapAiAuthOverlay === 'function') openCheapAiAuthOverlay('options', auth || null);
+    return;
+  }
+
+  const activeProv = getActiveOAuthProviderFromModel() || externalOAuthBridgeState.lastForcedProvider;
+  const nonOAuth = (lastCachedChatModelsList || []).filter(m => classifyChatModelOAuthGroup(m) === 'cheapai');
+  let chosen = null;
+  if (activeProv === 'claude') {
+    chosen = nonOAuth.find(m => /claude/i.test(String(m.id || m)));
+  } else if (activeProv === 'openai') {
+    chosen = nonOAuth.find(m => /gpt/i.test(String(m.id || m)));
+  }
+  if (!chosen) chosen = nonOAuth[0];
+  const targetModel = chosen ? String(chosen.id || chosen) : (activeProv === 'claude' ? 'claude-4.6-sonnet' : 'gpt-6-astra');
+
+  const msel = document.getElementById('model-select');
+  const cfgMid = document.getElementById('cfg-model-id');
+  [msel, cfgMid].forEach(sel => {
+    if (!sel || sel.tagName !== 'SELECT') return;
+    if (![...sel.options].some(o => o.value === targetModel)) {
+      const opt = document.createElement('option');
+      opt.value = targetModel;
+      opt.textContent = targetModel;
+      sel.prepend(opt);
+    }
+    sel.value = targetModel;
+  });
+  if (cfgMid && cfgMid.tagName !== 'SELECT') cfgMid.value = targetModel;
+
+  externalOAuthBridgeState.lastForcedProvider = '';
+  await saveModelConfig();
+  if (typeof syncAllCustomSelects === 'function') syncAllCustomSelects();
+  renderComposerOAuthUsageUi();
+  if (typeof showCustomToast === 'function') {
+    showCustomToast(extOAuthText(`CheapAI 모델(${targetModel})로 이 대화를 바로 이어갑니다.`, `Switched to CheapAI (${targetModel}) on this thread.`), 'CHEAPAI');
+  }
+  document.getElementById('chat-input')?.focus();
+}
+
 renderExternalOAuthCards();
+renderComposerOAuthUsageUi();
 </script>
 </body>
 </html>
