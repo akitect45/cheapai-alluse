@@ -2757,20 +2757,135 @@
     gap: 7px;
   }
 
-  #chat-project-modal .chat-project-card { width:560px; max-width:calc(100% - 24px); max-height:calc(100% - 24px); overflow-y:auto; overflow-x:hidden; gap:12px; }
-  .chat-project-note { font-size:12.5px; color:var(--text-secondary); line-height:1.55; }
-  .chat-project-path-row, .chat-project-actions, .chat-project-shortcuts { display:flex; gap:6px; flex-wrap:wrap; }
-  .chat-project-path-row input { flex:1; min-width:150px; }
-  .chat-project-shortcuts .btn { max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .chat-project-list { min-height:120px; max-height:240px; overflow:auto; border:1px solid var(--border); border-radius:10px; padding:5px; }
-  .chat-project-folder { display:flex; align-items:center; gap:9px; width:100%; padding:9px; border:0; border-radius:6px; background:transparent; color:var(--text-primary); text-align:left; cursor:pointer; }
-  .chat-project-folder:hover, .chat-project-folder:focus-visible { background:var(--bg-hover); }
-  .chat-project-folder span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .chat-project-actions { justify-content:flex-end; }
-  .chat-project-actions .btn { max-width:100%; height:auto; min-height:28px; white-space:normal; overflow-wrap:anywhere; }
-  .chat-project-path-row input { width:0; min-width:100px; }
-  #chat-project-error { color:var(--text-primary); font-size:12px; overflow-wrap:anywhere; }
-  #chat-project-none[hidden] { display:none; }
+  #chat-project-modal .chat-project-card {
+    width: 460px;
+    max-width: calc(100% - 24px);
+    max-height: calc(100% - 24px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    gap: 12px;
+    border-radius: 16px;
+  }
+  #chat-project-modal .chat-project-card.is-drop-active {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--border-focus), var(--shadow-md);
+  }
+  .chat-project-note {
+    font-size: 12.5px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+  }
+  .chat-project-section-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+  }
+  .chat-project-selected-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 180px;
+    overflow-y: auto;
+  }
+  .chat-project-selected-list:empty {
+    display: none;
+  }
+  .chat-project-selected-item {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg-input);
+    min-width: 0;
+  }
+  .chat-project-selected-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .chat-project-selected-name {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .chat-project-selected-path {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .chat-project-add-folder-btn {
+    width: 100%;
+    height: 40px;
+    border-radius: 10px;
+    border: 1px dashed var(--border-focus);
+    background: var(--bg-input);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    cursor: pointer;
+    transition: background 0.14s ease, border-color 0.14s ease, transform 0.1s ease;
+  }
+  .chat-project-add-folder-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent);
+    border-style: solid;
+  }
+  .chat-project-add-folder-btn:active {
+    transform: scale(0.99);
+  }
+  .chat-project-add-folder-btn:focus,
+  .chat-project-add-folder-btn:focus-visible {
+    outline: none;
+    outline-offset: 0;
+  }
+  .chat-project-add-folder-btn:focus-visible {
+    border-style: solid;
+    border-color: var(--accent);
+  }
+  .chat-project-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding-top: 4px;
+  }
+  .chat-project-actions-right {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+  }
+  .chat-project-actions .btn {
+    max-width: 100%;
+    min-height: 30px;
+  }
+  #chat-project-error {
+    color: #ef4444;
+    font-size: 12px;
+    overflow-wrap: anywhere;
+  }
+  #chat-project-error:empty {
+    display: none;
+  }
+  #chat-project-none[hidden] {
+    display: none;
+  }
 
   .composer-quick-bar {
     display: flex;
@@ -5910,7 +6025,7 @@
   .settings-card,
   .custom-ctx-menu,
   .code-block,
-  .chat-project-list {
+  .chat-project-selected-list {
     overscroll-behavior: contain;
   }
   @media (prefers-reduced-motion: no-preference) {
@@ -7269,6 +7384,246 @@
     background: #f8f9fa;
     border-color: rgba(15, 23, 42, 0.16);
   }
+
+  /* ── Chat Composer Attachments Preview Bar & '+' Context Menu ─────────── */
+  .composer-card.is-drop-active,
+  #panel-chat.is-drop-active .composer-card {
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 2px var(--border-focus), var(--shadow-md) !important;
+  }
+  .composer-attachments-strip {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 0 2px 8px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 2px;
+  }
+  .composer-attachments-strip[hidden] {
+    display: none;
+  }
+  .composer-attachments-list {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex-wrap: wrap;
+    max-height: 112px;
+    overflow-y: auto;
+    padding-top: 2px;
+  }
+  .composer-att-thumb {
+    position: relative;
+    width: 46px;
+    height: 46px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg-input);
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  .composer-att-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .composer-att-chip {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    height: 36px;
+    max-width: 230px;
+    padding: 0 26px 0 9px;
+    border-radius: 9px;
+    border: 1px solid var(--border);
+    background: var(--bg-sidebar);
+    color: var(--text);
+    flex-shrink: 0;
+  }
+  [data-skin="light"] .composer-att-chip,
+  [data-skin="lagoon"] .composer-att-chip {
+    background: #f4f4f5;
+    border-color: rgba(0, 0, 0, 0.10);
+  }
+  .composer-att-icon {
+    width: 15px;
+    height: 15px;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+  }
+  .composer-att-info {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    line-height: 1.22;
+  }
+  .composer-att-name {
+    font-size: 11.8px;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .composer-att-meta {
+    font-size: 10.5px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .composer-att-remove {
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--bg-canvas);
+    color: var(--text-secondary);
+    font-size: 11px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  }
+  .composer-att-chip .composer-att-remove {
+    top: 50%;
+    right: 5px;
+    transform: translateY(-50%);
+    width: 17px;
+    height: 17px;
+    border: none;
+    background: transparent;
+  }
+  .composer-att-remove:hover {
+    background: var(--bg-hover);
+    color: var(--text);
+    border-color: var(--border-focus);
+  }
+  .composer-plus-btn {
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-secondary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    margin-right: 2px;
+    transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  }
+  .composer-plus-btn:hover,
+  .composer-plus-btn[aria-expanded="true"] {
+    background: var(--bg-hover);
+    color: var(--text);
+    border-color: var(--border);
+  }
+  .composer-context-popover {
+    position: fixed;
+    left: 0;
+    top: 0;
+    z-index: 27000;
+    min-width: 168px;
+    padding: 5px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: var(--bg-sidebar);
+    color: var(--text);
+    box-shadow: var(--shadow-md);
+    display: none;
+    flex-direction: column;
+    gap: 2px;
+    user-select: none;
+  }
+  [data-skin="light"] .composer-context-popover,
+  [data-skin="lagoon"] .composer-context-popover {
+    background: #ffffff;
+    border-color: rgba(0, 0, 0, 0.11);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.09), 0 1px 3px rgba(0, 0, 0, 0.05);
+  }
+  .composer-context-popover.open {
+    display: flex;
+  }
+  .composer-context-pop-head {
+    padding: 4px 8px 3px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+  }
+  .composer-context-item {
+    width: 100%;
+    height: 31px;
+    padding: 0 8px;
+    border-radius: 8px;
+    border: none;
+    background: transparent;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 12.5px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.1s ease;
+  }
+  .composer-context-item:hover {
+    background: var(--bg-hover);
+  }
+
+  /* Sent User Bubble Attachment Chips */
+  .user-msg-attachments {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+    max-width: 82%;
+    margin-bottom: 5px;
+  }
+  .user-msg-att-thumb {
+    width: 56px;
+    height: 56px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    object-fit: cover;
+    display: block;
+    background: var(--bg-input);
+  }
+  .user-msg-att-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 30px;
+    max-width: 240px;
+    padding: 0 9px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    color: var(--text);
+    font-size: 11.5px;
+  }
+  .user-msg-att-chip-name {
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .user-msg-att-chip-meta {
+    color: var(--text-muted);
+    font-size: 10.5px;
+    flex-shrink: 0;
+  }
 </style>
 </head>
 <body>
@@ -7512,6 +7867,17 @@
   </symbol>
   <symbol id="solar-eye-off" viewBox="0 0 24 24" fill="none">
     <path d="M3 3L21 21M9.9 9.9A2.8 2.8 0 0 0 14.1 14.1M6.2 6.6C4.6 7.8 3.3 9.6 2.5 12C4.3 16.2 7.8 18.5 12 18.5C13.9 18.5 15.6 18 17.1 17M10.6 5.6C11.1 5.5 11.5 5.5 12 5.5C16.2 5.5 19.7 7.8 21.5 12C20.9 13.4 20.1 14.6 19.1 15.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+  <symbol id="solar-paperclip" viewBox="0 0 24 24" fill="none">
+    <path d="M21.44 11.05L12.25 20.24A6 6 0 0 1 3.77 11.76L12.96 2.57A4 4 0 0 1 18.62 8.23L9.42 17.42A2 2 0 0 1 6.59 14.59L15.07 6.12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+  <symbol id="solar-document" viewBox="0 0 24 24" fill="none">
+    <path d="M14 3H7A2 2 0 0 0 5 5V19A2 2 0 0 0 7 21H17A2 2 0 0 0 19 19V8L14 3Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+    <path d="M14 3V8H19M9 13H15M9 17H13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="solar-table" viewBox="0 0 24 24" fill="none">
+    <rect x="3.5" y="4.5" width="17" height="15" rx="2.2" stroke="currentColor" stroke-width="1.6"/>
+    <path d="M3.5 9.5H20.5M9.5 9.5V19.5M15 9.5V19.5" stroke="currentColor" stroke-width="1.5"/>
   </symbol>
   <symbol id="solar-lock" viewBox="0 0 24 24" fill="none">
     <rect x="5" y="10.5" width="14" height="10" rx="2.5" stroke="currentColor" stroke-width="1.6"/>
@@ -7978,23 +8344,25 @@
 </div>
 
 <div class="modal-backdrop" id="chat-project-modal" onclick="if(event.target === this) closeChatProjectPicker()">
-  <div class="modal-card chat-project-card" role="dialog" aria-modal="true" aria-labelledby="chat-project-title">
+  <div class="modal-card chat-project-card" id="chat-project-card" role="dialog" aria-modal="true" aria-labelledby="chat-project-title">
     <div class="modal-hdr">
-      <div class="modal-title" id="chat-project-title">대화 프로젝트</div>
+      <div class="modal-title" id="chat-project-title">프로젝트 추가</div>
       <button type="button" class="btn ghost icon-only" id="chat-project-close" onclick="closeChatProjectPicker()" aria-label="닫기"><svg class="solar-icon"><use href="#solar-close"/></svg></button>
     </div>
-    <div class="chat-project-note" id="chat-project-description">이 대화에서 작업할 폴더를 선택하세요. 프로젝트 없이도 대화할 수 있습니다.</div>
-    <div class="chat-project-shortcuts" id="chat-project-shortcuts"></div>
-    <form class="chat-project-path-row" onsubmit="event.preventDefault(); browseChatProjectFolder(document.getElementById('chat-project-path').value)">
-      <input id="chat-project-path" autocomplete="off" spellcheck="false" aria-label="프로젝트 폴더 경로" placeholder="폴더 전체 경로" />
-      <button type="submit" class="btn" id="chat-project-browse">열기</button>
-      <button type="button" class="btn" id="chat-project-up" onclick="browseChatProjectFolder(chatProjectPicker.parent)">상위 폴더</button>
-    </form>
-    <div class="chat-project-list" id="chat-project-folders" aria-live="polite"></div>
+    <div class="chat-project-note" id="chat-project-description">로컬 폴더를 선택해 프로젝트에 추가하세요.</div>
+    <div class="chat-project-section-label" id="chat-project-select-label">폴더 선택</div>
+    <div class="chat-project-selected-list" id="chat-project-selected-list" aria-live="polite"></div>
+    <button type="button" class="chat-project-add-folder-btn" id="chat-project-pick-native" onclick="pickProjectFoldersNative()">
+      <svg class="solar-icon sm"><use href="#solar-plus"/></svg>
+      <span id="chat-project-pick-native-label">폴더 추가</span>
+    </button>
     <div id="chat-project-error" role="status"></div>
     <div class="chat-project-actions">
-      <button type="button" class="btn" id="chat-project-none" onclick="saveChatProject('')">프로젝트 없이 대화</button>
-      <button type="button" class="btn primary" id="chat-project-apply" onclick="saveChatProject(document.getElementById('chat-project-path').value, false)">이 폴더 사용</button>
+      <button type="button" class="btn" id="chat-project-none" onclick="saveChatProject('')">일반 대화로 이동</button>
+      <div class="chat-project-actions-right">
+        <button type="button" class="btn ghost" id="chat-project-cancel" onclick="closeChatProjectPicker()">취소</button>
+        <button type="button" class="btn primary" id="chat-project-apply" onclick="saveChatProjectSelectedFolders()" disabled>프로젝트 추가</button>
+      </div>
     </div>
   </div>
 </div>
@@ -8176,6 +8544,17 @@
     <span class="crew-help-pin-badge">고정됨</span>
   </div>
   <div class="crew-help-pop-body" id="crew-help-pop-body"></div>
+</div>
+<div class="composer-context-popover" id="composer-context-popover" role="menu" aria-hidden="true">
+  <div class="composer-context-pop-head" id="composer-context-pop-head">컨텍스트 추가</div>
+  <button type="button" class="composer-context-item" id="composer-ctx-files-btn" role="menuitem" onclick="onComposerContextMenuSelect('files')">
+    <svg class="solar-icon sm"><use href="#solar-paperclip"/></svg>
+    <span id="composer-ctx-files-label">파일</span>
+  </button>
+  <button type="button" class="composer-context-item" id="composer-ctx-folder-btn" role="menuitem" onclick="onComposerContextMenuSelect('folder')">
+    <svg class="solar-icon sm"><use href="#solar-folder"/></svg>
+    <span id="composer-ctx-folder-label">폴더</span>
+  </button>
 </div>
 
 <div class="left-split-shell" id="left-split-shell">
@@ -8477,9 +8856,15 @@
           </div>
 
           <div class="composer-card" id="composer-card">
+            <div class="composer-attachments-strip" id="composer-attachments-strip" hidden>
+              <div class="composer-attachments-list" id="composer-attachments-list"></div>
+            </div>
             <textarea id="chat-input" placeholder="무엇이든 물어보거나 이미지·비디오 제작, 웹 작업을 맡겨보세요..." oninput="autoResizeChatInput(this); updateCurrentThreadStreamIndicator()" onkeydown="if(event.isComposing || event.keyCode===229) return; if(event.key==='Enter' && !event.shiftKey){ event.preventDefault(); sendChat(); } else if(event.key==='Escape'){ event.preventDefault(); emergencyStop(event); }"></textarea>
             <div class="composer-footer">
               <div class="composer-pills">
+                <button type="button" class="composer-plus-btn" id="composer-add-context-btn" onclick="toggleComposerContextPopover(event)" aria-haspopup="menu" aria-expanded="false" title="파일 또는 폴더 추가">
+                  <svg class="solar-icon sm"><use href="#solar-plus"/></svg>
+                </button>
                 <div class="composer-pill has-custom-select">
                   <select class="clean-select" id="chat-mode" onchange="onComposerModeChange(this.value)" title="작업 방식 선택">
                     <option value="auto">자동 실행</option>
@@ -11973,6 +12358,16 @@ const UI_KO_TO_EN_EXACT = {
   '복사됨': 'Copied',
   '어시스턴트 답변': 'Assistant reply',
   '복사할 텍스트가 없습니다.': 'No text to copy.',
+  '파일 또는 폴더 추가': 'Add files or folder',
+  '컨텍스트 추가': 'Add Context',
+  '파일': 'Files',
+  '폴더': 'Folder',
+  '프로젝트 추가': 'Add Project',
+  '로컬 폴더를 선택해 프로젝트에 추가하세요.': 'Select local folder(s) on this computer.',
+  '폴더 선택': 'Select Folder(s)',
+  '폴더 추가': 'Add Folder',
+  '일반 대화로 이동': 'Move to conversations',
+  '취소': 'Cancel',
   '아직 이미지가 없습니다': 'No images yet',
   '재생할 비디오가 아직 없습니다': 'No video loaded yet'
 };
@@ -12302,6 +12697,9 @@ function applyUiLanguage(lang) {
     }
     if (typeof syncChatLiveStatusRow === 'function') {
       syncChatLiveStatusRow(currentThreadId);
+    }
+    if (typeof refreshComposerAttachmentUiLocale === 'function') {
+      refreshComposerAttachmentUiLocale();
     }
     const openCrewPop = document.getElementById('crew-help-popover');
     if (openCrewPop && openCrewPop.classList.contains('open') && typeof crewHelpPinnedTrigger !== 'undefined' && crewHelpPinnedTrigger && typeof positionCrewHelpPopover === 'function') {
@@ -13208,7 +13606,8 @@ function handleRealtimeEvent(evt) {
         rt.queuedPrompts.splice(idx, 1);
       }
     }
-    if (evtTid === currentThreadId && msgBox && evt.content) {
+    const evtAtts = typeof extractUserBubbleAttachments === 'function' ? extractUserBubbleAttachments(evt) : [];
+    if (evtTid === currentThreadId && msgBox && (evt.content || evtAtts.length > 0)) {
       if (qid) {
         streamingAssistantEl = null;
         rt.thinkingBuf = '';
@@ -13223,7 +13622,7 @@ function handleRealtimeEvent(evt) {
         const elQid = el.getAttribute('data-queue-id') || '';
         const bubbleEl = el.querySelector('.user-bubble');
         const elTxt = bubbleEl ? bubbleEl.textContent : '';
-        if ((qid && elQid === qid) || elTxt === cleanContent) {
+        if ((qid && elQid === qid) || (cleanContent && elTxt === cleanContent)) {
           promotedEl = el;
         }
       });
@@ -13238,14 +13637,21 @@ function handleRealtimeEvent(evt) {
         appendBeforeQueuedPrompts(msgBox, promotedEl);
         if (scroll && !window.chatHasMoreNewer) scroll.scrollTop = scroll.scrollHeight;
       } else {
-        const committedBubbles = msgBox.querySelectorAll('.msg.user:not([data-queued-prompt="1"]) .user-bubble');
-        const lastUserBubble = committedBubbles.length > 0 ? committedBubbles[committedBubbles.length - 1] : null;
-        if (!lastUserBubble || lastUserBubble.textContent !== cleanContent) {
+        const committedUsers = msgBox.querySelectorAll('.msg.user:not([data-queued-prompt="1"])');
+        const lastUserEl = committedUsers.length > 0 ? committedUsers[committedUsers.length - 1] : null;
+        const lastBubble = lastUserEl ? lastUserEl.querySelector('.user-bubble') : null;
+        const lastTxt = lastBubble ? lastBubble.textContent : '';
+        const samePendingOptimistic = Boolean(
+          lastUserEl && !lastUserEl.getAttribute('data-msg-id') &&
+          (cleanContent ? lastTxt === cleanContent : !lastTxt)
+        );
+        if (!samePendingOptimistic) {
+          const attHtml = typeof renderUserAttachmentChipsHtml === 'function' ? renderUserAttachmentChipsHtml(evtAtts) : '';
           const div = document.createElement('div');
           div.className = 'msg user';
           if (evt.id) div.setAttribute('data-msg-id', String(evt.id));
           div.setAttribute('data-msg-role', 'user');
-          div.innerHTML = `<div class="user-bubble chat-msg-body">${escapeHtml(cleanContent)}</div>`;
+          div.innerHTML = `${attHtml}${cleanContent ? `<div class="user-bubble chat-msg-body">${escapeHtml(cleanContent)}</div>` : ''}`;
           applyMsgLiveEnter(div);
           if (streamingAssistantEl && streamingAssistantEl.parentNode === msgBox) {
             msgBox.insertBefore(div, streamingAssistantEl);
@@ -13254,8 +13660,11 @@ function handleRealtimeEvent(evt) {
             appendBeforeQueuedPrompts(msgBox, div);
           }
           if (scroll && !window.chatHasMoreNewer) scroll.scrollTop = scroll.scrollHeight;
-        } else if (evt.id && lastUserBubble.parentElement && !lastUserBubble.parentElement.getAttribute('data-msg-id')) {
-          lastUserBubble.parentElement.setAttribute('data-msg-id', String(evt.id));
+        } else if (lastUserEl) {
+          if (evt.id) lastUserEl.setAttribute('data-msg-id', String(evt.id));
+          if (evtAtts.length > 0 && !lastUserEl.querySelector('.user-msg-attachments') && typeof renderUserAttachmentChipsHtml === 'function') {
+            lastUserEl.insertAdjacentHTML('afterbegin', renderUserAttachmentChipsHtml(evtAtts));
+          }
         }
       }
       if (typeof syncLiveDomTurnIntoRail === 'function') syncLiveDomTurnIntoRail();
@@ -13764,6 +14173,10 @@ function handleRealtimeEvent(evt) {
       }
     }
     loadMessages(currentThreadId);
+  } else if (evt.type === 'native_drop_resolved') {
+    if (typeof resolvePendingNativeDropEvent === 'function') {
+      resolvePendingNativeDropEvent(evt);
+    }
   } else if (evt.type === 'ui_reload') {
     location.reload();
   } else if (evt.type === 'extensions_updated' || evt.type === 'heal_event') {
@@ -13833,7 +14246,7 @@ function pruneInactiveThreadRuntimeState(maxInactive = 12) {
   }
 }
 
-const chatProjectPicker = { threadId: '', mode: 'add', open: false, parent: '', request: 0, saving: false, trigger: null };
+const chatProjectPicker = { threadId: '', mode: 'add', open: false, selectedFolders: [], saving: false, picking: false, trigger: null };
 let sidebarProjects = [];
 let sidebarGroupPages = new Map();
 let sidebarGroupLimits = new Map();
@@ -13891,12 +14304,91 @@ function chatProjectBusy(thread) {
 
 function closeChatProjectPicker() {
   if (chatProjectPicker.saving) return;
-  chatProjectPicker.request++;
   chatProjectPicker.threadId = '';
+  chatProjectPicker.selectedFolders = [];
+  chatProjectPicker.picking = false;
   chatProjectPicker.open = false;
+  document.getElementById('chat-project-card')?.classList.remove('is-drop-active');
   document.getElementById('chat-project-modal').classList.remove('open');
   (chatProjectPicker.trigger?.isConnected ? chatProjectPicker.trigger : document.getElementById('sidebar-add-project'))?.focus();
   chatProjectPicker.trigger = null;
+}
+
+function renderChatProjectSelectedFolders() {
+  const list = document.getElementById('chat-project-selected-list');
+  const applyBtn = document.getElementById('chat-project-apply');
+  if (!list) return;
+  list.replaceChildren();
+  chatProjectPicker.selectedFolders.forEach((folderPath, idx) => {
+    const row = document.createElement('div');
+    row.className = 'chat-project-selected-item';
+    row.innerHTML = `
+      <svg class="solar-icon sm" style="color:var(--text-secondary);"><use href="#solar-folder"/></svg>
+      <div class="chat-project-selected-info">
+        <span class="chat-project-selected-name">${escapeHtml(chatProjectName(folderPath))}</span>
+        <span class="chat-project-selected-path" title="${escapeHtml(folderPath)}">${escapeHtml(folderPath)}</span>
+      </div>
+      <button type="button" class="btn ghost icon-only" style="width:22px; height:22px; padding:0;" aria-label="${escapeHtml(chatProjectText('제거', 'Remove'))}">
+        <svg class="solar-icon sm"><use href="#solar-close"/></svg>
+      </button>
+    `;
+    row.querySelector('button').onclick = () => {
+      chatProjectPicker.selectedFolders.splice(idx, 1);
+      renderChatProjectSelectedFolders();
+    };
+    list.appendChild(row);
+  });
+  if (applyBtn) {
+    applyBtn.disabled = chatProjectPicker.saving || chatProjectPicker.selectedFolders.length === 0;
+  }
+}
+
+function addProjectFoldersToModal(paths) {
+  const incoming = (Array.isArray(paths) ? paths : [paths]).map(p => String(p || '').trim()).filter(Boolean);
+  if (incoming.length === 0) return;
+  if (chatProjectPicker.mode === 'move') {
+    chatProjectPicker.selectedFolders = [incoming[incoming.length - 1]];
+  } else {
+    incoming.forEach(p => {
+      if (!chatProjectPicker.selectedFolders.some(existing => existing.toLowerCase() === p.toLowerCase())) {
+        chatProjectPicker.selectedFolders.push(p);
+      }
+    });
+  }
+  const errEl = document.getElementById('chat-project-error');
+  if (errEl) errEl.textContent = '';
+  renderChatProjectSelectedFolders();
+}
+
+async function pickProjectFoldersNative() {
+  if (!chatProjectPicker.open || chatProjectPicker.saving || chatProjectPicker.picking) return;
+  const errEl = document.getElementById('chat-project-error');
+  const pickBtn = document.getElementById('chat-project-pick-native');
+  if (errEl) errEl.textContent = '';
+  chatProjectPicker.picking = true;
+  if (pickBtn) pickBtn.disabled = true;
+  try {
+    const initialDir = chatProjectPicker.selectedFolders[chatProjectPicker.selectedFolders.length - 1]
+      || (typeof getActiveThreadWorkspaceDir === 'function' ? getActiveThreadWorkspaceDir() : '');
+    const res = await api('/api/dialog/pick', 'POST', {
+      mode: 'folder',
+      multiple: false,
+      initial_dir: initialDir || ''
+    });
+    if (!chatProjectPicker.open) return;
+    if (!res || res.ok === false) {
+      if (errEl) errEl.textContent = (res && res.error) || chatProjectText('폴더 선택 창을 열 수 없습니다.', 'Unable to open native folder picker.');
+      return;
+    }
+    if (res.cancelled) return;
+    const picked = Array.isArray(res.paths) && res.paths.length > 0
+      ? res.paths
+      : (Array.isArray(res.items) ? res.items.map(it => it && it.path).filter(Boolean) : []);
+    addProjectFoldersToModal(picked);
+  } finally {
+    chatProjectPicker.picking = false;
+    if (pickBtn) pickBtn.disabled = false;
+  }
 }
 
 function openChatProjectPicker(trigger = null, threadId = '') {
@@ -13907,90 +14399,81 @@ function openChatProjectPicker(trigger = null, threadId = '') {
   }
   chatProjectPicker.threadId = threadId;
   chatProjectPicker.mode = threadId ? 'move' : 'add';
+  chatProjectPicker.selectedFolders = thread?.workspace_path ? [thread.workspace_path] : [];
   chatProjectPicker.open = true;
   chatProjectPicker.trigger = trigger || document.getElementById('sidebar-add-project');
   const labels = {
-    'chat-project-title': threadId ? ['대화 이동', 'Move conversation'] : ['프로젝트 추가', 'Add project'],
-    'chat-project-description': threadId ? ['이 대화를 옮길 프로젝트 폴더를 선택하세요.', 'Choose a project folder for this conversation.'] : ['작업할 폴더를 추가하세요. 프로젝트 안에서 여러 대화를 만들 수 있습니다.', 'Add a folder, then create conversations inside the project.'],
-    'chat-project-browse': ['열기', 'Open'], 'chat-project-up': ['상위 폴더', 'Parent folder'],
-    'chat-project-none': ['일반 대화로 이동', 'Move to conversations'], 'chat-project-apply': threadId ? ['여기로 이동', 'Move here'] : ['프로젝트 추가', 'Add project'],
+    'chat-project-title': threadId ? ['대화 이동', 'Move Conversation'] : ['프로젝트 추가', 'Add Project'],
+    'chat-project-description': threadId
+      ? ['이 대화를 옮길 프로젝트 폴더를 선택하세요.', 'Choose a folder on this computer for this conversation.']
+      : ['로컬 폴더를 선택해 프로젝트에 추가하세요.', 'Select local folder(s) on this computer.'],
+    'chat-project-select-label': ['폴더 선택', 'Select Folder(s)'],
+    'chat-project-pick-native-label': threadId ? ['폴더 선택', 'Choose Folder'] : ['폴더 추가', 'Add Folder'],
+    'chat-project-none': ['일반 대화로 이동', 'Move to conversations'],
+    'chat-project-cancel': ['취소', 'Cancel'],
+    'chat-project-apply': threadId ? ['여기로 이동', 'Move Here'] : ['프로젝트 추가', 'Add Project'],
   };
-  Object.entries(labels).forEach(([id, text]) => document.getElementById(id).textContent = chatProjectText(...text));
+  Object.entries(labels).forEach(([id, text]) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = chatProjectText(...text);
+  });
   document.getElementById('chat-project-none').hidden = !threadId;
-  const input = document.getElementById('chat-project-path');
-  input.placeholder = chatProjectText('폴더 전체 경로', 'Absolute folder path');
-  input.setAttribute('aria-label', input.placeholder);
   document.getElementById('chat-project-close').setAttribute('aria-label', chatProjectText('닫기', 'Close'));
   document.getElementById('chat-project-error').textContent = '';
+  renderChatProjectSelectedFolders();
   document.getElementById('chat-project-modal').classList.add('open');
-  void browseChatProjectFolder(thread?.workspace_path || '');
-  input.focus();
+  const pickBtn = document.getElementById('chat-project-pick-native');
+  if (pickBtn) pickBtn.focus();
 }
 
-async function browseChatProjectFolder(path) {
+async function saveChatProjectSelectedFolders() {
   if (!chatProjectPicker.open || chatProjectPicker.saving) return;
-  const request = ++chatProjectPicker.request;
-  const list = document.getElementById('chat-project-folders');
-  const error = document.getElementById('chat-project-error');
-  const input = document.getElementById('chat-project-path');
-  input.value = path || '';
-  error.textContent = '';
-  list.textContent = chatProjectText('폴더 불러오는 중...', 'Loading folders...');
-  const result = await api(`/api/chat/workspaces?path=${encodeURIComponent(path || '')}`);
-  if (request !== chatProjectPicker.request || !chatProjectPicker.open) return;
-  list.replaceChildren();
-  if (!result.ok) {
-    error.textContent = result.error || chatProjectText('폴더를 열 수 없습니다.', 'Unable to open folder.');
+  const folders = chatProjectPicker.selectedFolders.slice();
+  if (folders.length === 0) {
+    const errEl = document.getElementById('chat-project-error');
+    if (errEl) errEl.textContent = chatProjectText('먼저 폴더를 선택해 주세요.', 'Select at least one folder.');
     return;
   }
-  // The user may have typed a new path while this directory request was in flight.
-  if (input.value === (path || '')) input.value = result.path;
-  chatProjectPicker.parent = result.parent || '';
-  document.getElementById('chat-project-up').disabled = !result.parent;
-  const shortcuts = document.getElementById('chat-project-shortcuts');
-  shortcuts.replaceChildren();
-  [...new Set([...(result.roots || []), ...(result.recent || [])])].forEach((folder, i) => {
-    const button = document.createElement('button');
-    button.type = 'button'; button.className = 'btn'; button.title = folder;
-    button.textContent = i === 0 ? chatProjectText('홈', 'Home') : chatProjectName(folder);
-    button.onclick = () => browseChatProjectFolder(folder);
-    shortcuts.appendChild(button);
-  });
-  (result.directories || []).forEach(folder => {
-    const button = document.createElement('button');
-    button.type = 'button'; button.className = 'chat-project-folder'; button.title = folder.path;
-    button.innerHTML = '<svg class="solar-icon sm"><use href="#solar-folder"/></svg><span></span>';
-    button.querySelector('span').textContent = folder.name;
-    button.onclick = () => browseChatProjectFolder(folder.path);
-    list.appendChild(button);
-  });
-  if (!result.directories?.length) list.textContent = chatProjectText('하위 폴더가 없습니다. 이 폴더를 선택할 수 있습니다.', 'No subfolders. You can select this folder.');
-  if (result.truncated) error.textContent = chatProjectText('폴더 500개까지 표시합니다. 경로를 입력해서 이동할 수 있습니다.', 'Showing up to 500 folders. Enter a path to navigate further.');
+  await saveChatProject(folders, false);
 }
 
-async function saveChatProject(path, allowEmpty = true) {
+async function saveChatProject(pathOrPaths, allowEmpty = true) {
   const tid = chatProjectPicker.threadId;
   if (!chatProjectPicker.open || chatProjectPicker.saving) return;
   const error = document.getElementById('chat-project-error');
-  if (!allowEmpty && !String(path).trim()) {
-    error.textContent = chatProjectText('폴더 경로를 입력해 주세요.', 'Enter a folder path.');
+  const list = Array.isArray(pathOrPaths) ? pathOrPaths : [pathOrPaths];
+  const targets = list.map(p => String(p || '').trim());
+  if (!allowEmpty && targets.every(p => !p)) {
+    error.textContent = chatProjectText('먼저 폴더를 선택해 주세요.', 'Select a folder first.');
     return;
   }
   chatProjectPicker.saving = true;
-  chatProjectPicker.request++;
-  document.querySelectorAll('#chat-project-modal button, #chat-project-modal input').forEach(el => el.disabled = true);
-  const result = await api(tid ? '/api/threads/workspace' : '/api/chat/projects', 'POST', { thread_id: tid, workspace_path: path });
-  chatProjectPicker.saving = false;
-  document.querySelectorAll('#chat-project-modal button, #chat-project-modal input').forEach(el => el.disabled = false);
-  document.getElementById('chat-project-up').disabled = !chatProjectPicker.parent;
-  if (!result.ok) {
-    error.textContent = result.error || chatProjectText('프로젝트를 저장하지 못했습니다.', 'Could not save project.');
-    return;
+  document.querySelectorAll('#chat-project-modal button').forEach(el => el.disabled = true);
+  try {
+    let lastError = '';
+    for (const p of targets) {
+      const result = await api(tid ? '/api/threads/workspace' : '/api/chat/projects', 'POST', { thread_id: tid, workspace_path: p });
+      if (!result || !result.ok) {
+        lastError = (result && result.error) || chatProjectText('프로젝트를 저장하지 못했습니다.', 'Could not save project.');
+        break;
+      }
+      const savedPath = result.workspace_path || result.thread?.workspace_path;
+      if (savedPath) {
+        expandedChatProjects.add(savedPath);
+        rememberExpandedProjects();
+      }
+    }
+    if (lastError) {
+      error.textContent = lastError;
+      return;
+    }
+    closeChatProjectPicker();
+    await loadThreads();
+  } finally {
+    chatProjectPicker.saving = false;
+    document.querySelectorAll('#chat-project-modal button').forEach(el => el.disabled = false);
+    renderChatProjectSelectedFolders();
   }
-  const savedPath = result.workspace_path || result.thread?.workspace_path;
-  if (savedPath) { expandedChatProjects.add(savedPath); rememberExpandedProjects(); }
-  closeChatProjectPicker();
-  await loadThreads();
 }
 
 document.getElementById('chat-project-modal').addEventListener('keydown', event => {
@@ -14240,6 +14723,7 @@ async function selectThread(id) {
     });
     syncThreadLiquid(true);
   }
+  if (typeof renderComposerAttachmentsStrip === 'function') renderComposerAttachmentsStrip(id);
   updateCurrentThreadStreamIndicator();
   if (workspaceState) {
     const curTab = typeof getActiveWorkspaceTab === 'function' ? getActiveWorkspaceTab() : null;
@@ -15020,9 +15504,15 @@ function renderSingleChatMessageHtml(m) {
     `;
   }
   if (m.role === 'user') {
+    const userAtts = typeof extractUserBubbleAttachments === 'function' ? extractUserBubbleAttachments(m) : [];
+    const attHtml = typeof renderUserAttachmentChipsHtml === 'function' ? renderUserAttachmentChipsHtml(userAtts) : '';
+    const bubbleHtml = (cleanContent || !attHtml)
+      ? `<div class="user-bubble chat-msg-body">${escapeHtml(cleanContent)}</div>`
+      : '';
     return `
       <div class="msg user" data-msg-id="${escapeHtml(m.id || '')}" data-msg-role="user" data-bookmarked="${m.bookmarked ? '1' : '0'}">
-        <div class="user-bubble chat-msg-body">${escapeHtml(cleanContent)}</div>
+        ${attHtml}
+        ${bubbleHtml}
       </div>
     `;
   } else if (m.role === 'tool') {
@@ -16300,9 +16790,12 @@ async function rewindToUserMessageUi(msgEl) {
 
 async function sendChat() {
   const input = document.getElementById('chat-input');
-  const promptText = input.value.trim();
-  if (!promptText) return;
   const targetTid = currentThreadId;
+  const stagedList = typeof getThreadStagedAttachments === 'function' ? getThreadStagedAttachments(targetTid) : [];
+  const promptText = input.value.trim();
+  if (!promptText && stagedList.length === 0) return;
+  const sentAttachments = stagedList.slice();
+  if (typeof clearThreadStagedAttachments === 'function') clearThreadStagedAttachments(targetTid, false);
   input.value = '';
   autoResizeChatInput(input);
   const rt = ensureThreadRuntime(targetTid);
@@ -16367,10 +16860,11 @@ async function sendChat() {
       const empty = msgBox.querySelector('.chat-empty-state');
       if (empty) empty.remove();
       const cleanPrompt = stripLeadingEmoji(promptText);
+      const attHtml = typeof renderUserAttachmentChipsHtml === 'function' ? renderUserAttachmentChipsHtml(sentAttachments) : '';
       const userDiv = document.createElement('div');
       userDiv.className = 'msg user';
       userDiv.setAttribute('data-msg-role', 'user');
-      userDiv.innerHTML = `<div class="user-bubble chat-msg-body">${escapeHtml(cleanPrompt)}</div>`;
+      userDiv.innerHTML = `${attHtml}${(cleanPrompt || !attHtml) ? `<div class="user-bubble chat-msg-body">${escapeHtml(cleanPrompt)}</div>` : ''}`;
       appendBeforeQueuedPrompts(msgBox, userDiv);
       applyMsgLiveEnter(userDiv);
       if (typeof syncLiveDomTurnIntoRail === 'function') syncLiveDomTurnIntoRail();
@@ -16387,11 +16881,24 @@ async function sendChat() {
   }
 
   const chatCrewRevBefore = typeof getCrewSseRev === 'function' ? getCrewSseRev(targetTid) : 0;
-  api('/api/chat', 'POST', {
+  const chatPayload = {
     thread_id: targetTid,
     prompt: promptText,
     mode: effectiveMode
-  }).then(res => {
+  };
+  if (sentAttachments.length > 0) {
+    chatPayload.attachments = sentAttachments.map(att => ({
+      id: att.id,
+      kind: att.kind,
+      name: att.name,
+      path: att.path,
+      mime_type: att.mime_type,
+      size: att.size,
+      badge: att.badge,
+      thumb_data_url: att.thumb_data_url || ''
+    }));
+  }
+  api('/api/chat', 'POST', chatPayload).then(res => {
     // When queued behind an active turn, bind the server-assigned queue_id to our optimistic queued item
     if (res && res.ok && res.queued) {
       if (localQueueItem) {
@@ -20686,8 +21193,18 @@ function onRailDragEnd() {
   document.querySelectorAll('.wb-drop-zone').forEach(z => z.classList.remove('drag-over'));
 }
 
+function isOsFilesDragEvent(ev) {
+  try {
+    const types = ev && ev.dataTransfer && ev.dataTransfer.types;
+    if (!types) return false;
+    return Array.from(types).includes('Files');
+  } catch (_) {
+    return false;
+  }
+}
+
 function onStageDragOver(ev) {
-  if (!draggedRailPanel) return;
+  if (!draggedRailPanel || isOsFilesDragEvent(ev)) return;
   ev.preventDefault();
   const overlay = document.getElementById('wb-drop-overlay');
   if (overlay && !overlay.classList.contains('visible')) {
@@ -20704,6 +21221,10 @@ function onStageDragLeave(ev) {
 }
 
 function onStageDrop(ev) {
+  if (isOsFilesDragEvent(ev) || !draggedRailPanel) {
+    onRailDragEnd();
+    return;
+  }
   ev.preventDefault();
   onRailDragEnd();
 }
@@ -20733,13 +21254,17 @@ function onDropZoneDrop(ev, splitMode, slotIndex) {
 }
 
 function onSlotDragOver(ev, slotIndex) {
-  if (!draggedRailPanel) return;
+  if (!draggedRailPanel || isOsFilesDragEvent(ev)) return;
   ev.preventDefault();
 }
 
 function onSlotDragLeave(slotIndex) {}
 
 function onSlotDirectDrop(ev, slotIndex) {
+  if (isOsFilesDragEvent(ev) || !draggedRailPanel) {
+    onRailDragEnd();
+    return;
+  }
   ev.preventDefault();
   const panelName = draggedRailPanel || (ev.dataTransfer && ev.dataTransfer.getData('text/plain'));
   onRailDragEnd();
@@ -30736,6 +31261,450 @@ if (!window.__assistantMsgTimeTickerBound) {
   window.__assistantMsgTimeTickerBound = true;
   setInterval(refreshAllAssistantMsgTimes, 30000);
 }
+
+/* ── Composer Attachments, Native Picker, WebView2 Drop & Context Menu ───── */
+const composerAttachmentsByThread = new Map();
+const pendingNativeDropRequests = new Map();
+
+function getThreadStagedAttachments(tid = currentThreadId) {
+  const key = tid || 'thread-main';
+  if (!composerAttachmentsByThread.has(key)) composerAttachmentsByThread.set(key, []);
+  return composerAttachmentsByThread.get(key);
+}
+
+function clearThreadStagedAttachments(tid = currentThreadId, deleteServer = true) {
+  const key = tid || 'thread-main';
+  const list = composerAttachmentsByThread.get(key) || [];
+  if (deleteServer) {
+    list.forEach(item => {
+      if (item && item.id) {
+        fetch('/api/chat/attachments/' + encodeURIComponent(item.id), { method: 'DELETE' }).catch(() => {});
+      }
+    });
+  }
+  composerAttachmentsByThread.set(key, []);
+  if (key === currentThreadId) renderComposerAttachmentsStrip(key);
+}
+
+function addThreadStagedAttachments(items, tid = currentThreadId) {
+  const key = tid || 'thread-main';
+  const arr = getThreadStagedAttachments(key);
+  const incoming = Array.isArray(items) ? items : [];
+  incoming.forEach(item => {
+    if (!item || typeof item !== 'object') return;
+    const normPath = String(item.path || '').trim().toLowerCase();
+    const dup = arr.some(ex =>
+      (item.id && ex.id === item.id) ||
+      (normPath && String(ex.path || '').trim().toLowerCase() === normPath && ex.kind === item.kind)
+    );
+    if (!dup) arr.push(item);
+  });
+  if (key === currentThreadId) renderComposerAttachmentsStrip(key);
+}
+
+function removeComposerAttachment(id) {
+  const key = currentThreadId || 'thread-main';
+  const arr = getThreadStagedAttachments(key);
+  const next = arr.filter(x => x && x.id !== id);
+  composerAttachmentsByThread.set(key, next);
+  renderComposerAttachmentsStrip(key);
+  if (id) {
+    fetch('/api/chat/attachments/' + encodeURIComponent(id), { method: 'DELETE' }).catch(() => {});
+  }
+}
+
+function attachmentIconIdForItem(item) {
+  const k = String((item && item.kind) || '').toLowerCase();
+  if (k === 'folder') return 'solar-folder';
+  if (k === 'spreadsheet') return 'solar-table';
+  if (k === 'document') return 'solar-document';
+  if (k === 'code') return 'solar-code';
+  if (k === 'image') return 'solar-image';
+  return 'solar-paperclip';
+}
+
+function shortAttachmentSubLabel(item) {
+  if (!item) return '';
+  if (item.kind === 'folder') {
+    const p = String(item.path || '').trim();
+    if (p.length <= 28) return p || translateUiString('폴더', currentUiLang);
+    return '...' + p.slice(-25);
+  }
+  if (item.badge) return String(item.badge);
+  if (Number(item.size) > 0) {
+    const kb = Math.max(1, Math.round(Number(item.size) / 1024));
+    return kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${kb} KB`;
+  }
+  return String(item.kind || 'file').toUpperCase();
+}
+
+function renderComposerAttachmentsStrip(tid = currentThreadId) {
+  if (tid !== currentThreadId) return;
+  const strip = document.getElementById('composer-attachments-strip');
+  const listEl = document.getElementById('composer-attachments-list');
+  if (!strip || !listEl) return;
+  const items = getThreadStagedAttachments(tid);
+  if (items.length === 0) {
+    strip.hidden = true;
+    listEl.replaceChildren();
+    return;
+  }
+  strip.hidden = false;
+  listEl.innerHTML = items.map(item => {
+    const id = escapeHtml(item.id || '');
+    const name = escapeHtml(item.name || chatProjectName(item.path) || 'file');
+    const titleAttr = escapeHtml(item.path || item.name || '');
+    const removeLbl = escapeHtml(translateUiString('제거', currentUiLang));
+    if (item.kind === 'image' && item.thumb_data_url) {
+      return `
+        <div class="composer-att-thumb" title="${titleAttr}" data-att-id="${id}">
+          <img src="${escapeHtml(item.thumb_data_url)}" alt="${name}" />
+          <button type="button" class="composer-att-remove" onclick="removeComposerAttachment('${escapeJsAttr(item.id || '')}')" aria-label="${removeLbl}">×</button>
+        </div>
+      `;
+    }
+    const iconId = attachmentIconIdForItem(item);
+    const sub = escapeHtml(shortAttachmentSubLabel(item));
+    return `
+      <div class="composer-att-chip" title="${titleAttr}" data-att-id="${id}" data-att-kind="${escapeHtml(item.kind || 'file')}">
+        <svg class="solar-icon composer-att-icon" aria-hidden="true"><use href="#${iconId}"/></svg>
+        <div class="composer-att-info">
+          <span class="composer-att-name">${name}</span>
+          ${sub ? `<span class="composer-att-meta">${sub}</span>` : ''}
+        </div>
+        <button type="button" class="composer-att-remove" onclick="removeComposerAttachment('${escapeJsAttr(item.id || '')}')" aria-label="${removeLbl}">×</button>
+      </div>
+    `;
+  }).join('');
+}
+
+function extractUserBubbleAttachments(msgOrEvt) {
+  if (!msgOrEvt || typeof msgOrEvt !== 'object') return [];
+  if (Array.isArray(msgOrEvt.attachments)) return msgOrEvt.attachments;
+  const meta = typeof parseMessageMetaObject === 'function' ? parseMessageMetaObject(msgOrEvt) : null;
+  if (meta && Array.isArray(meta.attachments)) return meta.attachments;
+  return [];
+}
+
+function renderUserAttachmentChipsHtml(attachments) {
+  const list = Array.isArray(attachments) ? attachments : [];
+  if (list.length === 0) return '';
+  const chips = list.map(item => {
+    if (!item || typeof item !== 'object') return '';
+    const name = escapeHtml(item.name || chatProjectName(item.path) || 'file');
+    const title = escapeHtml(item.path || item.name || '');
+    if (item.kind === 'image' && item.thumb_data_url) {
+      return `<img class="user-msg-att-thumb" src="${escapeHtml(item.thumb_data_url)}" alt="${name}" title="${title}" />`;
+    }
+    const iconId = attachmentIconIdForItem(item);
+    const sub = escapeHtml(item.badge || (item.kind === 'folder' ? translateUiString('폴더', currentUiLang) : ''));
+    return `
+      <div class="user-msg-att-chip" title="${title}">
+        <svg class="solar-icon sm" style="color:var(--text-secondary);" aria-hidden="true"><use href="#${iconId}"/></svg>
+        <span class="user-msg-att-chip-name">${name}</span>
+        ${sub ? `<span class="user-msg-att-chip-meta">${sub}</span>` : ''}
+      </div>
+    `;
+  }).filter(Boolean).join('');
+  return chips ? `<div class="user-msg-attachments">${chips}</div>` : '';
+}
+
+function getActiveThreadWorkspaceDir() {
+  const t = (cachedThreadsList || []).find(x => x && x.id === currentThreadId);
+  return (t && t.workspace_path) ? String(t.workspace_path) : '';
+}
+
+function positionComposerContextPopover() {
+  const pop = document.getElementById('composer-context-popover');
+  const btn = document.getElementById('composer-add-context-btn');
+  if (!pop || !btn) return;
+  refreshComposerAttachmentUiLocale();
+  pop.classList.add('open');
+  pop.setAttribute('aria-hidden', 'false');
+  btn.setAttribute('aria-expanded', 'true');
+  const br = btn.getBoundingClientRect();
+  const pr = pop.getBoundingClientRect();
+  const margin = 8;
+  const left = Math.max(margin, Math.min(window.innerWidth - pr.width - margin, br.left));
+  let top = br.top - pr.height - 8;
+  if (top < margin) top = Math.min(window.innerHeight - pr.height - margin, br.bottom + 8);
+  pop.style.left = Math.round(left) + 'px';
+  pop.style.top = Math.round(top) + 'px';
+}
+
+function closeComposerContextPopover() {
+  const pop = document.getElementById('composer-context-popover');
+  const btn = document.getElementById('composer-add-context-btn');
+  if (pop) {
+    pop.classList.remove('open');
+    pop.setAttribute('aria-hidden', 'true');
+  }
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+}
+
+function toggleComposerContextPopover(ev) {
+  if (ev) {
+    ev.preventDefault();
+    ev.stopPropagation();
+  }
+  const pop = document.getElementById('composer-context-popover');
+  if (!pop) return;
+  if (pop.classList.contains('open')) closeComposerContextPopover();
+  else positionComposerContextPopover();
+}
+
+function refreshComposerAttachmentUiLocale() {
+  const addBtn = document.getElementById('composer-add-context-btn');
+  if (addBtn) addBtn.title = translateUiString('파일 또는 폴더 추가', currentUiLang);
+  const head = document.getElementById('composer-context-pop-head');
+  if (head) head.textContent = translateUiString('컨텍스트 추가', currentUiLang);
+  const fLbl = document.getElementById('composer-ctx-files-label');
+  if (fLbl) fLbl.textContent = translateUiString('파일', currentUiLang);
+  const dLbl = document.getElementById('composer-ctx-folder-label');
+  if (dLbl) dLbl.textContent = translateUiString('폴더', currentUiLang);
+  renderComposerAttachmentsStrip(currentThreadId);
+}
+
+async function onComposerContextMenuSelect(mode) {
+  closeComposerContextPopover();
+  if (mode === 'folder') await pickComposerNativeFolder();
+  else await pickComposerNativeFiles();
+}
+
+async function pickComposerNativeFiles() {
+  const tid = currentThreadId;
+  const res = await api('/api/dialog/pick', 'POST', {
+    mode: 'files',
+    multiple: true,
+    initial_dir: getActiveThreadWorkspaceDir()
+  });
+  if (!res || res.ok === false) {
+    if (typeof showCustomToast === 'function') {
+      showCustomToast((res && res.error) || chatProjectText('파일 선택 창을 열지 못했습니다.', 'Unable to open file picker.'), 'FILE');
+    }
+    return;
+  }
+  if (res.cancelled) return;
+  if (Array.isArray(res.items) && res.items.length > 0) {
+    addThreadStagedAttachments(res.items, tid);
+  } else if (Array.isArray(res.paths) && res.paths.length > 0) {
+    const staged = await api('/api/chat/attachments/stage', 'POST', { paths: res.paths });
+    if (staged && staged.ok && Array.isArray(staged.items)) {
+      addThreadStagedAttachments(staged.items, tid);
+    }
+  }
+}
+
+async function pickComposerNativeFolder() {
+  const tid = currentThreadId;
+  const res = await api('/api/dialog/pick', 'POST', {
+    mode: 'folder',
+    multiple: false,
+    initial_dir: getActiveThreadWorkspaceDir()
+  });
+  if (!res || res.ok === false) {
+    if (typeof showCustomToast === 'function') {
+      showCustomToast((res && res.error) || chatProjectText('폴더 선택 창을 열지 못했습니다.', 'Unable to open folder picker.'), 'FOLDER');
+    }
+    return;
+  }
+  if (res.cancelled) return;
+  if (Array.isArray(res.items) && res.items.length > 0) {
+    addThreadStagedAttachments(res.items, tid);
+  } else if (Array.isArray(res.paths) && res.paths.length > 0) {
+    const staged = await api('/api/chat/attachments/stage', 'POST', { paths: res.paths });
+    if (staged && staged.ok && Array.isArray(staged.items)) {
+      addThreadStagedAttachments(staged.items, tid);
+    }
+  }
+}
+
+function readBrowserFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const s = String(reader.result || '');
+      const comma = s.indexOf(',');
+      resolve(comma >= 0 ? s.slice(comma + 1) : s);
+    };
+    reader.onerror = () => reject(reader.error || new Error('FileReader failed'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function resolvePendingNativeDropEvent(evt) {
+  const reqId = evt && evt.req_id;
+  if (!reqId || !pendingNativeDropRequests.has(reqId)) return;
+  const entry = pendingNativeDropRequests.get(reqId);
+  pendingNativeDropRequests.delete(reqId);
+  clearTimeout(entry.timer);
+  entry.resolve(evt);
+}
+
+async function tryResolveWebView2NativeDrop(fileList, target) {
+  const arr = Array.from(fileList || []).filter(Boolean);
+  if (
+    !window.chrome ||
+    !window.chrome.webview ||
+    typeof window.chrome.webview.postMessageWithAdditionalObjects !== 'function' ||
+    arr.length === 0
+  ) {
+    return null;
+  }
+  const reqId = 'ndrop_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+  return await new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      pendingNativeDropRequests.delete(reqId);
+      resolve(null);
+    }, 1500);
+    pendingNativeDropRequests.set(reqId, { resolve, timer });
+    try {
+      window.chrome.webview.postMessageWithAdditionalObjects(
+        { type: 'alluse_native_drop', target, req_id: reqId },
+        arr
+      );
+    } catch (_) {
+      clearTimeout(timer);
+      pendingNativeDropRequests.delete(reqId);
+      resolve(null);
+    }
+  });
+}
+
+async function stageDroppedBrowserFiles(fileList, tid = currentThreadId) {
+  const files = Array.from(fileList || []).filter(Boolean);
+  if (files.length === 0) return;
+  const encoded = [];
+  for (const f of files) {
+    try {
+      const b64 = await readBrowserFileAsBase64(f);
+      encoded.push({
+        name: f.name || 'file',
+        mime_type: f.type || 'application/octet-stream',
+        data_base64: b64
+      });
+    } catch (_) {}
+  }
+  if (encoded.length === 0) return;
+  const res = await api('/api/chat/attachments/stage', 'POST', { files: encoded });
+  if (res && res.ok && Array.isArray(res.items) && res.items.length > 0) {
+    addThreadStagedAttachments(res.items, tid);
+  } else if (typeof showCustomToast === 'function') {
+    showCustomToast((res && res.error) || chatProjectText('첨부 파일 처리에 실패했습니다.', 'Failed to attach files.'), 'FILE');
+  }
+}
+
+async function handleChatFilesDropOrPaste(fileList, targetTid = currentThreadId) {
+  const files = Array.from(fileList || []).filter(Boolean);
+  if (files.length === 0) return;
+  const nativeEvt = await tryResolveWebView2NativeDrop(files, 'chat');
+  if (nativeEvt && nativeEvt.ok !== false) {
+    if (Array.isArray(nativeEvt.items) && nativeEvt.items.length > 0) {
+      addThreadStagedAttachments(nativeEvt.items, targetTid);
+      return;
+    }
+    if (Array.isArray(nativeEvt.paths) && nativeEvt.paths.length > 0) {
+      const res = await api('/api/chat/attachments/stage', 'POST', { paths: nativeEvt.paths });
+      if (res && res.ok && Array.isArray(res.items)) {
+        addThreadStagedAttachments(res.items, targetTid);
+        return;
+      }
+    }
+  }
+  await stageDroppedBrowserFiles(files, targetTid);
+}
+
+function bindComposerAttachmentsAndDnD() {
+  if (window.__composerAttachmentsBound) return;
+  window.__composerAttachmentsBound = true;
+
+  document.addEventListener('click', (ev) => {
+    const pop = document.getElementById('composer-context-popover');
+    const btn = document.getElementById('composer-add-context-btn');
+    if (!pop || !pop.classList.contains('open')) return;
+    if (pop.contains(ev.target) || (btn && btn.contains(ev.target))) return;
+    closeComposerContextPopover();
+  });
+
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape') closeComposerContextPopover();
+  });
+
+  const panelChat = document.getElementById('panel-chat');
+  if (panelChat) {
+    let chatDragDepth = 0;
+    panelChat.addEventListener('dragenter', (ev) => {
+      if (!isOsFilesDragEvent(ev)) return;
+      ev.preventDefault();
+      chatDragDepth++;
+      panelChat.classList.add('is-drop-active');
+    });
+    panelChat.addEventListener('dragover', (ev) => {
+      if (!isOsFilesDragEvent(ev)) return;
+      ev.preventDefault();
+      if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'copy';
+      panelChat.classList.add('is-drop-active');
+    });
+    panelChat.addEventListener('dragleave', (ev) => {
+      if (!isOsFilesDragEvent(ev)) return;
+      chatDragDepth = Math.max(0, chatDragDepth - 1);
+      if (chatDragDepth === 0 || (ev.relatedTarget && !panelChat.contains(ev.relatedTarget))) {
+        chatDragDepth = 0;
+        panelChat.classList.remove('is-drop-active');
+      }
+    });
+    panelChat.addEventListener('drop', (ev) => {
+      if (!isOsFilesDragEvent(ev)) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      chatDragDepth = 0;
+      panelChat.classList.remove('is-drop-active');
+      const files = Array.from((ev.dataTransfer && ev.dataTransfer.files) || []).filter(Boolean);
+      if (files.length > 0) void handleChatFilesDropOrPaste(files, currentThreadId);
+    });
+  }
+
+  const chatInput = document.getElementById('chat-input');
+  if (chatInput) {
+    chatInput.addEventListener('paste', (ev) => {
+      const dt = ev.clipboardData;
+      const files = Array.from((dt && dt.files) || []).filter(Boolean);
+      if (files.length === 0) return;
+      ev.preventDefault();
+      void handleChatFilesDropOrPaste(files, currentThreadId);
+    });
+  }
+
+  const projCard = document.getElementById('chat-project-card');
+  if (projCard) {
+    projCard.addEventListener('dragover', (ev) => {
+      if (!isOsFilesDragEvent(ev)) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      projCard.classList.add('is-drop-active');
+    });
+    projCard.addEventListener('dragleave', (ev) => {
+      if (ev.relatedTarget && projCard.contains(ev.relatedTarget)) return;
+      projCard.classList.remove('is-drop-active');
+    });
+    projCard.addEventListener('drop', async (ev) => {
+      if (!isOsFilesDragEvent(ev)) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      projCard.classList.remove('is-drop-active');
+      const files = Array.from((ev.dataTransfer && ev.dataTransfer.files) || []).filter(Boolean);
+      if (files.length === 0) return;
+      const nativeEvt = await tryResolveWebView2NativeDrop(files, 'project_modal');
+      if (nativeEvt && Array.isArray(nativeEvt.paths) && nativeEvt.paths.length > 0) {
+        addProjectFoldersToModal(nativeEvt.paths);
+      } else {
+        const errEl = document.getElementById('chat-project-error');
+        if (errEl) errEl.textContent = chatProjectText('브라우저에서는 "+ 폴더 추가" 버튼으로 폴더를 선택해 주세요.', 'Use the "+ Add Folder" button to select a folder.');
+      }
+    });
+  }
+}
+bindComposerAttachmentsAndDnD();
 </script>
 </body>
 </html>
