@@ -1016,6 +1016,13 @@ pub async fn fetch_media_models_catalog_for(
         }
     }
 
+    let oauth_models = crate::oauth::fetch_connected_catalog_models_with_remote().await;
+    for om in oauth_models {
+        if !chat_models.iter().any(|m| m.id == om.id) {
+            chat_models.push(om);
+        }
+    }
+
     let def_img = configured_media_default(cfg.default_image_model.trim(), &img_models, endpoint_ok);
     let def_vid = configured_media_default(cfg.default_video_model.trim(), &vid_models, endpoint_ok);
 

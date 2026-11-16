@@ -1878,6 +1878,75 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
         }
 
         // ─────────────────────────────────────────────────────────────────────
+        // External OAuth (OpenAI ChatGPT/Codex & Anthropic Claude)
+        // ─────────────────────────────────────────────────────────────────────
+        ("GET", "/api/oauth/status") => Ok(crate::oauth::build_status_response()),
+
+        ("POST", p) if p.starts_with("/api/oauth/") && p.ends_with("/start") => {
+            let raw_prov = p
+                .strip_prefix("/api/oauth/")
+                .and_then(|s| s.strip_suffix("/start"))
+                .unwrap_or("")
+                .trim_matches('/');
+            let prov = crate::oauth::OAuthProvider::parse(raw_prov)?;
+            let open_browser = json_opt_bool(body.get("open_browser")).unwrap_or(true);
+            let redirect_mode = body
+                .get("redirect_mode")
+                .and_then(|v| v.as_str())
+                .unwrap_or("loopback");
+            crate::oauth::start_oauth_flow(prov, open_browser, redirect_mode).await
+        }
+
+        ("POST", p) if p.starts_with("/api/oauth/") && p.ends_with("/exchange") => {
+            let raw_prov = p
+                .strip_prefix("/api/oauth/")
+                .and_then(|s| s.strip_suffix("/exchange"))
+                .unwrap_or("")
+                .trim_matches('/');
+            let prov = crate::oauth::OAuthProvider::parse(raw_prov)?;
+            let code = body
+                .get("code")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let session_id = body
+                .get("sessionId")
+                .or_else(|| body.get("session_id"))
+                .and_then(|v| v.as_str());
+            crate::oauth::exchange_oauth_code(prov, code, session_id).await
+        }
+
+        ("POST", p) if p.starts_with("/api/oauth/") && p.ends_with("/refresh") => {
+            let raw_prov = p
+                .strip_prefix("/api/oauth/")
+                .and_then(|s| s.strip_suffix("/refresh"))
+                .unwrap_or("")
+                .trim_matches('/');
+            let prov = crate::oauth::OAuthProvider::parse(raw_prov)?;
+            crate::oauth::refresh_provider_token(prov).await?;
+            Ok(json!({
+                "ok": true,
+                "provider": prov.as_str(),
+                "status": crate::oauth::build_status_response(),
+            }))
+        }
+
+        ("POST", p) if p.starts_with("/api/oauth/") && p.ends_with("/disconnect") => {
+            let raw_prov = p
+                .strip_prefix("/api/oauth/")
+                .and_then(|s| s.strip_suffix("/disconnect"))
+                .unwrap_or("")
+                .trim_matches('/');
+            let prov = crate::oauth::OAuthProvider::parse(raw_prov)?;
+            crate::oauth::disconnect_provider(prov)
+        }
+
+        ("DELETE", p) if p.starts_with("/api/oauth/") => {
+            let raw_prov = p.strip_prefix("/api/oauth/").unwrap_or("").trim_matches('/');
+            let prov = crate::oauth::OAuthProvider::parse(raw_prov)?;
+            crate::oauth::disconnect_provider(prov)
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
         // Chat & Autonomous Agent Loop
         // ─────────────────────────────────────────────────────────────────────
         ("POST", "/api/chat") => {
@@ -6120,5 +6189,47 @@ mod http_security_tests {
         assert_eq!(removed_post["removed"], true);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn api_oauth_status_start_and_delete_routes() {
+        let tmp_vault = std::env::temp_dir().join(format!(
+            "alluse_srv_oauth_{}.vault",
+            uuid::Uuid::new_v4().simple()
+        ));
+        unsafe {
+            std::env::set_var("ALLUSE_OAUTH_VAULT_PATH", &tmp_vault);
+        }
+        let st = route_api("GET", "/api/oauth/status", "", json!({}))
+            .await
+            .expect("GET /api/oauth/status");
+        assert_eq!(st["ok"], true);
+        assert!(st["providers"]["openai"].is_object());
+        assert!(st["providers"]["claude"].is_object());
+
+        let started = route_api(
+            "POST",
+            "/api/oauth/claude/start",
+            "",
+            json!({ "open_browser": false, "redirect_mode": "manual" }),
+        )
+        .await
+        .expect("POST /api/oauth/claude/start");
+        assert_eq!(started["ok"], true);
+        assert_eq!(started["provider"], "claude");
+        assert!(started["authUrl"]
+            .as_str()
+            .unwrap_or("")
+            .contains("code_challenge_method=S256"));
+
+        let disc = route_api("DELETE", "/api/oauth/claude", "", json!({}))
+            .await
+            .expect("DELETE /api/oauth/claude");
+        assert_eq!(disc["ok"], true);
+        assert_eq!(disc["disconnected"], true);
+        unsafe {
+            std::env::remove_var("ALLUSE_OAUTH_VAULT_PATH");
+        }
+        let _ = std::fs::remove_file(&tmp_vault);
     }
 }

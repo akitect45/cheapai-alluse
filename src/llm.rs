@@ -623,6 +623,7 @@ pub(crate) fn sanitize_tool_arguments(raw: &str) -> String {
 pub enum ResolvedApiStyle {
     Responses,
     ChatCompletions,
+    AnthropicMessages,
 }
 
 pub fn resolve_api_style(
@@ -663,10 +664,19 @@ pub fn resolve_api_style(
         }
         "chat" | "chat_completions" | "chat-completions" | "chatcompletions" | "completions"
         | "openrouter" => Ok(ResolvedApiStyle::ChatCompletions),
+        "anthropic" | "anthropic-messages" | "anthropic_messages" | "claude"
+        | "claude-oauth" | "claude_oauth" => Ok(ResolvedApiStyle::AnthropicMessages),
         "" | "auto" | "default" | "standard" | "cheapai" | "openai" => {
             if matches!(style_low.as_str(), "" | "auto") {
                 let prov_low = provider_name.trim().to_ascii_lowercase();
                 let base_low = base_url.trim().to_ascii_lowercase();
+                if prov_low.contains("anthropic")
+                    || prov_low.contains("claude_oauth")
+                    || prov_low.contains("claude-oauth")
+                    || base_low.contains("api.anthropic.com")
+                {
+                    return Ok(ResolvedApiStyle::AnthropicMessages);
+                }
                 let is_chat_provider = [
                     "openrouter",
                     "groq",
@@ -683,12 +693,8 @@ pub fn resolve_api_style(
             }
             Ok(ResolvedApiStyle::Responses)
         }
-        "anthropic" => bail!(
-            "API style '{}' is not supported by this OpenAI/CheapAI client; use 'auto', 'responses', or 'chat'.",
-            s
-        ),
         other => bail!(
-            "Unknown API style '{}'; use 'auto', 'responses', or 'chat'.",
+            "Unknown API style '{}'; use 'auto', 'responses', 'chat', or 'anthropic'.",
             other
         ),
     }
@@ -717,18 +723,21 @@ where
         .map_err(|error| anyhow!(public_llm_error(&error.to_string(), &cfg.api_key)))
 }
 
-fn public_llm_error(error: &str, api_key: &str) -> String {
-    let key = api_key.trim();
-    let mut public = if key.is_empty() {
-        error.to_string()
-    } else {
-        error.replace(key, "[REDACTED]")
-    };
-    // Error bodies can contain JSON-escaped credentials; remove those too.
+fn redact_secret_string(mut public: String, secret: &str) -> String {
+    let key = secret.trim();
     if !key.is_empty() {
+        public = public.replace(key, "[REDACTED]");
         if let Ok(encoded) = serde_json::to_string(key) {
             public = public.replace(&encoded[1..encoded.len() - 1], "[REDACTED]");
         }
+    }
+    public
+}
+
+fn public_llm_error(error: &str, api_key: &str) -> String {
+    let mut public = redact_secret_string(error.to_string(), api_key);
+    for oauth_secret in crate::oauth::active_secret_tokens() {
+        public = redact_secret_string(public, &oauth_secret);
     }
     const MAX_ERROR_CHARS: usize = 8192;
     if let Some((boundary, _)) = public.char_indices().nth(MAX_ERROR_CHARS) {
@@ -751,6 +760,8 @@ pub fn is_retryable_llm_error(err_msg: &str) -> bool {
     let low = err_msg.to_ascii_lowercase();
     if low.contains("interrupted by user")
         || low.contains("api key is empty")
+        || low.contains("oauth account is not connected")
+        || low.contains("please reconnect")
         || low.contains("api style")
         || low.contains("exceeded 4mb limit")
     {
@@ -1310,6 +1321,217 @@ pub(crate) fn build_responses_request_body(
     body
 }
 
+fn split_data_image_url_parts(raw: &str) -> (String, String) {
+    let data_url = format_data_image_url(raw);
+    if let Some((meta, data)) = data_url.split_once(";base64,") {
+        let mime = meta.strip_prefix("data:").unwrap_or("image/png");
+        (mime.to_string(), data.trim().to_string())
+    } else {
+        ("image/png".to_string(), raw.trim().to_string())
+    }
+}
+
+pub(crate) fn build_anthropic_messages_request_body(
+    model_id: &str,
+    system_prompt: &str,
+    history: &[LlmTurnMessage],
+    tools: &[Value],
+    _effort: &str,
+    is_claude_oauth: bool,
+) -> Value {
+    let mut system_blocks: Vec<Value> = Vec::new();
+    if is_claude_oauth {
+        system_blocks.push(json!({
+            "type": "text",
+            "text": "You are Claude Code, Anthropic's official CLI for Claude."
+        }));
+    }
+    if !system_prompt.trim().is_empty() {
+        system_blocks.push(json!({
+            "type": "text",
+            "text": system_prompt
+        }));
+    }
+
+    let keep_image_from = compute_keep_image_from(history);
+    let mut messages: Vec<Value> = Vec::new();
+
+    let push_blocks_for_role = |messages: &mut Vec<Value>, role: &str, mut blocks: Vec<Value>| {
+        if blocks.is_empty() {
+            return;
+        }
+        if let Some(last) = messages.last_mut() {
+            if last.get("role").and_then(|v| v.as_str()) == Some(role) {
+                if let Some(arr) = last.get_mut("content").and_then(|v| v.as_array_mut()) {
+                    arr.append(&mut blocks);
+                    return;
+                }
+            }
+        }
+        messages.push(json!({
+            "role": role,
+            "content": blocks,
+        }));
+    };
+
+    let mut pending_tool_blocks: Vec<Value> = Vec::new();
+    let flush_pending_tools = |messages: &mut Vec<Value>, pending: &mut Vec<Value>| {
+        if !pending.is_empty() {
+            let drained = std::mem::take(pending);
+            push_blocks_for_role(messages, "user", drained);
+        }
+    };
+
+    for (idx, m) in history.iter().enumerate() {
+        let include_img =
+            idx >= keep_image_from && m.image_b64.as_ref().map(|s| !s.is_empty()).unwrap_or(false);
+        let role_norm = m.role.trim().to_ascii_lowercase();
+        let is_tool = matches!(role_norm.as_str(), "tool" | "function");
+        if !is_tool {
+            flush_pending_tools(&mut messages, &mut pending_tool_blocks);
+        }
+
+        match role_norm.as_str() {
+            "system" | "developer" => {
+                if !m.content.trim().is_empty() {
+                    system_blocks.push(json!({
+                        "type": "text",
+                        "text": m.content
+                    }));
+                }
+            }
+            "assistant" => {
+                let mut blocks: Vec<Value> = Vec::new();
+                if !m.content.trim().is_empty() {
+                    blocks.push(json!({
+                        "type": "text",
+                        "text": m.content
+                    }));
+                }
+                for tc in &m.tool_calls {
+                    let parsed_input = serde_json::from_str::<Value>(tc.arguments.trim())
+                        .ok()
+                        .filter(|v| v.is_object())
+                        .unwrap_or_else(|| json!({}));
+                    blocks.push(json!({
+                        "type": "tool_use",
+                        "id": tc.id,
+                        "name": tc.name,
+                        "input": parsed_input,
+                    }));
+                }
+                push_blocks_for_role(&mut messages, "assistant", blocks);
+            }
+            "tool" | "function" => {
+                let call_id = m.tool_call_id.as_deref().unwrap_or("call_0");
+                let tool_output = if m.content.trim().is_empty() {
+                    "{\"status\":\"ok\"}".to_string()
+                } else {
+                    m.content.clone()
+                };
+                pending_tool_blocks.push(json!({
+                    "type": "tool_result",
+                    "tool_use_id": call_id,
+                    "content": tool_output,
+                }));
+                if include_img {
+                    if let Some(b64) = &m.image_b64 {
+                        for url in decode_turn_image_urls(b64) {
+                            let (mime, data) = split_data_image_url_parts(&url);
+                            pending_tool_blocks.push(json!({
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": mime,
+                                    "data": data,
+                                }
+                            }));
+                        }
+                    }
+                }
+            }
+            _ => {
+                let mut blocks: Vec<Value> = Vec::new();
+                let text_body = if m.content.trim().is_empty() && include_img {
+                    "Please inspect the attached image(s)."
+                } else {
+                    m.content.as_str()
+                };
+                if !text_body.is_empty() {
+                    blocks.push(json!({
+                        "type": "text",
+                        "text": text_body
+                    }));
+                }
+                if include_img {
+                    if let Some(b64) = &m.image_b64 {
+                        for url in decode_turn_image_urls(b64) {
+                            let (mime, data) = split_data_image_url_parts(&url);
+                            blocks.push(json!({
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": mime,
+                                    "data": data,
+                                }
+                            }));
+                        }
+                    }
+                }
+                push_blocks_for_role(&mut messages, "user", blocks);
+            }
+        }
+    }
+    flush_pending_tools(&mut messages, &mut pending_tool_blocks);
+
+    if messages.is_empty() {
+        messages.push(json!({
+            "role": "user",
+            "content": [{ "type": "text", "text": "Hello" }]
+        }));
+    }
+
+    let mut body = json!({
+        "model": model_id,
+        "max_tokens": 16384,
+        "messages": messages,
+        "stream": true,
+    });
+    if !system_blocks.is_empty() {
+        body["system"] = Value::Array(system_blocks);
+    }
+    if !tools.is_empty() {
+        let anth_tools: Vec<Value> = tools
+            .iter()
+            .filter_map(|t| {
+                let func = t.get("function").unwrap_or(t);
+                let name = func.get("name").and_then(|v| v.as_str())?.trim();
+                if name.is_empty() {
+                    return None;
+                }
+                let desc = func
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let schema = func
+                    .get("parameters")
+                    .or_else(|| func.get("input_schema"))
+                    .cloned()
+                    .unwrap_or_else(|| json!({ "type": "object", "properties": {} }));
+                Some(json!({
+                    "name": name,
+                    "description": desc,
+                    "input_schema": schema,
+                }))
+            })
+            .collect();
+        if !anth_tools.is_empty() {
+            body["tools"] = Value::Array(anth_tools);
+        }
+    }
+    body
+}
+
 fn apply_reasoning_fallback(
     body: &mut Value,
     style: ResolvedApiStyle,
@@ -1317,6 +1539,7 @@ fn apply_reasoning_fallback(
     stage: u8,
 ) -> bool {
     match style {
+        ResolvedApiStyle::AnthropicMessages => false,
         ResolvedApiStyle::ChatCompletions => {
             if body.get("reasoning_effort").is_none() {
                 return false;
@@ -1369,25 +1592,32 @@ fn apply_reasoning_fallback(
     }
 }
 
-async fn send_llm_post(
+async fn send_llm_post_with_headers(
     client: &Client,
     url: &str,
     api_key: &str,
     body: &Value,
+    use_bearer: bool,
+    extra_headers: &[(&str, &str)],
     timeout_msg: &str,
 ) -> Result<reqwest::Response> {
-    let send_res = await_with_esc_interrupt(
-        client
-            .post(url)
-            .bearer_auth(api_key.trim())
-            .header("Content-Type", "application/json")
-            .header("Accept", "text/event-stream")
-            .json(body)
-            .send(),
-        LLM_REQUEST_CONNECT_TIMEOUT,
-        timeout_msg,
-    )
-    .await?;
+    let mut req = client
+        .post(url)
+        .header("Content-Type", "application/json")
+        .header("Accept", "text/event-stream");
+    if use_bearer {
+        req = req.bearer_auth(api_key.trim());
+    } else if !api_key.trim().is_empty() {
+        req = req.header("x-api-key", api_key.trim());
+    }
+    for (k, v) in extra_headers {
+        if !v.trim().is_empty() {
+            req = req.header(*k, *v);
+        }
+    }
+    let send_res =
+        await_with_esc_interrupt(req.json(body).send(), LLM_REQUEST_CONNECT_TIMEOUT, timeout_msg)
+            .await?;
     send_res.map_err(|e| {
         let chain = format!("{:#}", anyhow::Error::from(e));
         anyhow!("{}", sanitize_llm_error_message(&chain, api_key))
@@ -1744,9 +1974,122 @@ impl<'a, F: FnMut(StreamDelta)> SseStreamState<'a, F> {
                     .unwrap_or(ev_owned.as_str());
                 self.process_responses_json(ev_type, &val)
             }
+            ResolvedApiStyle::AnthropicMessages => {
+                let ev_owned = std::mem::take(&mut self.current_sse_event);
+                let ev_type = val
+                    .get("type")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or(ev_owned.as_str());
+                self.process_anthropic_json(ev_type, &val)
+            }
         };
         self.current_sse_event.clear();
         result
+    }
+
+    fn process_anthropic_json(&mut self, ev_type: &str, val: &Value) -> bool {
+        if ev_type == "error" || val.get("error").is_some_and(|e| !e.is_null()) {
+            let err_msg = val
+                .get("error")
+                .and_then(|e| e.get("message"))
+                .and_then(|v| v.as_str())
+                .map(String::from)
+                .unwrap_or_else(|| extract_raw_error_field(val));
+            self.set_sanitized_stream_error(&err_msg);
+            return true;
+        }
+        match ev_type {
+            "message_start" => {
+                if let Some(m) = val
+                    .get("message")
+                    .and_then(|msg| msg.get("model"))
+                    .and_then(|v| v.as_str())
+                {
+                    self.out.model = m.to_string();
+                }
+            }
+            "content_block_start" => {
+                let idx = val.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                if let Some(cb) = val.get("content_block") {
+                    let cb_type = cb.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                    match cb_type {
+                        "text" => {
+                            if let Some(txt) = cb.get("text").and_then(|v| v.as_str()) {
+                                self.emit_text_delta(txt.to_string());
+                            }
+                        }
+                        "thinking" => {
+                            if let Some(th) = cb.get("thinking").and_then(|v| v.as_str()) {
+                                self.emit_thinking_delta(th);
+                            }
+                        }
+                        "tool_use" => {
+                            let id = cb
+                                .get("id")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            let name = cb
+                                .get("name")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            let initial_args = cb
+                                .get("input")
+                                .and_then(|inp| inp.as_object())
+                                .filter(|m| !m.is_empty())
+                                .and_then(|m| serde_json::to_string(m).ok())
+                                .unwrap_or_default();
+                            self.tc_builders.insert(idx, (id, name, initial_args));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            "content_block_delta" => {
+                let idx = val.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                if let Some(delta) = val.get("delta") {
+                    let dtype = delta.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                    match dtype {
+                        "text_delta" => {
+                            if let Some(txt) = delta.get("text").and_then(|v| v.as_str()) {
+                                self.emit_text_delta(txt.to_string());
+                            }
+                        }
+                        "thinking_delta" => {
+                            if let Some(th) = delta.get("thinking").and_then(|v| v.as_str()) {
+                                self.emit_thinking_delta(th);
+                            }
+                        }
+                        "input_json_delta" => {
+                            if let Some(part) = delta.get("partial_json").and_then(|v| v.as_str()) {
+                                if let Some(entry) = self.tc_builders.get_mut(&idx) {
+                                    entry.2.push_str(part);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            "message_delta" => {
+                if val
+                    .get("delta")
+                    .and_then(|d| d.get("stop_reason"))
+                    .is_some_and(|v| !v.is_null())
+                {
+                    self.saw_finish_reason = true;
+                }
+            }
+            "message_stop" => {
+                self.saw_finish_reason = true;
+                return true;
+            }
+            _ => {}
+        }
+        false
     }
 
     fn process_chat_json(&mut self, val: &Value) -> bool {
@@ -2176,32 +2519,87 @@ async fn call_llm_streaming_inner<F>(
 where
     F: FnMut(StreamDelta),
 {
+    let raw_model_trim = cfg.model.trim();
+    let prov_trim = cfg.provider_name.trim();
+    let is_openai_oauth = raw_model_trim.starts_with("openai-oauth/")
+        || prov_trim.eq_ignore_ascii_case("openai_oauth")
+        || prov_trim.eq_ignore_ascii_case("openai-oauth");
+    let is_claude_oauth = !is_openai_oauth
+        && (raw_model_trim.starts_with("claude-oauth/")
+            || prov_trim.eq_ignore_ascii_case("claude_oauth")
+            || prov_trim.eq_ignore_ascii_case("claude-oauth"));
+
     let raw_base = if cfg.base_url.trim().is_empty() {
         crate::config::DEFAULT_BASE_URL
     } else {
         cfg.base_url.trim()
     };
-    let style = resolve_api_style(&cfg.api_style, raw_base, &cfg.provider_name)?;
-    if crate::config::is_masked_api_key(&cfg.api_key) {
-        bail!(
-            "API key is empty. Configure CheapAI/OpenCode key in Settings or ~/.config/opencode/opencode.json."
-        );
-    }
+    let style = if is_openai_oauth {
+        ResolvedApiStyle::Responses
+    } else if is_claude_oauth {
+        ResolvedApiStyle::AnthropicMessages
+    } else {
+        resolve_api_style(&cfg.api_style, raw_base, &cfg.provider_name)?
+    };
+
+    let mut oauth_record_opt = if is_openai_oauth {
+        Some((
+            crate::oauth::OAuthProvider::Openai,
+            crate::oauth::get_valid_token(crate::oauth::OAuthProvider::Openai).await?,
+        ))
+    } else if is_claude_oauth {
+        Some((
+            crate::oauth::OAuthProvider::Claude,
+            crate::oauth::get_valid_token(crate::oauth::OAuthProvider::Claude).await?,
+        ))
+    } else {
+        if crate::config::is_masked_api_key(&cfg.api_key) {
+            bail!(
+                "API key is empty. Configure CheapAI/OpenCode key in Settings or ~/.config/opencode/opencode.json."
+            );
+        }
+        None
+    };
 
     let base = crate::config::normalize_llm_base_url(raw_base);
-    let url = match style {
-        ResolvedApiStyle::Responses => format!("{base}/responses"),
-        ResolvedApiStyle::ChatCompletions => format!("{base}/chat/completions"),
+    let url = if is_openai_oauth {
+        crate::oauth::openai_codex_responses_url()
+    } else if is_claude_oauth {
+        format!("{}/v1/messages", crate::oauth::claude_api_base_url())
+    } else {
+        match style {
+            ResolvedApiStyle::Responses => format!("{base}/responses"),
+            ResolvedApiStyle::ChatCompletions => format!("{base}/chat/completions"),
+            ResolvedApiStyle::AnthropicMessages => format!("{base}/messages"),
+        }
     };
 
-    let raw_model = if cfg.model.trim().is_empty() {
-        crate::config::DEFAULT_MODEL
+    let raw_model = if raw_model_trim.is_empty() {
+        if is_openai_oauth {
+            "gpt-5.4"
+        } else if is_claude_oauth {
+            "claude-sonnet-4-6"
+        } else {
+            crate::config::DEFAULT_MODEL
+        }
     } else {
-        cfg.model.trim()
+        raw_model_trim
     };
-    let stripped_model = crate::config::normalize_model_id(raw_model, &cfg.provider_name);
+    let stripped_model = if is_openai_oauth {
+        raw_model.strip_prefix("openai-oauth/").unwrap_or(raw_model)
+    } else if is_claude_oauth {
+        raw_model.strip_prefix("claude-oauth/").unwrap_or(raw_model)
+    } else {
+        crate::config::normalize_model_id(raw_model, &cfg.provider_name)
+    };
     let model_id = if stripped_model.is_empty() {
-        crate::config::DEFAULT_MODEL
+        if is_openai_oauth {
+            "gpt-5.4"
+        } else if is_claude_oauth {
+            "claude-sonnet-4-6"
+        } else {
+            crate::config::DEFAULT_MODEL
+        }
     } else {
         stripped_model
     };
@@ -2212,39 +2610,134 @@ where
         crate::config::normalize_reasoning_effort(&cfg.effort).to_string()
     };
 
-    let body = match style {
+    let mut body = match style {
         ResolvedApiStyle::Responses => {
             build_responses_request_body(model_id, system_prompt, history, tools, &effort)
         }
         ResolvedApiStyle::ChatCompletions => {
             build_chat_completions_request_body(model_id, system_prompt, history, tools, &effort)
         }
+        ResolvedApiStyle::AnthropicMessages => build_anthropic_messages_request_body(
+            model_id,
+            system_prompt,
+            history,
+            tools,
+            &effort,
+            is_claude_oauth,
+        ),
+    };
+    if is_openai_oauth {
+        body["store"] = json!(false);
+        let inst_empty = body
+            .get("instructions")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().is_empty())
+            .unwrap_or(true);
+        if inst_empty {
+            body["instructions"] = json!("You are a helpful AI assistant.");
+        }
+    }
+
+    let mut active_auth_secret = oauth_record_opt
+        .as_ref()
+        .map(|(_, rec)| rec.access_token.clone())
+        .unwrap_or_else(|| cfg.api_key.clone());
+    let use_bearer = is_openai_oauth || is_claude_oauth || style != ResolvedApiStyle::AnthropicMessages;
+
+    let build_headers_for = |rec_opt: &Option<(crate::oauth::OAuthProvider, crate::oauth::OAuthTokenRecord)>| -> Vec<(&'static str, String)> {
+        if is_openai_oauth {
+            let mut hdrs = vec![
+                ("OpenAI-Beta", "responses=experimental".to_string()),
+                ("originator", "codex_cli_rs".to_string()),
+            ];
+            if let Some((_, rec)) = rec_opt {
+                if !rec.account_id.trim().is_empty() {
+                    hdrs.push(("ChatGPT-Account-Id", rec.account_id.trim().to_string()));
+                }
+            }
+            hdrs
+        } else if style == ResolvedApiStyle::AnthropicMessages {
+            let mut hdrs = vec![("anthropic-version", "2023-06-01".to_string())];
+            if is_claude_oauth {
+                hdrs.push((
+                    "anthropic-beta",
+                    "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14"
+                        .to_string(),
+                ));
+            }
+            hdrs
+        } else {
+            Vec::new()
+        }
     };
 
     let client = http_client();
-    let mut resp = send_llm_post(
+    let owned_hdrs = build_headers_for(&oauth_record_opt);
+    let hdr_refs: Vec<(&str, &str)> = owned_hdrs.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    let mut resp = send_llm_post_with_headers(
         client,
         &url,
-        &cfg.api_key,
+        &active_auth_secret,
         &body,
+        use_bearer,
+        &hdr_refs,
         "LLM HTTP request timed out waiting for response headers (120s)",
     )
     .await?;
 
+    // One-shot OAuth token refresh on HTTP 401 before reasoning/error handling
+    if resp.status().as_u16() == 401 {
+        if let Some((oauth_prov, _)) = oauth_record_opt {
+            let _ = read_llm_error_body(
+                resp,
+                &active_auth_secret,
+                "LLM HTTP 401 error body read timed out",
+            )
+            .await;
+            let refreshed = crate::oauth::refresh_provider_token(oauth_prov).await?;
+            active_auth_secret = refreshed.access_token.clone();
+            oauth_record_opt = Some((oauth_prov, refreshed));
+            let refreshed_hdrs = build_headers_for(&oauth_record_opt);
+            let refreshed_refs: Vec<(&str, &str)> = refreshed_hdrs
+                .iter()
+                .map(|(k, v)| (*k, v.as_str()))
+                .collect();
+            resp = send_llm_post_with_headers(
+                client,
+                &url,
+                &active_auth_secret,
+                &body,
+                use_bearer,
+                &refreshed_refs,
+                "LLM HTTP 401 refresh retry timed out waiting for response headers (120s)",
+            )
+            .await?;
+        }
+    }
+
     // Fallback: if the upstream model rejects reasoning parameters, retry cleanly up to 2 stages
     if !resp.status().is_success() {
         let status = resp.status();
-        let err_text =
-            read_llm_error_body(resp, &cfg.api_key, "LLM HTTP error body read timed out").await?;
+        let err_text = read_llm_error_body(
+            resp,
+            &active_auth_secret,
+            "LLM HTTP error body read timed out",
+        )
+        .await?;
         let mut retry_body = body.clone();
         if rejects_reasoning_parameter(status.as_u16(), &err_text)
             && apply_reasoning_fallback(&mut retry_body, style, &effort, 1)
         {
-            resp = send_llm_post(
+            let retry_hdrs = build_headers_for(&oauth_record_opt);
+            let retry_refs: Vec<(&str, &str)> =
+                retry_hdrs.iter().map(|(k, v)| (*k, v.as_str())).collect();
+            resp = send_llm_post_with_headers(
                 client,
                 &url,
-                &cfg.api_key,
+                &active_auth_secret,
                 &retry_body,
+                use_bearer,
+                &retry_refs,
                 "LLM HTTP retry request timed out waiting for response headers (120s)",
             )
             .await?;
@@ -2252,7 +2745,7 @@ where
                 let retry_status = resp.status();
                 let retry_error = read_llm_error_body(
                     resp,
-                    &cfg.api_key,
+                    &active_auth_secret,
                     "LLM HTTP retry error body read timed out",
                 )
                 .await?;
@@ -2261,11 +2754,16 @@ where
                 {
                     bail!("LLM HTTP {}: {}", retry_status, retry_error);
                 }
-                resp = send_llm_post(
+                let retry2_hdrs = build_headers_for(&oauth_record_opt);
+                let retry2_refs: Vec<(&str, &str)> =
+                    retry2_hdrs.iter().map(|(k, v)| (*k, v.as_str())).collect();
+                resp = send_llm_post_with_headers(
                     client,
                     &url,
-                    &cfg.api_key,
+                    &active_auth_secret,
                     &retry_body,
+                    use_bearer,
+                    &retry2_refs,
                     "LLM HTTP fallback request timed out waiting for response headers (120s)",
                 )
                 .await?;
@@ -2277,8 +2775,12 @@ where
 
     if !resp.status().is_success() {
         let status = resp.status();
-        let err_text =
-            read_llm_error_body(resp, &cfg.api_key, "LLM HTTP error body read timed out").await?;
+        let err_text = read_llm_error_body(
+            resp,
+            &active_auth_secret,
+            "LLM HTTP error body read timed out",
+        )
+        .await?;
         return Err(anyhow!("LLM HTTP {}: {}", status, err_text));
     }
 
@@ -2470,7 +2972,90 @@ where
         ResolvedApiStyle::ChatCompletions => {
             parse_non_streaming_chat_response(val, default_model, on_delta)
         }
+        ResolvedApiStyle::AnthropicMessages => {
+            parse_non_streaming_anthropic_response(val, default_model, api_key, on_delta)
+        }
     }
+}
+
+pub(crate) fn parse_non_streaming_anthropic_response<F>(
+    val: &Value,
+    default_model: &str,
+    api_key: &str,
+    on_delta: &mut F,
+) -> Result<LlmResponse>
+where
+    F: FnMut(StreamDelta),
+{
+    if let Some(err_val) = val.get("error").filter(|e| !e.is_null()) {
+        let msg = err_val
+            .get("message")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .unwrap_or_else(|| err_val.to_string());
+        bail!(
+            "LLM error response: {}",
+            sanitize_llm_error_message(&msg, api_key)
+        );
+    }
+    let mut out = LlmResponse {
+        model: val
+            .get("model")
+            .and_then(|v| v.as_str())
+            .unwrap_or(default_model)
+            .to_string(),
+        ..Default::default()
+    };
+    if let Some(blocks) = val.get("content").and_then(|v| v.as_array()) {
+        for (idx, b) in blocks.iter().enumerate() {
+            match b.get("type").and_then(|v| v.as_str()).unwrap_or("") {
+                "text" => {
+                    if let Some(txt) = b.get("text").and_then(|v| v.as_str()) {
+                        if !txt.is_empty() {
+                            out.content.push_str(txt);
+                            on_delta(StreamDelta::Text(txt.to_string()));
+                        }
+                    }
+                }
+                "thinking" => {
+                    if let Some(th) = b.get("thinking").and_then(|v| v.as_str()) {
+                        let emitted = append_thinking_segment(&mut out.thinking, th);
+                        if !emitted.is_empty() {
+                            on_delta(StreamDelta::Thinking(emitted));
+                        }
+                    }
+                }
+                "tool_use" => {
+                    let name = b
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+                    if !name.is_empty() {
+                        let id = b
+                            .get("id")
+                            .and_then(|v| v.as_str())
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .map(ToString::to_string)
+                            .unwrap_or_else(|| format!("toolu_{idx}"));
+                        let args = b
+                            .get("input")
+                            .and_then(|inp| serde_json::to_string(inp).ok())
+                            .unwrap_or_else(|| "{}".to_string());
+                        out.tool_calls.push(ToolCallItem {
+                            id,
+                            name,
+                            arguments: sanitize_tool_arguments(&args),
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    finish_response(out, None)
 }
 
 pub(crate) fn parse_non_streaming_responses_response<F>(
@@ -2862,8 +3447,14 @@ mod api_style_tests {
 
     #[test]
     fn rejects_unsupported_and_unknown_styles() {
-        for style in ["ANTHROPIC", "anthropic", "xml", "invalid"] {
+        for style in ["xml", "invalid"] {
             assert!(validate_api_style(style).is_err(), "accepted {style}");
+        }
+        for style in ["ANTHROPIC", "anthropic", "claude-oauth"] {
+            assert_eq!(
+                resolve_api_style(style, "", "").unwrap(),
+                ResolvedApiStyle::AnthropicMessages
+            );
         }
     }
 
@@ -2939,7 +3530,10 @@ mod api_style_tests {
             );
         }
 
-        assert!(resolve_api_style("anthropic", "https://api.anthropic.com/v1", "anthropic").is_err());
+        assert_eq!(
+            resolve_api_style("anthropic", "https://api.anthropic.com/v1", "anthropic").unwrap(),
+            ResolvedApiStyle::AnthropicMessages
+        );
         assert!(resolve_api_style("unknown-style", "", "").is_err());
     }
 
@@ -3897,5 +4491,103 @@ mod error_redaction_tests {
             false,
             &None
         ));
+    }
+
+    #[test]
+    fn build_anthropic_body_and_sse_streaming_handle_system_images_and_tool_use() {
+        let history = vec![
+            LlmTurnMessage {
+                role: "user".to_string(),
+                content: "Inspect screen".to_string(),
+                image_b64: encode_turn_images(
+                    "data:image/png;base64,AAA",
+                    &["data:image/jpeg;base64,BBB".to_string()],
+                ),
+                tool_call_id: None,
+                tool_name: None,
+                tool_calls: Vec::new(),
+            },
+            LlmTurnMessage {
+                role: "assistant".to_string(),
+                content: "Calling tool".to_string(),
+                image_b64: None,
+                tool_call_id: None,
+                tool_name: None,
+                tool_calls: vec![ToolCallItem {
+                    id: "toolu_1".to_string(),
+                    name: "fs_list_dir".to_string(),
+                    arguments: "{\"path\":\".\"}".to_string(),
+                }],
+            },
+            LlmTurnMessage {
+                role: "tool".to_string(),
+                content: "{\"entries\":[\"a.txt\"]}".to_string(),
+                image_b64: None,
+                tool_call_id: Some("toolu_1".to_string()),
+                tool_name: Some("fs_list_dir".to_string()),
+                tool_calls: Vec::new(),
+            },
+        ];
+        let tools = vec![json!({
+            "type": "function",
+            "function": {
+                "name": "fs_list_dir",
+                "description": "List files",
+                "parameters": { "type": "object", "properties": { "path": { "type": "string" } } }
+            }
+        })];
+        let body = build_anthropic_messages_request_body(
+            "claude-sonnet-4-6",
+            "Main instructions",
+            &history,
+            &tools,
+            "high",
+            true,
+        );
+        assert_eq!(body["model"], "claude-sonnet-4-6");
+        assert_eq!(
+            body["system"][0]["text"],
+            "You are Claude Code, Anthropic's official CLI for Claude."
+        );
+        assert_eq!(body["system"][1]["text"], "Main instructions");
+        assert_eq!(body["messages"][0]["content"][1]["type"], "image");
+        assert_eq!(body["messages"][0]["content"][2]["source"]["media_type"], "image/jpeg");
+        assert_eq!(body["messages"][1]["content"][1]["type"], "tool_use");
+        assert_eq!(body["messages"][2]["role"], "user");
+        assert_eq!(body["messages"][2]["content"][0]["type"], "tool_result");
+        assert_eq!(body["tools"][0]["name"], "fs_list_dir");
+
+        let mut deltas = Vec::new();
+        let mut st = SseStreamState::new("claude-sonnet-4-6".to_string(), "", |d| deltas.push(d));
+        let lines = [
+            "event: message_start",
+            "data: {\"type\":\"message_start\",\"message\":{\"model\":\"claude-sonnet-4-6\"}}",
+            "",
+            "event: content_block_start",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}",
+            "event: content_block_delta",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Plan\"}}",
+            "event: content_block_start",
+            "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}",
+            "event: content_block_delta",
+            "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello Claude\"}}",
+            "event: content_block_start",
+            "data: {\"type\":\"content_block_start\",\"index\":2,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_9\",\"name\":\"fs_read_file\",\"input\":{}}}",
+            "event: content_block_delta",
+            "data: {\"type\":\"content_block_delta\",\"index\":2,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\\\"README.md\\\"}\"}}",
+            "event: message_stop",
+            "data: {\"type\":\"message_stop\"}",
+        ];
+        for ln in lines {
+            if st.process_line(ResolvedApiStyle::AnthropicMessages, ln) {
+                break;
+            }
+        }
+        assert_eq!(st.out.thinking, "Plan");
+        assert_eq!(st.out.content, "Hello Claude");
+        let tc = st.tc_builders.get(&2).unwrap();
+        assert_eq!(tc.0, "toolu_9");
+        assert_eq!(tc.1, "fs_read_file");
+        assert_eq!(tc.2, "{\"path\":\"README.md\"}");
     }
 }
