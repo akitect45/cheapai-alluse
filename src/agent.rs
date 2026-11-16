@@ -11698,6 +11698,30 @@ pub(crate) fn compact_browser_tool_history(history: &[LlmTurnMessage]) -> Vec<Ll
         .collect()
 }
 
+fn persist_user_chat_message_with_attachments(
+    thread_id: &str,
+    prompt: &str,
+    attachments: &[Value],
+) -> Result<(
+    crate::db::ChatMessage,
+    crate::attachments::ResolvedMessageAttachments,
+)> {
+    let resolved = crate::attachments::resolve_attachments_for_chat(attachments);
+    let meta_str = serde_json::to_string(&crate::attachments::build_message_meta_value(&resolved))
+        .unwrap_or_else(|_| "{}".to_string());
+    let user_msg = append_message(
+        thread_id,
+        "user",
+        prompt,
+        "",
+        "",
+        "",
+        &resolved.primary_image_b64,
+        &meta_str,
+    )?;
+    Ok((user_msg, resolved))
+}
+
 pub(crate) fn reconstruct_llm_history_from_db_messages(
     db_msgs: Vec<crate::db::ChatMessage>,
 ) -> Vec<LlmTurnMessage> {
@@ -12231,21 +12255,8 @@ pub async fn run_agent_turn_with_attachments(
         }
         emit_event("threads_updated", json!({ "thread_id": thread_id }));
     } else {
-        let resolved_att = crate::attachments::resolve_attachments_for_chat(&attachments);
-        let att_meta_str = serde_json::to_string(&crate::attachments::build_message_meta_value(
-            &resolved_att,
-        ))
-        .unwrap_or_else(|_| "{}".to_string());
-        let user_msg = append_message(
-            &thread_id,
-            "user",
-            &user_prompt,
-            &resolved_att.primary_image_b64,
-            "",
-            "",
-            "",
-            &att_meta_str,
-        )?;
+        let (user_msg, _resolved_att) =
+            persist_user_chat_message_with_attachments(&thread_id, &user_prompt, &attachments)?;
         emit_event("user_message", serde_json::to_value(&user_msg)?);
         if !is_crew_worker && mode.eq_ignore_ascii_case("crew") {
             let _ = crate::crew::ensure_crew_mode_enabled(&thread_id);
@@ -12661,23 +12672,8 @@ pub async fn run_agent_turn_with_attachments(
                         ));
                     }
                     cfg = q.cfg.clone();
-                    let resolved_q =
-                        crate::attachments::resolve_attachments_for_chat(&q.attachments);
-                    let q_meta_str =
-                        serde_json::to_string(&crate::attachments::build_message_meta_value(
-                            &resolved_q,
-                        ))
-                        .unwrap_or_else(|_| "{}".to_string());
-                    let user_msg = append_message(
-                        &thread_id,
-                        "user",
-                        &q.prompt,
-                        &resolved_q.primary_image_b64,
-                        "",
-                        "",
-                        "",
-                        &q_meta_str,
-                    )?;
+                    let (user_msg, resolved_q) =
+                        persist_user_chat_message_with_attachments(&thread_id, &q.prompt, &q.attachments)?;
                     if !is_crew_worker && mode.eq_ignore_ascii_case("crew") {
                         let _ = crate::crew::ensure_crew_mode_enabled(&thread_id);
                     }
@@ -14895,5 +14891,97 @@ mod config_tool_redaction_tests {
         assert!(img.contains("PRIMARYIMG1") && img.contains("EXTRAIMG2"));
         let _ = crate::attachments::remove_staged_attachment(&staged[0].id);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn persist_user_chat_message_stores_single_and_multi_images_in_image_b64_not_thinking() {
+        use base64::Engine as _;
+
+        let make_png_b64 = |rgb: [u8; 4]| -> String {
+            let img = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+                24,
+                24,
+                image::Rgba(rgb),
+            ));
+            let mut buf = Vec::new();
+            img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
+                .unwrap();
+            base64::engine::general_purpose::STANDARD.encode(&buf)
+        };
+
+        let staged = crate::attachments::stage_uploaded_files(&[
+            crate::attachments::UploadedAttachmentInput {
+                name: "first.png".to_string(),
+                mime_type: "image/png".to_string(),
+                data_base64: format!("data:image/png;base64,{}", make_png_b64([255, 0, 0, 255])),
+            },
+            crate::attachments::UploadedAttachmentInput {
+                name: "second.png".to_string(),
+                mime_type: "image/png".to_string(),
+                data_base64: format!("data:image/png;base64,{}", make_png_b64([0, 0, 255, 255])),
+            },
+        ])
+        .unwrap();
+        assert_eq!(staged.len(), 2);
+
+        // 1) Single-image attachment must land in DB `image_b64` (NOT `thinking`) and reconstruct for LLM
+        let t_single = crate::db::create_thread(
+            "Single Image Attachment Regression",
+            "auto",
+            "gpt-6-astra",
+            "low",
+        )
+        .unwrap();
+        let (saved_single, _) = super::persist_user_chat_message_with_attachments(
+            &t_single.id,
+            "single img check",
+            &[json!({ "id": staged[0].id })],
+        )
+        .unwrap();
+        assert!(saved_single.thinking.is_empty(), "thinking column must stay empty");
+        assert!(
+            saved_single.image_b64.starts_with("data:image/"),
+            "primary image must be persisted in image_b64 column"
+        );
+        let hist_single = super::reconstruct_llm_history_from_db_messages(
+            crate::db::list_active_context_messages(&t_single.id).unwrap(),
+        );
+        assert_eq!(hist_single.len(), 1);
+        assert!(hist_single[0]
+            .image_b64
+            .as_deref()
+            .unwrap_or("")
+            .starts_with("data:image/"));
+
+        // 2) Multi-image attachment must keep first in DB `image_b64` + rest in `meta_json.extra_images_b64`
+        let t_multi = crate::db::create_thread(
+            "Multi Image Attachment Regression",
+            "auto",
+            "gpt-6-astra",
+            "low",
+        )
+        .unwrap();
+        let (saved_multi, _) = super::persist_user_chat_message_with_attachments(
+            &t_multi.id,
+            "multi img check",
+            &[json!({ "id": staged[0].id }), json!({ "id": staged[1].id })],
+        )
+        .unwrap();
+        assert!(saved_multi.thinking.is_empty());
+        assert!(saved_multi.image_b64.starts_with("data:image/"));
+        let hist_multi = super::reconstruct_llm_history_from_db_messages(
+            crate::db::list_active_context_messages(&t_multi.id).unwrap(),
+        );
+        assert_eq!(hist_multi.len(), 1);
+        let encoded_arr: Vec<String> = serde_json::from_str(
+            hist_multi[0].image_b64.as_deref().unwrap_or(""),
+        )
+        .expect("multi-image turn should encode JSON array of 2 images");
+        assert_eq!(encoded_arr.len(), 2);
+
+        let _ = crate::attachments::remove_staged_attachment(&staged[0].id);
+        let _ = crate::attachments::remove_staged_attachment(&staged[1].id);
+        let _ = crate::db::delete_thread(&t_single.id);
+        let _ = crate::db::delete_thread(&t_multi.id);
     }
 }
