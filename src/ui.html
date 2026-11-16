@@ -5940,6 +5940,39 @@
   #settings-general.settings-section { gap:0; }
   .settings-auth-bar { padding:10px 12px; border-radius:10px; background:var(--bg-elevated); border:1px solid var(--border-strong); display:flex; align-items:flex-start; justify-content:space-between; gap:10px; flex-wrap:wrap; }
   .settings-auth-actions { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  .settings-auth-default-badge { display:inline-flex; align-items:center; height:18px; padding:0 7px; border-radius:999px; font-size:11px; font-weight:600; background:var(--bg-hover); border:1px solid var(--border-strong); color:var(--text-secondary); white-space:nowrap; }
+  .ext-oauth-section { display:flex; flex-direction:column; gap:8px; padding-top:2px; }
+  .ext-oauth-head { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
+  .ext-oauth-title { display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:700; color:var(--text); }
+  .ext-oauth-vault-pill { display:inline-flex; align-items:center; gap:4px; height:20px; padding:0 8px; border-radius:999px; font-size:11px; font-weight:600; background:var(--bg-input); border:1px solid var(--border); color:var(--text-secondary); }
+  .ext-oauth-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; }
+  @media (max-width: 660px) { .ext-oauth-grid { grid-template-columns:1fr; } }
+  .ext-oauth-card { padding:11px 12px; border-radius:10px; background:var(--bg-elevated); border:1px solid var(--border); display:flex; flex-direction:column; gap:8px; min-width:0; transition:border-color 0.14s ease, background 0.14s ease; }
+  .ext-oauth-card.is-connected { border-color:var(--border-strong); }
+  .ext-oauth-card-top { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .ext-oauth-brand { display:inline-flex; align-items:center; gap:7px; min-width:0; }
+  .ext-oauth-brand-icon { width:22px; height:22px; border-radius:6px; background:var(--bg-input); border:1px solid var(--border); display:inline-flex; align-items:center; justify-content:center; color:var(--text); flex-shrink:0; }
+  .ext-oauth-brand-text { display:flex; flex-direction:column; min-width:0; }
+  .ext-oauth-brand-name { font-size:12.5px; font-weight:700; color:var(--text); line-height:1.25; }
+  .ext-oauth-brand-sub { font-size:11px; color:var(--text-muted); line-height:1.25; }
+  .ext-oauth-status-pill { display:inline-flex; align-items:center; gap:5px; height:20px; padding:0 8px; border-radius:999px; font-size:11px; font-weight:600; border:1px solid var(--border); background:var(--bg-input); color:var(--text-secondary); white-space:nowrap; flex-shrink:0; }
+  .ext-oauth-status-pill.is-connected { color:var(--text); border-color:var(--border-strong); }
+  .ext-oauth-dot { width:7px; height:7px; border-radius:50%; background:var(--text-muted); flex-shrink:0; }
+  .ext-oauth-status-pill.is-connected .ext-oauth-dot { background:#22c55e; }
+  .ext-oauth-status-pill.is-pending .ext-oauth-dot { background:#eab308; }
+  .ext-oauth-account-info { font-size:11.5px; color:var(--text-secondary); background:var(--bg-input); border:1px solid var(--border); border-radius:7px; padding:6px 8px; display:flex; flex-direction:column; gap:2px; min-width:0; }
+  .ext-oauth-account-line { font-family:var(--font-mono); font-size:11.5px; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ext-oauth-actions { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .ext-oauth-actions .btn { height:28px; padding:0 10px; font-size:12px; font-weight:600; }
+  .ext-oauth-manual-link { font-size:11.5px; height:26px; padding:0 6px; color:var(--text-secondary); }
+  .ext-oauth-manual-box { display:flex; flex-direction:column; gap:6px; padding:8px; border-radius:8px; background:var(--bg-input); border:1px solid var(--border); }
+  .ext-oauth-manual-hint { font-size:11.5px; color:var(--text-secondary); line-height:1.4; }
+  .ext-oauth-manual-btns { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .ext-oauth-manual-btns .btn { height:25px; padding:0 8px; font-size:11.5px; }
+  .ext-oauth-code-row { display:flex; align-items:center; gap:6px; }
+  .ext-oauth-code-row input { flex:1 1 auto; min-width:0; height:28px; padding:0 8px; font-size:11.5px; font-family:var(--font-mono); }
+  .ext-oauth-code-row .btn { height:28px; padding:0 10px; font-size:11.5px; flex-shrink:0; }
+  .ext-oauth-err { font-size:11.5px; color:#ef4444; line-height:1.35; overflow-wrap:anywhere; }
   #cfg-auth-status-sub { font-size:12px; color:var(--text-secondary); line-height:1.45; overflow-wrap:anywhere; }
   .settings-url-head { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; flex-wrap:wrap; }
   .settings-url-head .field-label { min-width:0; line-height:1.4; }
@@ -7980,9 +8013,10 @@
       <div style="display:flex; align-items:flex-start; gap:9px; min-width:0; flex:1 1 220px;">
         <img src="/assets/cheapai_logo_icon.png" alt="CheapAI" style="width:24px; height:24px; border-radius:6px; object-fit:contain; flex-shrink:0;" />
         <div style="min-width:0;">
-          <div style="display:flex; align-items:center; gap:6px;">
+          <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
             <span id="cfg-auth-status-dot" style="display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--text-muted); flex-shrink:0;"></span>
             <span id="cfg-auth-status-title" style="font-size:12px; font-weight:700; color:var(--text);">CheapAI 계정 연동</span>
+            <span id="cfg-auth-default-badge" class="settings-auth-default-badge">권장 · 통합 기본</span>
           </div>
           <div id="cfg-auth-status-sub">OAuth 브라우저 로그인 또는 API 키로 연결하세요</div>
         </div>
@@ -7993,6 +8027,24 @@
           <span>CheapAI OAuth 로그인</span>
         </button>
         <button class="btn" id="cfg-auth-logout-btn" style="height:28px; padding:0 10px; font-size:12.5px; display:none;" onclick="logoutCheapAiAccount()">로그아웃</button>
+      </div>
+    </div>
+
+    <!-- External OpenAI / Claude OAuth Direct Subscriptions -->
+    <div class="ext-oauth-section" id="external-oauth-section">
+      <div class="ext-oauth-head">
+        <span class="ext-oauth-title" id="ext-oauth-section-title">
+          <svg class="solar-icon sm"><use href="#solar-key"/></svg>
+          <span id="ext-oauth-title-text">외부 AI 구독 직접 연결</span>
+        </span>
+        <span class="ext-oauth-vault-pill" id="ext-oauth-vault-badge">
+          <svg class="solar-icon sm" style="width:12px; height:12px;"><use href="#solar-lock"/></svg>
+          <span id="ext-oauth-vault-text">OAuth · 로컬 보안 볼트 암호화</span>
+        </span>
+      </div>
+      <div class="ext-oauth-grid">
+        <div class="ext-oauth-card" id="oauth-card-openai"></div>
+        <div class="ext-oauth-card" id="oauth-card-claude"></div>
       </div>
     </div>
 
@@ -8222,6 +8274,9 @@
           </button>
           <button class="btn ghost" style="font-size:12.5px; height:26px; padding:0 8px;" onclick="closeCheapAiAuthOverlay()">나중에 하기</button>
         </div>
+      </div>
+      <div style="display:flex; justify-content:center; padding-top:2px;">
+        <button type="button" class="btn ghost" id="cheapai-auth-ext-oauth-link" style="font-size:12px; height:24px; padding:0 8px; color:var(--text-secondary);" onclick="openExternalOAuthFromOnboarding()">기존 ChatGPT / Claude 구독 계정 OAuth 연결 →</button>
       </div>
     </div>
 
@@ -10916,6 +10971,7 @@ function openApiSettingsModal(section = 'general') {
     }
   }
   refreshCheapAiAuthStatusUi();
+  if (typeof refreshExternalOAuthStatus === 'function') refreshExternalOAuthStatus();
   refreshModelsFromConnectedBaseUrl({ notify: true, useModalInputs: false });
   if (typeof syncUiOverlayCutoutWithHost === 'function') syncUiOverlayCutoutWithHost();
 }
@@ -11350,10 +11406,7 @@ async function resetDefaultApiConfig() {
     const msel = document.getElementById('model-select');
     if (msel) {
       if (Array.isArray(res.models) && res.models.length > 0) {
-        msel.innerHTML = res.models.map(m => {
-          const p = formatChatModelOptionParts(m);
-          return `<option value="${escapeHtml(p.id)}" data-short-label="${escapeHtml(p.shortLabel)}" data-opt-tag="${escapeHtml(p.tag)}" data-opt-desc="${escapeHtml(p.desc)}" ${p.id === defModel ? 'selected' : ''}>${escapeHtml(p.shortLabel)}</option>`;
-        }).join('');
+        msel.innerHTML = renderGroupedChatModelOptionsHtml(res.models, defModel);
       } else if (![...msel.options].some(o => o.value === defModel)) {
         const opt = document.createElement('option');
         opt.value = defModel;
@@ -12369,7 +12422,27 @@ const UI_KO_TO_EN_EXACT = {
   '일반 대화로 이동': 'Move to conversations',
   '취소': 'Cancel',
   '아직 이미지가 없습니다': 'No images yet',
-  '재생할 비디오가 아직 없습니다': 'No video loaded yet'
+  '재생할 비디오가 아직 없습니다': 'No video loaded yet',
+  '권장 · 통합 기본': 'Recommended · Default',
+  '외부 AI 구독 직접 연결': 'External AI Subscriptions',
+  'OAuth · 로컬 보안 볼트 암호화': 'OAuth · Local Vault Encrypted',
+  '기존 ChatGPT / Claude 구독 계정 OAuth 연결 →': 'Connect existing ChatGPT / Claude via OAuth →',
+  '미연결': 'Not connected',
+  '연결됨': 'Connected',
+  '인증 대기': 'Pending',
+  'OpenAI OAuth 로그인': 'OpenAI OAuth Login',
+  'Claude OAuth 로그인': 'Claude OAuth Login',
+  '수동 코드 입력': 'Manual code',
+  '콘솔 코드 방식': 'Console Code',
+  '브라우저 다시 열기': 'Reopen Browser',
+  '인증 URL 복사': 'Copy Auth URL',
+  '콜백 URL 또는 인증 코드(code#state) 붙여넣기': 'Paste callback URL or code#state',
+  '연결 완료': 'Complete Connect',
+  '이 계정 모델 선택': 'Use This Model',
+  '연결 해제': 'Disconnect',
+  'CheapAI 통합 모델': 'CheapAI Unified Models',
+  'OpenAI OAuth (직접 연결)': 'OpenAI OAuth (Direct)',
+  'Claude OAuth (직접 연결)': 'Claude OAuth (Direct)'
 };
 
 const UI_EN_TO_KO_EXACT = (() => {
@@ -12701,6 +12774,9 @@ function applyUiLanguage(lang) {
     if (typeof refreshComposerAttachmentUiLocale === 'function') {
       refreshComposerAttachmentUiLocale();
     }
+    if (typeof refreshExternalOAuthUiLocale === 'function') {
+      refreshExternalOAuthUiLocale();
+    }
     const openCrewPop = document.getElementById('crew-help-popover');
     if (openCrewPop && openCrewPop.classList.contains('open') && typeof crewHelpPinnedTrigger !== 'undefined' && crewHelpPinnedTrigger && typeof positionCrewHelpPopover === 'function') {
       positionCrewHelpPopover(crewHelpPinnedTrigger);
@@ -12769,12 +12845,7 @@ async function initApp() {
     const msel = document.getElementById('model-select');
     const effModel = st.config.model || (st.config.models && st.config.models[0] && st.config.models[0].id) || '';
     if (st.config.models && st.config.models.length > 0) {
-      let opts = st.config.models.map(m => {
-        const p = formatChatModelOptionParts(m);
-        return `<option value="${escapeHtml(p.id)}" data-short-label="${escapeHtml(p.shortLabel)}" data-opt-tag="${escapeHtml(p.tag)}" data-opt-desc="${escapeHtml(p.desc)}" ${p.id === effModel ? 'selected' : ''}>${escapeHtml(p.shortLabel)}</option>`;
-      }).join('');
-
-      msel.innerHTML = opts;
+      msel.innerHTML = renderGroupedChatModelOptionsHtml(st.config.models, effModel);
       selectAvailableModel(msel, effModel);
     }
     document.getElementById('effort-select').value = st.config.effort || 'xhigh';
@@ -12799,6 +12870,7 @@ async function initApp() {
       st.config.browser_width_ratio || 0.48
     );
     refreshModelsFromConnectedBaseUrl({ silent: true });
+    if (typeof refreshExternalOAuthStatus === 'function') refreshExternalOAuthStatus();
     if (!st.config.has_api_key) {
       openCheapAiAuthOverlay('options', st.auth || null);
     }
@@ -13885,12 +13957,15 @@ function handleRealtimeEvent(evt) {
     }
     if (Array.isArray(evt.models) && evt.models.length > 0) {
       const msel = document.getElementById('model-select');
-      if (msel) {
-        msel.innerHTML = evt.models.map(m => {
-          const p = formatChatModelOptionParts(m);
-          return `<option value="${escapeHtml(p.id)}" data-short-label="${escapeHtml(p.shortLabel)}" data-opt-tag="${escapeHtml(p.tag)}" data-opt-desc="${escapeHtml(p.desc)}">${escapeHtml(p.shortLabel)}</option>`;
-        }).join('');
+      const cfgMid = document.getElementById('cfg-model-id');
+      const curSel = evt.model || msel?.value || cfgMid?.value || '';
+      const groupedHtml = renderGroupedChatModelOptionsHtml(evt.models, curSel);
+      if (msel) msel.innerHTML = groupedHtml;
+      if (cfgMid && cfgMid.tagName === 'SELECT') {
+        cfgMid.innerHTML = groupedHtml;
+        if (curSel) cfgMid.value = curSel;
       }
+      if (typeof syncAllCustomSelects === 'function') syncAllCustomSelects();
     }
     if (evt.model) {
       const msel = document.getElementById('model-select');
@@ -14115,6 +14190,9 @@ function handleRealtimeEvent(evt) {
     if (evt.type === 'subagent_envelope' && (evt.recipient_thread_id === currentThreadId || evt.sender_thread_id === currentThreadId) && !ensureThreadRuntime(currentThreadId).running) {
       loadMessages(currentThreadId);
     }
+  } else if (evt.type === 'oauth_updated') {
+    if (typeof ingestExternalOAuthStatus === 'function') ingestExternalOAuthStatus(evt);
+    refreshModelsFromConnectedBaseUrl({ silent: true });
   } else if (evt.type === 'workspace_state_updated' && evt.state) {
     if (workspaceStateReady && !draggedRailPanel && !persistWsTimer && (Date.now() - lastLocalWsPersistTs > 800)) {
       const normalized = normalizeWorkspaceStateObject(evt.state);
@@ -26061,7 +26139,9 @@ function formatChatModelOptionParts(m) {
   if (tailSegs.length > 0) {
     extraMeta = [extraMeta, ...tailSegs].filter(Boolean).join(' · ');
   }
-  const provRaw = String((m && m.provider) || '').trim();
+  const isOpenAiOauth = id.startsWith('openai-oauth/') || (m && m.provider === 'openai-oauth');
+  const isClaudeOauth = id.startsWith('claude-oauth/') || (m && m.provider === 'claude-oauth');
+  const provRaw = String((m && m.provider) || (isOpenAiOauth ? 'openai-oauth' : isClaudeOauth ? 'claude-oauth' : '')).trim();
   if (provRaw && !extraMeta.toLowerCase().includes(provRaw.toLowerCase())) {
     extraMeta = [provRaw.toUpperCase(), extraMeta].filter(Boolean).join(' · ');
   }
@@ -26069,7 +26149,11 @@ function formatChatModelOptionParts(m) {
     extraMeta = [extraMeta, String(m.description).trim()].filter(Boolean).join(' · ');
   }
   const shortLabel = id || segs[0] || rawFull;
-  const tag = provRaw ? provRaw.toUpperCase() : inferModelFamilyTag(shortLabel);
+  const tag = isOpenAiOauth
+    ? 'OPENAI OAUTH'
+    : isClaudeOauth
+      ? 'CLAUDE OAUTH'
+      : (provRaw ? provRaw.toUpperCase() : inferModelFamilyTag(shortLabel));
   return { id: shortLabel, shortLabel, tag, desc: extraMeta };
 }
 
@@ -26136,10 +26220,7 @@ function syncStudioModelsFromCatalog(data) {
     const targetChat = data.chatModels.some(m => String(m.id) === curChat)
       ? curChat
       : String(data.chatModels[0].id || '');
-    const chatHtml = data.chatModels.map(m => {
-      const p = formatChatModelOptionParts(m);
-      return `<option value="${escapeHtml(p.id)}" data-short-label="${escapeHtml(p.shortLabel)}" data-opt-tag="${escapeHtml(p.tag)}" data-opt-desc="${escapeHtml(p.desc)}" ${p.id === targetChat ? 'selected' : ''}>${escapeHtml(p.shortLabel)}</option>`;
-    }).join('');
+    const chatHtml = renderGroupedChatModelOptionsHtml(data.chatModels, targetChat);
     if (msel) {
       msel.innerHTML = chatHtml;
       if (targetChat) msel.value = targetChat;
@@ -26152,6 +26233,7 @@ function syncStudioModelsFromCatalog(data) {
         cfgMid.value = targetChat;
       }
     }
+    if (typeof syncAllCustomSelects === 'function') syncAllCustomSelects();
   }
   if (Array.isArray(data.imageModels)) {
     const imgSel = document.getElementById('img-model-select');
@@ -31705,6 +31787,429 @@ function bindComposerAttachmentsAndDnD() {
   }
 }
 bindComposerAttachmentsAndDnD();
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * EXTERNAL AI SUBSCRIPTION OAUTH (OPENAI CHATGPT/CODEX & ANTHROPIC CLAUDE)
+ * ═══════════════════════════════════════════════════════════════════════════ */
+let lastCachedChatModelsList = [];
+
+function classifyChatModelOAuthGroup(m) {
+  const id = String((m && m.id) || (typeof m === 'string' ? m : '') || '').trim();
+  const prov = String((m && m.provider) || '').trim().toLowerCase();
+  if (id.startsWith('openai-oauth/') || prov === 'openai-oauth') return 'openai-oauth';
+  if (id.startsWith('claude-oauth/') || prov === 'claude-oauth') return 'claude-oauth';
+  return 'cheapai';
+}
+
+function renderGroupedChatModelOptionsHtml(models, selectedId) {
+  const list = Array.isArray(models) ? models : [];
+  lastCachedChatModelsList = list;
+  const buildOpt = (m) => {
+    const p = formatChatModelOptionParts(m);
+    const selAttr = p.id === selectedId ? ' selected' : '';
+    return `<option value="${escapeHtml(p.id)}" data-short-label="${escapeHtml(p.shortLabel)}" data-opt-tag="${escapeHtml(p.tag)}" data-opt-desc="${escapeHtml(p.desc)}"${selAttr}>${escapeHtml(p.shortLabel)}</option>`;
+  };
+  const cheapaiList = [];
+  const openaiList = [];
+  const claudeList = [];
+  list.forEach(m => {
+    const g = classifyChatModelOAuthGroup(m);
+    if (g === 'openai-oauth') openaiList.push(m);
+    else if (g === 'claude-oauth') claudeList.push(m);
+    else cheapaiList.push(m);
+  });
+  if (openaiList.length === 0 && claudeList.length === 0) {
+    return list.map(buildOpt).join('');
+  }
+  const parts = [];
+  if (cheapaiList.length > 0) {
+    parts.push(`<optgroup label="${escapeHtml(translateUiString('CheapAI 통합 모델', currentUiLang))}">${cheapaiList.map(buildOpt).join('')}</optgroup>`);
+  }
+  if (openaiList.length > 0) {
+    parts.push(`<optgroup label="${escapeHtml(translateUiString('OpenAI OAuth (직접 연결)', currentUiLang))}">${openaiList.map(buildOpt).join('')}</optgroup>`);
+  }
+  if (claudeList.length > 0) {
+    parts.push(`<optgroup label="${escapeHtml(translateUiString('Claude OAuth (직접 연결)', currentUiLang))}">${claudeList.map(buildOpt).join('')}</optgroup>`);
+  }
+  return parts.join('');
+}
+
+const externalOAuthState = {
+  providers: {
+    openai: { provider: 'openai', connected: false, email: '', accountId: '', expiresAt: 0, pending: false, authUrl: '', redirectUri: '', models: ['openai-oauth/gpt-5.4', 'openai-oauth/gpt-5.3-codex', 'openai-oauth/gpt-5-mini', 'openai-oauth/o3'] },
+    claude: { provider: 'claude', connected: false, email: '', accountId: '', expiresAt: 0, pending: false, authUrl: '', redirectUri: '', models: ['claude-oauth/claude-opus-4-6', 'claude-oauth/claude-sonnet-4-6', 'claude-oauth/claude-haiku-4-5'] }
+  },
+  manualOpen: { openai: false, claude: false },
+  busy: { openai: false, claude: false },
+  errors: { openai: '', claude: '' },
+  pendingUrls: { openai: '', claude: '' },
+  pendingSessionIds: { openai: '', claude: '' },
+  codeDrafts: { openai: '', claude: '' }
+};
+
+function extOAuthText(ko, en) {
+  return currentUiLang === 'en' ? en : ko;
+}
+
+function externalOAuthBrandSvg(provider) {
+  if (provider === 'openai') {
+    return '<svg class="solar-icon sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 10.5 12 7l3.5 3.5M8.5 13.5 12 17l3.5-3.5"/></svg>';
+  }
+  return '<svg class="solar-icon sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4 5.5 20h3l1.4-3.6h4.2L15.5 20h3L12 4Z"/><path d="M10.8 13.8 12 10.4l1.2 3.4h-2.4Z"/></svg>';
+}
+
+function ingestExternalOAuthStatus(payload) {
+  if (!payload || typeof payload !== 'object') return;
+  const srcProviders = payload.providers || (payload.status && payload.status.providers) || null;
+  if (srcProviders && typeof srcProviders === 'object') {
+    ['openai', 'claude'].forEach(p => {
+      if (srcProviders[p] && typeof srcProviders[p] === 'object') {
+        const next = { ...externalOAuthState.providers[p], ...srcProviders[p], provider: p };
+        externalOAuthState.providers[p] = next;
+        if (next.authUrl) externalOAuthState.pendingUrls[p] = next.authUrl;
+        if (next.connected) {
+          externalOAuthState.manualOpen[p] = false;
+          externalOAuthState.pendingUrls[p] = '';
+          externalOAuthState.pendingSessionIds[p] = '';
+          externalOAuthState.codeDrafts[p] = '';
+          externalOAuthState.errors[p] = '';
+        }
+      }
+    });
+  } else if (payload.provider === 'openai' || payload.provider === 'claude') {
+    const p = payload.provider;
+    externalOAuthState.providers[p] = { ...externalOAuthState.providers[p], ...payload };
+    if (payload.authUrl) externalOAuthState.pendingUrls[p] = payload.authUrl;
+    if (payload.sessionId) externalOAuthState.pendingSessionIds[p] = payload.sessionId;
+  }
+  renderExternalOAuthCards();
+}
+
+async function refreshExternalOAuthStatus() {
+  try {
+    const res = await api('/api/oauth/status', 'GET');
+    if (res && res.ok !== false && res.providers) {
+      ingestExternalOAuthStatus(res);
+    } else {
+      renderExternalOAuthCards();
+    }
+  } catch (_) {
+    renderExternalOAuthCards();
+  }
+}
+
+function renderExternalOAuthCards() {
+  refreshExternalOAuthUiLocaleHeadersOnly();
+  ['openai', 'claude'].forEach(renderSingleExternalOAuthCard);
+}
+
+function refreshExternalOAuthUiLocaleHeadersOnly() {
+  const defBadge = document.getElementById('cfg-auth-default-badge');
+  if (defBadge) defBadge.textContent = extOAuthText('권장 · 통합 기본', 'Recommended · Default');
+  const titleEl = document.getElementById('ext-oauth-title-text');
+  if (titleEl) titleEl.textContent = extOAuthText('외부 AI 구독 직접 연결', 'External AI Subscriptions');
+  const vaultEl = document.getElementById('ext-oauth-vault-text');
+  if (vaultEl) vaultEl.textContent = extOAuthText('OAuth · 로컬 보안 볼트 암호화', 'OAuth · Local Vault Encrypted');
+  const linkEl = document.getElementById('cheapai-auth-ext-oauth-link');
+  if (linkEl) linkEl.textContent = extOAuthText('기존 ChatGPT / Claude 구독 계정 OAuth 연결 →', 'Connect existing ChatGPT / Claude via OAuth →');
+}
+
+function refreshExternalOAuthUiLocale() {
+  refreshExternalOAuthUiLocaleHeadersOnly();
+  ['openai', 'claude'].forEach(renderSingleExternalOAuthCard);
+  if (lastCachedChatModelsList.length > 0) {
+    const msel = document.getElementById('model-select');
+    const cfgMid = document.getElementById('cfg-model-id');
+    const curSel = msel?.value || cfgMid?.value || '';
+    const html = renderGroupedChatModelOptionsHtml(lastCachedChatModelsList, curSel);
+    if (msel) {
+      msel.innerHTML = html;
+      if (curSel) msel.value = curSel;
+    }
+    if (cfgMid && cfgMid.tagName === 'SELECT') {
+      cfgMid.innerHTML = html;
+      if (curSel) cfgMid.value = curSel;
+    }
+  }
+}
+
+function renderSingleExternalOAuthCard(provider) {
+  const card = document.getElementById('oauth-card-' + provider);
+  if (!card) return;
+  const st = externalOAuthState.providers[provider] || {};
+  const connected = Boolean(st.connected);
+  const pending = Boolean(st.pending);
+  const manualOpen = Boolean(externalOAuthState.manualOpen[provider]);
+  const busy = Boolean(externalOAuthState.busy[provider]);
+  const errMsg = externalOAuthState.errors[provider] || '';
+  const authUrl = st.authUrl || externalOAuthState.pendingUrls[provider] || '';
+  const codeDraft = externalOAuthState.codeDrafts[provider] || '';
+
+  card.classList.toggle('is-connected', connected);
+
+  const brandTitle = provider === 'openai' ? 'OpenAI (ChatGPT / Codex)' : 'Anthropic (Claude)';
+  const brandSub = provider === 'openai'
+    ? extOAuthText('ChatGPT Plus · Pro · Team 구독 OAuth', 'ChatGPT Plus · Pro · Team OAuth')
+    : extOAuthText('Claude Pro · Max 구독 OAuth', 'Claude Pro · Max Subscription OAuth');
+
+  let statusClass = '';
+  let statusText = extOAuthText('미연결', 'Not connected');
+  if (connected) {
+    statusClass = 'is-connected';
+    statusText = extOAuthText('연결됨', 'Connected');
+  } else if (pending || manualOpen) {
+    statusClass = 'is-pending';
+    statusText = extOAuthText('인증 대기', 'Pending');
+  }
+
+  let bodyHtml = '';
+  if (connected) {
+    const identity = st.email || st.accountId || extOAuthText('OAuth 계정 연결됨', 'OAuth account linked');
+    const expStr = st.expiresAt ? new Date(Number(st.expiresAt) * 1000).toLocaleString() : '';
+    const subMeta = st.email && st.accountId ? st.accountId : (expStr ? extOAuthText('만료: ', 'Expires: ') + expStr : '');
+    bodyHtml = `
+      <div class="ext-oauth-account-info">
+        <div class="ext-oauth-account-line" title="${escapeHtml(identity)}">${escapeHtml(identity)}</div>
+        ${subMeta ? `<div class="ext-oauth-brand-sub" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(subMeta)}</div>` : ''}
+      </div>
+      <div class="ext-oauth-actions">
+        <button type="button" class="btn primary" id="oauth-use-${provider}" onclick="selectExternalOAuthModel('${provider}')" ${busy ? 'disabled' : ''}>
+          <span>${escapeHtml(extOAuthText('이 계정 모델 선택', 'Use This Model'))}</span>
+        </button>
+        <button type="button" class="btn" id="oauth-disconnect-${provider}" onclick="disconnectExternalOAuth('${provider}')" ${busy ? 'disabled' : ''}>
+          <span>${escapeHtml(extOAuthText('연결 해제', 'Disconnect'))}</span>
+        </button>
+      </div>
+    `;
+  } else {
+    const loginLabel = provider === 'openai'
+      ? extOAuthText('OpenAI OAuth 로그인', 'OpenAI OAuth Login')
+      : extOAuthText('Claude OAuth 로그인', 'Claude OAuth Login');
+    bodyHtml = `
+      <div class="ext-oauth-actions">
+        <button type="button" class="btn primary" id="oauth-login-${provider}" onclick="startExternalOAuth('${provider}', 'loopback')" ${busy ? 'disabled' : ''}>
+          <svg class="solar-icon sm"><use href="#solar-globe"/></svg>
+          <span>${escapeHtml(loginLabel)}</span>
+        </button>
+        ${provider === 'claude' ? `
+          <button type="button" class="btn" id="oauth-console-${provider}" onclick="startExternalOAuth('claude', 'manual')" ${busy ? 'disabled' : ''}>
+            <span>${escapeHtml(extOAuthText('콘솔 코드 방식', 'Console Code'))}</span>
+          </button>
+        ` : ''}
+        <button type="button" class="btn ghost ext-oauth-manual-link" id="oauth-manual-toggle-${provider}" onclick="toggleExternalOAuthManual('${provider}')" ${busy ? 'disabled' : ''}>
+          <span>${escapeHtml(manualOpen ? extOAuthText('접기', 'Hide') : extOAuthText('수동 코드 입력', 'Manual code'))}</span>
+        </button>
+      </div>
+    `;
+
+    if (pending || manualOpen) {
+      const hint = extOAuthText(
+        '브라우저 인증 완료 시 자동 연결되며, 환경에 따라 아래에 콜백 URL 또는 code#state를 붙여넣어 완료할 수 있습니다.',
+        'Completes automatically after browser sign-in, or paste the callback URL / code#state below.'
+      );
+      bodyHtml += `
+        <div class="ext-oauth-manual-box" id="oauth-manual-box-${provider}">
+          <div class="ext-oauth-manual-hint">${escapeHtml(hint)}</div>
+          <div class="ext-oauth-manual-btns">
+            <button type="button" class="btn" id="oauth-reopen-${provider}" onclick="reopenExternalOAuthBrowser('${provider}')" ${busy ? 'disabled' : ''}>
+              <svg class="solar-icon sm"><use href="#solar-globe"/></svg>
+              <span>${escapeHtml(extOAuthText('브라우저 다시 열기', 'Reopen Browser'))}</span>
+            </button>
+            <button type="button" class="btn" id="oauth-copyurl-${provider}" onclick="copyExternalOAuthUrl('${provider}')" ${busy ? 'disabled' : ''}>
+              <svg class="solar-icon sm"><use href="#solar-copy"/></svg>
+              <span>${escapeHtml(extOAuthText('인증 URL 복사', 'Copy Auth URL'))}</span>
+            </button>
+          </div>
+          <div class="ext-oauth-code-row">
+            <input type="text" id="oauth-code-input-${provider}" value="${escapeHtml(codeDraft)}" oninput="externalOAuthState.codeDrafts['${provider}']=this.value" placeholder="${escapeHtml(extOAuthText('콜백 URL 또는 인증 코드(code#state) 붙여넣기', 'Paste callback URL or code#state'))}" autocomplete="off" spellcheck="false" />
+            <button type="button" class="btn primary" id="oauth-exchange-${provider}" onclick="exchangeExternalOAuthCode('${provider}')" ${busy ? 'disabled' : ''}>${escapeHtml(extOAuthText('연결 완료', 'Complete Connect'))}</button>
+          </div>
+        </div>
+      `;
+    }
+  }
+
+  if (errMsg) {
+    bodyHtml += `<div class="ext-oauth-err" id="oauth-err-${provider}">${escapeHtml(errMsg)}</div>`;
+  }
+
+  card.innerHTML = `
+    <div class="ext-oauth-card-top">
+      <div class="ext-oauth-brand">
+        <span class="ext-oauth-brand-icon">${externalOAuthBrandSvg(provider)}</span>
+        <div class="ext-oauth-brand-text">
+          <span class="ext-oauth-brand-name">${escapeHtml(brandTitle)}</span>
+          <span class="ext-oauth-brand-sub">${escapeHtml(brandSub)}</span>
+        </div>
+      </div>
+      <span class="ext-oauth-status-pill ${statusClass}" id="oauth-status-pill-${provider}">
+        <span class="ext-oauth-dot"></span>
+        <span>${escapeHtml(statusText)}</span>
+      </span>
+    </div>
+    ${bodyHtml}
+    ${authUrl ? `<input type="hidden" id="oauth-auth-url-${provider}" value="${escapeHtml(authUrl)}" />` : ''}
+  `;
+}
+
+async function startExternalOAuth(provider, redirectMode = 'loopback', openBrowser = true) {
+  externalOAuthState.busy[provider] = true;
+  externalOAuthState.errors[provider] = '';
+  externalOAuthState.manualOpen[provider] = true;
+  renderSingleExternalOAuthCard(provider);
+  try {
+    const res = await api(`/api/oauth/${provider}/start`, 'POST', {
+      open_browser: openBrowser,
+      redirect_mode: redirectMode
+    });
+    if (res && res.ok) {
+      if (res.authUrl) externalOAuthState.pendingUrls[provider] = res.authUrl;
+      if (res.sessionId) externalOAuthState.pendingSessionIds[provider] = res.sessionId;
+      externalOAuthState.providers[provider] = {
+        ...externalOAuthState.providers[provider],
+        pending: true,
+        authUrl: res.authUrl || externalOAuthState.pendingUrls[provider] || '',
+        redirectUri: res.redirectUri || ''
+      };
+      if (openBrowser && res.authUrl && !res.browserOpened && typeof openCheapAiExternalUrl === 'function') {
+        // Server handles open_browser:true natively; no duplicate open unless requested by Reopen button.
+      }
+    } else {
+      externalOAuthState.errors[provider] = (res && res.error) || extOAuthText('OAuth 인증을 시작하지 못했습니다.', 'Could not start OAuth login.');
+    }
+  } catch (err) {
+    externalOAuthState.errors[provider] = (err && err.message) || String(err);
+  } finally {
+    externalOAuthState.busy[provider] = false;
+    renderSingleExternalOAuthCard(provider);
+  }
+}
+
+function toggleExternalOAuthManual(provider) {
+  externalOAuthState.manualOpen[provider] = !externalOAuthState.manualOpen[provider];
+  externalOAuthState.errors[provider] = '';
+  renderSingleExternalOAuthCard(provider);
+}
+
+async function reopenExternalOAuthBrowser(provider) {
+  const url = externalOAuthState.providers[provider]?.authUrl || externalOAuthState.pendingUrls[provider] || '';
+  if (url) {
+    await openCheapAiExternalUrl(url);
+    return;
+  }
+  await startExternalOAuth(provider, 'loopback', true);
+}
+
+async function copyExternalOAuthUrl(provider) {
+  let url = externalOAuthState.providers[provider]?.authUrl || externalOAuthState.pendingUrls[provider] || '';
+  if (!url) {
+    await startExternalOAuth(provider, 'manual', false);
+    url = externalOAuthState.providers[provider]?.authUrl || externalOAuthState.pendingUrls[provider] || '';
+  }
+  if (!url) return;
+  try {
+    await navigator.clipboard.writeText(url);
+    if (typeof showCustomToast === 'function') {
+      showCustomToast(extOAuthText('OAuth 인증 URL을 복사했습니다.', 'OAuth authorization URL copied.'), 'OAUTH');
+    }
+  } catch (_) {
+    externalOAuthState.errors[provider] = url;
+    renderSingleExternalOAuthCard(provider);
+  }
+}
+
+async function exchangeExternalOAuthCode(provider) {
+  const inp = document.getElementById('oauth-code-input-' + provider);
+  const code = String((inp ? inp.value : externalOAuthState.codeDrafts[provider]) || '').trim();
+  if (!code) {
+    externalOAuthState.errors[provider] = extOAuthText('콜백 URL 또는 인증 코드를 붙여넣어 주세요.', 'Paste callback URL or authorization code.');
+    renderSingleExternalOAuthCard(provider);
+    return;
+  }
+  externalOAuthState.busy[provider] = true;
+  externalOAuthState.errors[provider] = '';
+  renderSingleExternalOAuthCard(provider);
+  try {
+    const res = await api(`/api/oauth/${provider}/exchange`, 'POST', {
+      code,
+      sessionId: externalOAuthState.pendingSessionIds[provider] || ''
+    });
+    if (res && res.ok) {
+      ingestExternalOAuthStatus(res.status || res);
+      await refreshModelsFromConnectedBaseUrl({ silent: true });
+      if (typeof showCustomToast === 'function') {
+        showCustomToast(extOAuthText(`${provider.toUpperCase()} OAuth 연결 완료`, `${provider.toUpperCase()} OAuth connected`), 'OAUTH');
+      }
+    } else {
+      externalOAuthState.errors[provider] = (res && res.error) || extOAuthText('OAuth 코드 교환에 실패했습니다.', 'Failed to exchange OAuth code.');
+    }
+  } catch (err) {
+    externalOAuthState.errors[provider] = (err && err.message) || String(err);
+  } finally {
+    externalOAuthState.busy[provider] = false;
+    renderSingleExternalOAuthCard(provider);
+  }
+}
+
+async function selectExternalOAuthModel(provider) {
+  const st = externalOAuthState.providers[provider] || {};
+  const list = Array.isArray(st.models) ? st.models : [];
+  const preferred = provider === 'openai'
+    ? (list.includes('openai-oauth/gpt-5.4') ? 'openai-oauth/gpt-5.4' : (list[0] || 'openai-oauth/gpt-5.4'))
+    : (list.includes('claude-oauth/claude-sonnet-4-6') ? 'claude-oauth/claude-sonnet-4-6' : (list[0] || 'claude-oauth/claude-sonnet-4-6'));
+
+  await refreshModelsFromConnectedBaseUrl({ silent: true });
+  const msel = document.getElementById('model-select');
+  const cfgMid = document.getElementById('cfg-model-id');
+  [msel, cfgMid].forEach(sel => {
+    if (!sel || sel.tagName !== 'SELECT') return;
+    if (![...sel.options].some(o => o.value === preferred)) {
+      const opt = document.createElement('option');
+      opt.value = preferred;
+      opt.textContent = preferred;
+      sel.appendChild(opt);
+    }
+    sel.value = preferred;
+  });
+  if (cfgMid && cfgMid.tagName !== 'SELECT') cfgMid.value = preferred;
+  await saveModelConfig();
+  if (typeof syncAllCustomSelects === 'function') syncAllCustomSelects();
+  if (typeof showCustomToast === 'function') {
+    showCustomToast(extOAuthText(`활성 모델 변경: ${preferred}`, `Active model switched to ${preferred}`), 'MODEL');
+  }
+}
+
+async function disconnectExternalOAuth(provider) {
+  externalOAuthState.busy[provider] = true;
+  externalOAuthState.errors[provider] = '';
+  renderSingleExternalOAuthCard(provider);
+  try {
+    const res = await api(`/api/oauth/${provider}`, 'DELETE');
+    if (res && res.ok !== false) {
+      if (res.status || res.providers) ingestExternalOAuthStatus(res.status || res);
+      else await refreshExternalOAuthStatus();
+      await refreshModelsFromConnectedBaseUrl({ silent: true });
+      if (typeof showCustomToast === 'function') {
+        showCustomToast(extOAuthText(`${provider.toUpperCase()} OAuth 연결을 해제했습니다.`, `Disconnected ${provider.toUpperCase()} OAuth.`), 'OAUTH');
+      }
+    } else {
+      externalOAuthState.errors[provider] = (res && res.error) || extOAuthText('연결 해제에 실패했습니다.', 'Failed to disconnect.');
+    }
+  } finally {
+    externalOAuthState.busy[provider] = false;
+    renderSingleExternalOAuthCard(provider);
+  }
+}
+
+function openExternalOAuthFromOnboarding() {
+  closeCheapAiAuthOverlay();
+  openApiSettingsModal('account');
+  requestAnimationFrame(() => {
+    document.getElementById('external-oauth-section')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
+}
+
+renderExternalOAuthCards();
 </script>
 </body>
 </html>
