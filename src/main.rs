@@ -17,6 +17,7 @@ pub mod crew;
 pub mod cua;
 pub mod db;
 pub mod dpi_win32;
+pub mod encoding;
 pub mod github;
 pub mod llm;
 pub mod media;

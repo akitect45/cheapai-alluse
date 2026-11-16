@@ -41,6 +41,9 @@ pub const RDW_ALLCHILDREN: UINT = 0x0080;
 pub const RDW_UPDATENOW: UINT = 0x0100;
 pub const RDW_FRAME: UINT = 0x0400;
 pub const GCLP_HBRBACKGROUND: i32 = -10;
+pub const CP_UTF8: UINT = 65001;
+pub const MB_ERR_INVALID_CHARS: DWORD = 0x0000_0008;
+pub const WC_NO_BEST_FIT_CHARS: DWORD = 0x0000_0400;
 
 // DPI Awareness Contexts
 pub const DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2: isize = -4;
@@ -545,6 +548,26 @@ unsafe extern "system" {
         lpTotalNumberOfFreeBytes: *mut u64,
     ) -> BOOL;
     pub fn GetTickCount64() -> u64;
+    pub fn GetACP() -> UINT;
+    pub fn GetOEMCP() -> UINT;
+    pub fn MultiByteToWideChar(
+        CodePage: UINT,
+        dwFlags: DWORD,
+        lpMultiByteStr: *const u8,
+        cbMultiByte: i32,
+        lpWideCharStr: *mut u16,
+        cchWideChar: i32,
+    ) -> i32;
+    pub fn WideCharToMultiByte(
+        CodePage: UINT,
+        dwFlags: DWORD,
+        lpWideCharStr: *const u16,
+        cchWideChar: i32,
+        lpMultiByteStr: *mut u8,
+        cbMultiByte: i32,
+        lpDefaultChar: *const u8,
+        lpUsedDefaultChar: *mut BOOL,
+    ) -> i32;
 }
 
 #[cfg(windows)]
