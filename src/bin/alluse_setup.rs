@@ -1649,7 +1649,8 @@ impl InstallEnv {
                         .join("CheapAI")
                         .join("AllUse")
                         .join("install-state.json");
-                    (inst.clone(), sm, inst, receipt)
+                    let bin_dir = home.join(".local").join("bin");
+                    (inst, sm, bin_dir, receipt)
                 }
                 "macos" => {
                     let apps = home.join("Applications");
@@ -1845,8 +1846,9 @@ fn normalize_cmp_path(p: &Path, is_windows: bool) -> String {
 /// Returns `true` if `candidate` is a root, home, user-data, or system directory that must NEVER
 /// be wiped or accepted as an unsafe install/uninstall target.
 pub fn is_protected_directory(candidate: &Path, env: &InstallEnv) -> bool {
-    let is_win = env.target_os == "windows" || cfg!(windows);
+    let is_win = env.target_os == "windows";
     let norm = normalize_cmp_path(candidate, is_win);
+    let norm_low = norm.to_ascii_lowercase();
     if norm.is_empty() || norm == "." || norm == ".." || norm == "/" || norm == "\\" {
         return true;
     }
@@ -1856,9 +1858,10 @@ pub fn is_protected_directory(candidate: &Path, env: &InstallEnv) -> bool {
             return true;
         }
         if matches!(
-            norm.as_str(),
+            norm_low.as_str(),
             r"c:\windows"
                 | r"c:\windows\system32"
+                | r"c:\windows\syswow64"
                 | r"c:\program files"
                 | r"c:\program files (x86)"
                 | r"c:\programdata"
@@ -1867,7 +1870,7 @@ pub fn is_protected_directory(candidate: &Path, env: &InstallEnv) -> bool {
             return true;
         }
     } else if matches!(
-        norm.as_str(),
+        norm_low.as_str(),
         "/bin"
             | "/sbin"
             | "/usr"
@@ -1898,12 +1901,13 @@ pub fn is_protected_directory(candidate: &Path, env: &InstallEnv) -> bool {
         env.user_data_dir.clone(),
         env.desktop_dir.clone(),
         env.start_menu_dir.clone(),
-        env.local_bin_dir.clone(),
         env.home_dir.join("Applications"),
         env.home_dir.join("Documents"),
         env.home_dir.join("Downloads"),
+        env.home_dir.join("OneDrive"),
         env.home_dir.join("Library"),
         env.home_dir.join(".local"),
+        env.home_dir.join(".local").join("bin"),
         env.home_dir.join(".local").join("share"),
         env.home_dir.join(".config"),
         env.home_dir.join("AppData"),
@@ -1911,6 +1915,17 @@ pub fn is_protected_directory(candidate: &Path, env: &InstallEnv) -> bool {
         env.home_dir.join("AppData").join("Local").join("Programs"),
         env.home_dir.join("AppData").join("Roaming"),
     ];
+    if let Some(receipt_parent) = env.state_receipt_path.parent()
+        && normalize_cmp_path(receipt_parent, is_win)
+            != normalize_cmp_path(&env.default_install_dir, is_win)
+    {
+        protected_paths.push(receipt_parent.to_path_buf());
+    }
+    if normalize_cmp_path(&env.local_bin_dir, is_win)
+        != normalize_cmp_path(&env.default_install_dir, is_win)
+    {
+        protected_paths.push(env.local_bin_dir.clone());
+    }
 
     if !env.sandbox_mode {
         for var in [
@@ -1919,6 +1934,8 @@ pub fn is_protected_directory(candidate: &Path, env: &InstallEnv) -> bool {
             "ProgramFiles",
             "ProgramFiles(x86)",
             "ProgramW6432",
+            "ProgramData",
+            "ALLUSERSPROFILE",
             "APPDATA",
             "LOCALAPPDATA",
             "USERPROFILE",
@@ -1927,15 +1944,23 @@ pub fn is_protected_directory(candidate: &Path, env: &InstallEnv) -> bool {
                 let pb = PathBuf::from(val);
                 if var == "LOCALAPPDATA" {
                     protected_paths.push(pb.join("Programs"));
+                } else if var == "WINDIR" || var == "SystemRoot" {
+                    protected_paths.push(pb.join("System32"));
                 }
                 protected_paths.push(pb);
             }
         }
     }
 
-    protected_paths
-        .iter()
-        .any(|p| normalize_cmp_path(p, is_win) == norm)
+    let cmp_case_insensitive = is_win || env.target_os == "macos";
+    protected_paths.iter().any(|p| {
+        let pn = normalize_cmp_path(p, is_win);
+        if cmp_case_insensitive {
+            pn.eq_ignore_ascii_case(&norm)
+        } else {
+            pn == norm
+        }
+    })
 }
 
 fn resolve_target_install_dir(raw_dir: &str, env: &InstallEnv) -> Result<PathBuf> {
@@ -4915,11 +4940,76 @@ mod tests {
                 "~/.alluse must be removed when --wipe-data is explicitly passed ({sim_os})"
             );
 
-            // 4. Protected directory guard must block home_dir and user_data_dir
+            // 4. Protected directory guard must block home_dir and user_data_dir while allowing default_install_dir
             assert!(is_protected_directory(&env.home_dir, &env));
             assert!(is_protected_directory(&env.user_data_dir, &env));
+            assert!(!is_protected_directory(&env.default_install_dir, &env));
             assert!(resolve_target_install_dir(&env.home_dir.to_string_lossy(), &env).is_err());
+            assert_eq!(
+                resolve_target_install_dir("", &env).expect("empty input resolves to default"),
+                env.default_install_dir
+            );
         }
+    }
+
+    #[test]
+    fn host_protected_directory_allows_app_subfolders_and_blocks_dangerous_roots() {
+        let mut host_env = InstallEnv::host();
+        host_env.sandbox_mode = false;
+        assert!(
+            !is_protected_directory(&host_env.default_install_dir, &host_env),
+            "default_install_dir must NEVER be rejected: {}",
+            host_env.default_install_dir.display()
+        );
+        let resolved_default = resolve_target_install_dir("", &host_env)
+            .expect("empty raw dir should resolve to host default_install_dir");
+        assert_eq!(resolved_default, host_env.default_install_dir);
+
+        assert!(is_protected_directory(&host_env.home_dir, &host_env));
+        assert!(is_protected_directory(&host_env.user_data_dir, &host_env));
+
+        #[cfg(windows)]
+        {
+            let local_app_data = std::env::var_os("LOCALAPPDATA")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| host_env.home_dir.join("AppData").join("Local"));
+            let programs_root = local_app_data.join("Programs");
+            let default_app = programs_root.join(PRODUCT_NAME);
+            assert!(is_protected_directory(&local_app_data, &host_env));
+            assert!(is_protected_directory(&programs_root, &host_env));
+            assert!(!is_protected_directory(&default_app, &host_env));
+            assert!(resolve_target_install_dir(&default_app.to_string_lossy(), &host_env).is_ok());
+
+            let pf_root = std::env::var_os("ProgramFiles")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from(r"C:\Program Files"));
+            assert!(is_protected_directory(&pf_root, &host_env));
+            assert!(!is_protected_directory(&pf_root.join(PRODUCT_NAME), &host_env));
+            assert!(!is_protected_directory(Path::new(r"C:\Tools\CheapAI AllUse"), &host_env));
+            assert!(is_protected_directory(Path::new(r"C:\"), &host_env));
+            assert!(is_protected_directory(Path::new(r"C:\Windows"), &host_env));
+            assert!(is_protected_directory(Path::new(r"C:\Windows\SysWOW64"), &host_env));
+            assert!(is_protected_directory(Path::new(r"C:\Users"), &host_env));
+            assert!(is_protected_directory(&host_env.home_dir.join("OneDrive"), &host_env));
+            if let Some(rp) = host_env.state_receipt_path.parent() {
+                assert!(is_protected_directory(rp, &host_env));
+            }
+        }
+
+        // Cross-platform non-sandboxed macOS / Linux host-like simulations
+        let tmp_mac = TempTestDir::new("host_guard_mac");
+        let mut mac_env = InstallEnv::sandboxed(&tmp_mac.path, "macos");
+        mac_env.sandbox_mode = false;
+        assert!(!is_protected_directory(&mac_env.default_install_dir, &mac_env));
+        assert!(!is_protected_directory(Path::new("/Applications/CheapAI AllUse.app"), &mac_env));
+        assert!(is_protected_directory(Path::new("/Applications"), &mac_env));
+
+        let tmp_lin = TempTestDir::new("host_guard_lin");
+        let mut lin_env = InstallEnv::sandboxed(&tmp_lin.path, "linux");
+        lin_env.sandbox_mode = false;
+        assert!(!is_protected_directory(&lin_env.default_install_dir, &lin_env));
+        assert!(!is_protected_directory(Path::new("/opt/cheapai-alluse"), &lin_env));
+        assert!(is_protected_directory(Path::new("/opt"), &lin_env));
     }
 
     #[test]
