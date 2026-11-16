@@ -32,6 +32,55 @@ pub fn is_binary_bytes(bytes: &[u8]) -> bool {
     inspect.iter().take(4096).any(|&b| b == 0)
 }
 
+fn contains_hangul(s: &str) -> bool {
+    s.chars()
+        .any(|c| ('\u{AC00}'..='\u{D7A3}').contains(&c) || ('\u{3131}'..='\u{318E}').contains(&c))
+}
+
+fn contains_valid_multibyte_utf8(bytes: &[u8]) -> bool {
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] >= 0x80 {
+            if let Some(w) = utf8_char_width_at(&bytes[i..])
+                && w >= 3
+            {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
+/// Decodes non-UTF-8 bytes using `cps`. When a non-Korean single-byte ACP/OEM codepage
+/// (e.g. English Windows `1252` / `437`) precedes `949`, single-byte codepages accept
+/// arbitrary `0x80..=0xFF` bytes as Latin mojibake (`À§Ä¡`), so strict `949` with
+/// actual Hangul characters is checked before single-byte fallback.
+fn decode_non_utf8_with_codepages(
+    bytes: &[u8],
+    cps: &[u32],
+    defer_single_byte_if_utf8_mixed: bool,
+) -> Option<(String, u32)> {
+    let first_is_korean = matches!(cps.first(), Some(949 | 51949));
+    if !first_is_korean && cps.contains(&949) {
+        if let Some(decoded_949) = try_decode_codepage_strict(bytes, 949)
+            && contains_hangul(&decoded_949)
+        {
+            return Some((decoded_949, 949));
+        }
+    }
+    let has_utf8 = defer_single_byte_if_utf8_mixed && contains_valid_multibyte_utf8(bytes);
+    for &cp in cps {
+        if has_utf8 && !matches!(cp, 949 | 51949 | 932 | 936 | 950) {
+            continue;
+        }
+        if let Some(decoded) = try_decode_codepage_strict(bytes, cp) {
+            return Some((decoded, cp));
+        }
+    }
+    None
+}
+
 fn candidate_codepages() -> Vec<u32> {
     let mut cps = Vec::with_capacity(4);
     #[cfg(windows)]
@@ -173,10 +222,8 @@ fn decode_mixed_line_body(line_body: &[u8], cps: &[u32]) -> String {
     if let Ok(s) = std::str::from_utf8(line_body) {
         return s.to_string();
     }
-    for &cp in cps {
-        if let Some(decoded) = try_decode_codepage_strict(line_body, cp) {
-            return decoded;
-        }
+    if let Some((decoded, _)) = decode_non_utf8_with_codepages(line_body, cps, true) {
+        return decoded;
     }
 
     // Intra-line mixed UTF-8 + CP949 recovery.
@@ -205,14 +252,7 @@ fn decode_mixed_line_body(line_body: &[u8], cps: &[u32]) -> String {
             out.push_str(s);
             continue;
         }
-        let mut decoded_seg = None;
-        for &cp in cps {
-            if let Some(s) = try_decode_codepage_strict(seg, cp) {
-                decoded_seg = Some(s);
-                break;
-            }
-        }
-        if let Some(s) = decoded_seg {
+        if let Some((s, _)) = decode_non_utf8_with_codepages(seg, cps, true) {
             out.push_str(&s);
             continue;
         }
@@ -236,14 +276,7 @@ fn decode_mixed_line_body(line_body: &[u8], cps: &[u32]) -> String {
                 }
             }
             if p + 2 <= seg.len() {
-                let mut pair_decoded = None;
-                for &cp in cps {
-                    if let Some(s) = try_decode_codepage_strict(&seg[p..p + 2], cp) {
-                        pair_decoded = Some(s);
-                        break;
-                    }
-                }
-                if let Some(s) = pair_decoded {
+                if let Some((s, _)) = decode_non_utf8_with_codepages(&seg[p..p + 2], cps, false) {
                     out.push_str(&s);
                     p += 2;
                     continue;
@@ -328,10 +361,9 @@ pub fn decode_file_bytes(bytes: &[u8]) -> Result<Option<(String, DetectedTextEnc
     if let Ok(s) = std::str::from_utf8(bytes) {
         return Ok(Some((s.to_string(), DetectedTextEncoding::Utf8)));
     }
-    for cp in candidate_codepages() {
-        if let Some(decoded) = try_decode_codepage_strict(bytes, cp) {
-            return Ok(Some((decoded, DetectedTextEncoding::WindowsCodePage(cp))));
-        }
+    let cps = candidate_codepages();
+    if let Some((decoded, cp)) = decode_non_utf8_with_codepages(bytes, &cps, false) {
+        return Ok(Some((decoded, DetectedTextEncoding::WindowsCodePage(cp))));
     }
     Ok(Some((
         decode_process_bytes(bytes),
@@ -641,5 +673,33 @@ mod tests {
         {
             assert!(!decoded.is_empty());
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_cp949_wins_over_english_windows_1252_437_without_breaking_latin1() {
+        let english_ci_cps = [1252u32, 437, 949, 51949];
+        // CP949 "위치 줄:1 문자:175\r\n빈 파이프 요소는 허용되지 않습니다."
+        let cp949_line = vec![
+            0xC0, 0xA7, 0xC4, 0xA1, 0x20, 0xC1, 0xD9, 0x3A, 0x31, 0x20, 0xB9, 0xAE, 0xC0, 0xDA,
+            0x3A, 0x31, 0x37, 0x35,
+        ];
+        let (decoded_kr, cp_kr) =
+            decode_non_utf8_with_codepages(&cp949_line, &english_ci_cps, true).unwrap();
+        assert_eq!(cp_kr, 949);
+        assert_eq!(decoded_kr, "위치 줄:1 문자:175");
+
+        // Genuine Windows-1252 "Café © 2026"
+        let win1252_line = b"Caf\xe9 \xa9 2026";
+        let (decoded_en, cp_en) =
+            decode_non_utf8_with_codepages(win1252_line, &english_ci_cps, false).unwrap();
+        assert_eq!(cp_en, 1252);
+        assert_eq!(decoded_en, "Café © 2026");
+
+        // Single-line mixed UTF-8 + CP949 with English ACP=1252
+        let mut mixed_line = "UTF8정상: ".as_bytes().to_vec();
+        mixed_line.extend_from_slice(&[0xC0, 0xA7, 0xC4, 0xA1]); // 위치
+        let recovered = decode_mixed_line_body(&mixed_line, &english_ci_cps);
+        assert_eq!(recovered, "UTF8정상: 위치");
     }
 }
