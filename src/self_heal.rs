@@ -530,7 +530,7 @@ pub fn check_hiberboot_safe() -> (bool, String) {
             .creation_flags(CREATE_NO_WINDOW)
             .output();
         if let Ok(o) = out {
-            let text = String::from_utf8_lossy(&o.stdout);
+            let text = crate::encoding::decode_process_bytes(&o.stdout);
             if text.contains("0x0") {
                 return (
                     true,
@@ -1415,10 +1415,17 @@ pub async fn run_ai_assisted_repair(
                 if !ps.is_empty() && !dangerous {
                     #[cfg(windows)]
                     let mut ps_cmd = {
+                        let ps_wrapped = crate::encoding::wrap_powershell_utf8_command(ps);
                         let mut c = tokio::process::Command::new(
                             r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
                         );
-                        c.args(["-NoProfile", "-NonInteractive", "-Command", ps]);
+                        c.args(["-NoProfile", "-NonInteractive", "-Command", &ps_wrapped]);
+                        if std::env::var_os("PYTHONUTF8").is_none() {
+                            c.env("PYTHONUTF8", "1");
+                        }
+                        if std::env::var_os("PYTHONIOENCODING").is_none() {
+                            c.env("PYTHONIOENCODING", "utf-8");
+                        }
                         c.creation_flags(0x08000000);
                         c
                     };
@@ -1427,6 +1434,12 @@ pub async fn run_ai_assisted_repair(
                         let mut c = tokio::process::Command::new("sh");
                         c.args(["-c", ps]);
                         c.env("PATH", crate::config::augmented_env_path());
+                        if std::env::var_os("PYTHONUTF8").is_none() {
+                            c.env("PYTHONUTF8", "1");
+                        }
+                        if std::env::var_os("PYTHONIOENCODING").is_none() {
+                            c.env("PYTHONIOENCODING", "utf-8");
+                        }
                         #[cfg(unix)]
                         c.process_group(0);
                         c
@@ -1443,7 +1456,7 @@ pub async fn run_ai_assisted_repair(
                         ai_actions.push(format!(
                             "Executed AI PowerShell fix (exit={}): {}",
                             out.status.code().unwrap_or(-1),
-                            String::from_utf8_lossy(&out.stdout)
+                            crate::encoding::decode_process_bytes(&out.stdout)
                                 .trim()
                                 .chars()
                                 .take(160)
@@ -3774,10 +3787,14 @@ pub async fn execute_custom_tool(
                 (pwsh, ok)
             };
             #[cfg(windows)]
-            let mut prologue = String::from("$ARGS_JSON = $env:ALLUSE_TOOL_ARGS;\n");
+            let mut prologue = String::from(
+                "[Console]::InputEncoding = [Console]::OutputEncoding = $OutputEncoding = [System.Text.UTF8Encoding]::new($false);\n$ARGS_JSON = $env:ALLUSE_TOOL_ARGS;\n",
+            );
             #[cfg(not(windows))]
             let mut prologue = if has_pwsh {
-                String::from("$ARGS_JSON = $env:ALLUSE_TOOL_ARGS;\n")
+                String::from(
+                    "[Console]::InputEncoding = [Console]::OutputEncoding = $OutputEncoding = [System.Text.UTF8Encoding]::new($false);\n$ARGS_JSON = $env:ALLUSE_TOOL_ARGS;\n",
+                )
             } else {
                 String::from("export ARGS_JSON=\"$ALLUSE_TOOL_ARGS\"\n")
             };
@@ -3792,6 +3809,12 @@ pub async fn execute_custom_tool(
                 tokio::process::Command::new("sh")
             };
             cmd.kill_on_drop(true);
+            if std::env::var_os("PYTHONUTF8").is_none() {
+                cmd.env("PYTHONUTF8", "1");
+            }
+            if std::env::var_os("PYTHONIOENCODING").is_none() {
+                cmd.env("PYTHONIOENCODING", "utf-8");
+            }
             #[cfg(not(windows))]
             cmd.env("PATH", crate::config::augmented_env_path());
             #[cfg(unix)]
@@ -3892,8 +3915,12 @@ pub async fn execute_custom_tool(
                 Ok(res) => res?,
                 Err(_) => bail!("Custom PowerShell tool '{}' timed out after 30s", spec.name),
             };
-            let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            let stdout = crate::encoding::decode_process_bytes(&out.stdout)
+                .trim()
+                .to_string();
+            let stderr = crate::encoding::decode_process_bytes(&out.stderr)
+                .trim()
+                .to_string();
             let parsed_json: Option<Value> = serde_json::from_str(&stdout).ok();
             Ok(json!({
                 "ok": out.status.success(),
@@ -4637,8 +4664,8 @@ pub async fn rebuild_self_with_rollback(hot_restart: bool) -> Result<Value> {
     build_cmd.creation_flags(0x08000000);
     let mut build_out = build_cmd.output().await?;
 
-    let mut stdout = String::from_utf8_lossy(&build_out.stdout).to_string();
-    let mut stderr = String::from_utf8_lossy(&build_out.stderr).to_string();
+    let mut stdout = crate::encoding::decode_process_bytes(&build_out.stdout);
+    let mut stderr = crate::encoding::decode_process_bytes(&build_out.stderr);
     let mut ai_compile_repair: Option<Value> = None;
 
     if !build_out.status.success() {
@@ -4677,8 +4704,8 @@ pub async fn rebuild_self_with_rollback(hot_restart: bool) -> Result<Value> {
                     #[cfg(windows)]
                     retry_cmd.creation_flags(0x08000000);
                     build_out = retry_cmd.output().await?;
-                    stdout = String::from_utf8_lossy(&build_out.stdout).to_string();
-                    stderr = String::from_utf8_lossy(&build_out.stderr).to_string();
+                    stdout = crate::encoding::decode_process_bytes(&build_out.stdout);
+                    stderr = crate::encoding::decode_process_bytes(&build_out.stderr);
                 }
             }
         }
@@ -4734,7 +4761,7 @@ pub async fn rebuild_self_with_rollback(hot_restart: bool) -> Result<Value> {
             let _ = fs::rename(&rel_old_exe, &rel_exe);
         }
         let _ = restore_golden_snapshot(&pre_snap.id, false);
-        let v_err = String::from_utf8_lossy(&verify_out.stderr).to_string();
+        let v_err = crate::encoding::decode_process_bytes(&verify_out.stderr);
         record_heal_event(
             "rollback",
             "verify_failed_auto_rollback",

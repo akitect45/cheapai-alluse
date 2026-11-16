@@ -4467,7 +4467,7 @@ pub(crate) fn execute_fs_read_file(args: &Value, cfg: &AppConfig) -> Result<Valu
     }
 
     let bytes = std::fs::read(&path)?;
-    if bytes.iter().take(4096).any(|&b| b == 0) {
+    let Some((text, _detected_enc)) = crate::encoding::decode_file_bytes(&bytes)? else {
         return Ok(json!({
             "ok": true,
             "path": path.to_string_lossy(),
@@ -4475,9 +4475,7 @@ pub(crate) fn execute_fs_read_file(args: &Value, cfg: &AppConfig) -> Result<Valu
             "size_bytes": bytes.len(),
             "notice": "Binary file detected; skipped raw text dump."
         }));
-    }
-
-    let text = String::from_utf8_lossy(&bytes);
+    };
     let all_lines: Vec<&str> = text.lines().collect();
     let total_lines = all_lines.len();
     let max_lines = json_u64(
@@ -4663,10 +4661,9 @@ pub(crate) fn execute_fs_search(args: &Value, cfg: &AppConfig) -> Result<Value> 
             let Ok(bytes) = std::fs::read(cur) else {
                 return;
             };
-            if bytes.iter().take(2048).any(|&b| b == 0) {
+            let Ok(Some((text, _))) = crate::encoding::decode_file_bytes(&bytes) else {
                 return;
-            }
-            let text = String::from_utf8_lossy(&bytes);
+            };
             for (idx, line) in text.lines().enumerate() {
                 let matched = if let Some(re) = compiled_re {
                     re.is_match(line)
@@ -4853,7 +4850,7 @@ pub(crate) fn execute_fs_edit_file(args: &Value, cfg: &AppConfig) -> Result<Valu
     .unwrap_or(false);
 
     let path = resolve_local_fs_path(raw_path, &cfg.default_workspace);
-    let existing = std::fs::read_to_string(&path)?;
+    let (existing, detected_enc) = crate::encoding::read_text_file_lossless(&path)?;
 
     let (updated, count) = if existing.contains(target) {
         if replace_all {
@@ -4880,7 +4877,8 @@ pub(crate) fn execute_fs_edit_file(args: &Value, cfg: &AppConfig) -> Result<Valu
         }
     };
 
-    std::fs::write(&path, updated.as_bytes())?;
+    let encoded = crate::encoding::encode_file_text(&updated, detected_enc);
+    std::fs::write(&path, &encoded)?;
     Ok(json!({
         "ok": true,
         "path": path.to_string_lossy(),
@@ -4985,6 +4983,7 @@ pub(crate) async fn execute_shell_exec(
                         (PathBuf::from("powershell.exe"), false)
                     }
                 });
+                let ps_command = crate::encoding::wrap_powershell_utf8_command(&cmd_for_spawn);
                 let mut c = std::process::Command::new(shell_path);
                 if *is_pwsh {
                     c.args([
@@ -4992,7 +4991,7 @@ pub(crate) async fn execute_shell_exec(
                         "-NoProfile",
                         "-NonInteractive",
                         "-Command",
-                        &cmd_for_spawn,
+                        &ps_command,
                     ]);
                 } else {
                     c.args([
@@ -5002,8 +5001,14 @@ pub(crate) async fn execute_shell_exec(
                         "-InputFormat",
                         "None",
                         "-Command",
-                        &cmd_for_spawn,
+                        &ps_command,
                     ]);
+                }
+                if std::env::var_os("PYTHONUTF8").is_none() {
+                    c.env("PYTHONUTF8", "1");
+                }
+                if std::env::var_os("PYTHONIOENCODING").is_none() {
+                    c.env("PYTHONIOENCODING", "utf-8");
                 }
                 c.stdin(Stdio::piped())
                     .stdout(Stdio::piped())
@@ -5018,8 +5023,14 @@ pub(crate) async fn execute_shell_exec(
             let mut proc = {
                 let mut c = std::process::Command::new("sh");
                 c.args(["-c", &cmd_for_spawn])
-                    .env("PATH", crate::config::augmented_env_path())
-                    .stdin(Stdio::null())
+                    .env("PATH", crate::config::augmented_env_path());
+                if std::env::var_os("PYTHONUTF8").is_none() {
+                    c.env("PYTHONUTF8", "1");
+                }
+                if std::env::var_os("PYTHONIOENCODING").is_none() {
+                    c.env("PYTHONIOENCODING", "utf-8");
+                }
+                c.stdin(Stdio::null())
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped());
                 if cwd_for_spawn.is_dir() {
@@ -5112,11 +5123,11 @@ pub(crate) async fn execute_shell_exec(
             };
             let out_bytes = stdout_handle.join().unwrap_or_default();
             let err_bytes = stderr_handle.join().unwrap_or_default();
-            let stdout: String = String::from_utf8_lossy(&out_bytes)
+            let stdout: String = crate::encoding::decode_process_bytes(&out_bytes)
                 .chars()
                 .take(12_000)
                 .collect();
-            let stderr: String = String::from_utf8_lossy(&err_bytes)
+            let stderr: String = crate::encoding::decode_process_bytes(&err_bytes)
                 .chars()
                 .take(12_000)
                 .collect();
@@ -14609,6 +14620,153 @@ mod config_tool_redaction_tests {
         }
 
         let _ = crate::db::delete_thread(&guard_thread.id);
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn test_fs_tools_cp949_and_utf16le_bom_roundtrip() {
+        let mut cfg = crate::config::AppConfig::default();
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let tmp_dir = std::env::temp_dir().join(format!("alluse_enc_fs_{unique}"));
+        std::fs::create_dir_all(&tmp_dir).unwrap();
+        cfg.default_workspace = tmp_dir.to_string_lossy().into_owned();
+
+        let txt_path = tmp_dir.join("legacy_cp949.txt");
+        let txt_src = "첫번째 줄: 한글 내용\r\n두번째 줄: 검색대상 키워드\r\n";
+        let txt_bytes = crate::encoding::encode_file_text(
+            txt_src,
+            crate::encoding::DetectedTextEncoding::WindowsCodePage(949),
+        );
+        std::fs::write(&txt_path, &txt_bytes).unwrap();
+
+        let reg_path = tmp_dir.join("settings_utf16le.reg");
+        let reg_src = "Windows Registry Editor Version 5.00\r\n; 한글 레지스트리 주석\r\n\"키\"=\"값원본\"\r\n";
+        let reg_bytes = crate::encoding::encode_file_text(
+            reg_src,
+            crate::encoding::DetectedTextEncoding::Utf16LeBom,
+        );
+        assert!(reg_bytes.starts_with(&[0xFF, 0xFE]));
+        std::fs::write(&reg_path, &reg_bytes).unwrap();
+
+        let read_txt = super::execute_fs_read_file(
+            &json!({ "path": txt_path.to_string_lossy() }),
+            &cfg,
+        )
+        .unwrap();
+        assert!(read_txt.get("binary").is_none());
+        let txt_content = read_txt["content"].as_str().unwrap();
+        assert!(!txt_content.contains('\u{FFFD}'));
+        assert!(txt_content.contains("한글 내용"));
+
+        let read_reg = super::execute_fs_read_file(
+            &json!({ "path": reg_path.to_string_lossy() }),
+            &cfg,
+        )
+        .unwrap();
+        assert!(read_reg.get("binary").is_none());
+        let reg_content = read_reg["content"].as_str().unwrap();
+        assert!(!reg_content.contains('\u{FFFD}'));
+        assert!(reg_content.contains("한글 레지스트리 주석"));
+
+        let search_txt = super::execute_fs_search(
+            &json!({ "path": tmp_dir.to_string_lossy(), "query": "검색대상" }),
+            &cfg,
+        )
+        .unwrap();
+        assert!(search_txt["match_count"].as_u64().unwrap_or(0) >= 1);
+        assert!(!search_txt["matches"].to_string().contains('\u{FFFD}'));
+
+        let search_reg = super::execute_fs_search(
+            &json!({ "path": tmp_dir.to_string_lossy(), "query": "레지스트리" }),
+            &cfg,
+        )
+        .unwrap();
+        assert!(search_reg["match_count"].as_u64().unwrap_or(0) >= 1);
+        assert!(!search_reg["matches"].to_string().contains('\u{FFFD}'));
+
+        super::execute_fs_edit_file(
+            &json!({
+                "path": txt_path.to_string_lossy(),
+                "target": "한글 내용",
+                "replacement": "수정된 한글"
+            }),
+            &cfg,
+        )
+        .unwrap();
+        let after_txt_bytes = std::fs::read(&txt_path).unwrap();
+        let (after_txt, after_txt_enc) =
+            crate::encoding::decode_file_bytes(&after_txt_bytes).unwrap().unwrap();
+        assert!(!after_txt.contains('\u{FFFD}'));
+        assert!(after_txt.contains("수정된 한글"));
+        #[cfg(windows)]
+        assert_eq!(
+            after_txt_enc,
+            crate::encoding::DetectedTextEncoding::WindowsCodePage(949)
+        );
+        let _ = after_txt_enc;
+
+        super::execute_fs_edit_file(
+            &json!({
+                "path": reg_path.to_string_lossy(),
+                "target": "값원본",
+                "replacement": "변경된값"
+            }),
+            &cfg,
+        )
+        .unwrap();
+        let after_reg_bytes = std::fs::read(&reg_path).unwrap();
+        assert!(after_reg_bytes.starts_with(&[0xFF, 0xFE]));
+        let (after_reg, after_reg_enc) =
+            crate::encoding::decode_file_bytes(&after_reg_bytes).unwrap().unwrap();
+        assert_eq!(after_reg_enc, crate::encoding::DetectedTextEncoding::Utf16LeBom);
+        assert!(!after_reg.contains('\u{FFFD}'));
+        assert!(after_reg.contains("변경된값"));
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn test_shell_exec_korean_parser_error_and_cmd_echo_no_fffd() {
+        let mut cfg = crate::config::AppConfig::default();
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let tmp_dir = std::env::temp_dir().join(format!("alluse_enc_sh_{unique}"));
+        std::fs::create_dir_all(&tmp_dir).unwrap();
+        cfg.default_workspace = tmp_dir.to_string_lossy().into_owned();
+
+        let err_res = super::execute_shell_exec(
+            &json!({ "command": "$paths = @('a'); foreach ($p in $paths) { $p } | ConvertTo-Json" }),
+            "test-enc-err",
+            &cfg,
+        )
+        .await
+        .unwrap();
+        let err_stdout = err_res["stdout"].as_str().unwrap_or("");
+        let err_stderr = err_res["stderr"].as_str().unwrap_or("");
+        assert!(!err_stdout.contains('\u{FFFD}'), "stdout had U+FFFD: {err_stdout:?}");
+        assert!(!err_stderr.contains('\u{FFFD}'), "stderr had U+FFFD: {err_stderr:?}");
+        assert!(!err_stderr.is_empty());
+
+        let echo_res = super::execute_shell_exec(
+            &json!({ "command": "cmd /c echo 한글테스트" }),
+            "test-enc-cmd",
+            &cfg,
+        )
+        .await
+        .unwrap();
+        let echo_stdout = echo_res["stdout"].as_str().unwrap_or("");
+        let echo_stderr = echo_res["stderr"].as_str().unwrap_or("");
+        assert_eq!(echo_res["exit_code"].as_i64(), Some(0));
+        assert!(!echo_stdout.contains('\u{FFFD}'), "stdout had U+FFFD: {echo_stdout:?}");
+        assert!(!echo_stderr.contains('\u{FFFD}'), "stderr had U+FFFD: {echo_stderr:?}");
+        assert!(echo_stdout.contains("한글테스트"), "stdout was {echo_stdout:?}");
+
         let _ = std::fs::remove_dir_all(&tmp_dir);
     }
 }

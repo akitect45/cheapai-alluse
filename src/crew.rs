@@ -1620,6 +1620,17 @@ fn crew_worktrees_root() -> PathBuf {
     }
 }
 
+fn hidden_git_cmd() -> std::process::Command {
+    let mut cmd = std::process::Command::new(crate::config::resolve_cli_program("git"));
+    cmd.args(["-c", "core.quotepath=false"]);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    cmd
+}
+
 fn prepare_crew_workspace(
     root_workspace: &str,
     crew_id: &str,
@@ -1632,14 +1643,14 @@ fn prepare_crew_workspace(
     }
     let clean_ws = root_workspace.trim();
     if !clean_ws.is_empty() && Path::new(clean_ws).exists() {
-        let git_check = std::process::Command::new("git")
+        let git_check = hidden_git_cmd()
             .args(["-C", clean_ws, "rev-parse", "--show-toplevel"])
             .output();
         if let Ok(out) = git_check
             && out.status.success()
         {
-            let repo_root = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            let head_ok = std::process::Command::new("git")
+            let repo_root = crate::encoding::decode_process_bytes(&out.stdout).trim().to_string();
+            let head_ok = hidden_git_cmd()
                 .args(["-C", &repo_root, "rev-parse", "--verify", "HEAD"])
                 .output()
                 .map(|o| o.status.success())
@@ -1658,7 +1669,7 @@ fn prepare_crew_workspace(
                     .collect();
                 let wt_dir = wt_root.join(format!("{safe_name}-{short_id}"));
                 let branch_name = format!("crew/{safe_name}-{short_id}");
-                let add_out = std::process::Command::new("git")
+                let add_out = hidden_git_cmd()
                     .args([
                         "-C",
                         &repo_root,
@@ -1689,18 +1700,18 @@ fn cleanup_crew_worktree(workspace_mode: &str, workspace_path: &str) {
     if !path.exists() {
         return;
     }
-    let common_dir = std::process::Command::new("git")
+    let common_dir = hidden_git_cmd()
         .args(["-C", workspace_path.trim(), "rev-parse", "--git-common-dir"])
         .output()
         .ok()
         .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+        .map(|o| crate::encoding::decode_process_bytes(&o.stdout).trim().to_string());
     if let Some(git_dir) = common_dir {
         let repo_parent = Path::new(&git_dir)
             .parent()
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_else(|| git_dir.clone());
-        let _ = std::process::Command::new("git")
+        let _ = hidden_git_cmd()
             .args([
                 "-C",
                 &repo_parent,

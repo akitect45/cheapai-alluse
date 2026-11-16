@@ -1025,12 +1025,18 @@ async fn safe_fetch_body(client: &reqwest::Client, url: &str) -> Result<(String,
     validate_public_http_url(url).map_err(|e| anyhow::anyhow!(e))?;
     let resp = client.get(url).send().await?;
     let status = resp.status().as_u16();
+    let content_type = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned);
     let bytes = resp.bytes().await?;
-    let body = if bytes.len() > MAX_BODY_BYTES {
-        String::from_utf8_lossy(&bytes[..MAX_BODY_BYTES]).to_string()
+    let slice = if bytes.len() > MAX_BODY_BYTES {
+        &bytes[..MAX_BODY_BYTES]
     } else {
-        String::from_utf8_lossy(&bytes).to_string()
+        &bytes[..]
     };
+    let body = crate::encoding::decode_http_bytes(slice, content_type.as_deref());
     Ok((body, status))
 }
 

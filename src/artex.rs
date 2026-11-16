@@ -6279,6 +6279,9 @@ fn run_hidden_cmd_raw(program: &str, args: &[&str], cwd: &str) -> Result<(i32, S
     use std::io::Read;
     let resolved_prog = crate::config::resolve_cli_program(program);
     let mut cmd = std::process::Command::new(resolved_prog);
+    if program.eq_ignore_ascii_case("git") {
+        cmd.args(["-c", "core.quotepath=false"]);
+    }
     cmd.args(args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
@@ -6360,8 +6363,8 @@ fn run_hidden_cmd_raw(program: &str, args: &[&str], cwd: &str) -> Result<(i32, S
 
     let stdout_bytes = out_handle.join().unwrap_or_default();
     let stderr_bytes = err_handle.join().unwrap_or_default();
-    let stdout = String::from_utf8_lossy(&stdout_bytes).to_string();
-    let mut stderr = String::from_utf8_lossy(&stderr_bytes).to_string();
+    let stdout = crate::encoding::decode_process_bytes(&stdout_bytes);
+    let mut stderr = crate::encoding::decode_process_bytes(&stderr_bytes);
     let code = match status {
         Some(st) => st.code().unwrap_or(-1),
         None => {
@@ -6466,7 +6469,7 @@ fn git_filtered_blob_hash(repo: &str, path: &str, content: &str) -> Result<Strin
     use std::io::Write;
     let git_bin = crate::config::resolve_cli_program("git");
     let mut cmd = std::process::Command::new(git_bin);
-    cmd.args(["hash-object", "--stdin", "--path", path])
+    cmd.args(["-c", "core.quotepath=false", "hash-object", "--stdin", "--path", path])
         .current_dir(repo)
         .env("PATH", crate::config::augmented_env_path())
         .stdin(std::process::Stdio::piped())
@@ -6488,10 +6491,10 @@ fn git_filtered_blob_hash(repo: &str, path: &str, content: &str) -> Result<Strin
     if !output.status.success() {
         return Err(anyhow!(
             "Git blob validation failed: {}",
-            String::from_utf8_lossy(&output.stderr)
+            crate::encoding::decode_process_bytes(&output.stderr)
         ));
     }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    Ok(crate::encoding::decode_process_bytes(&output.stdout).trim().to_string())
 }
 
 fn commit_owned_pr_files(
@@ -8366,8 +8369,10 @@ pub(crate) fn read_repo_text(root: &std::path::Path, relative: &str) -> Result<S
         return Err(anyhow!("Repository file is not a bounded regular file"));
     }
     require_single_link(&file)?;
-    let mut text = String::new();
-    file.read_to_string(&mut text)?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)?;
+    let (text, _) = crate::encoding::decode_file_bytes(&bytes)?
+        .ok_or_else(|| anyhow!("Binary repository file is not readable as text: {relative}"))?;
     Ok(text)
 }
 
@@ -8400,8 +8405,10 @@ pub(crate) fn read_repo_text(root: &std::path::Path, relative: &str) -> Result<S
         return Err(anyhow!("Repository file is not a bounded regular file"));
     }
     require_single_link(&file)?;
-    let mut text = String::new();
-    file.read_to_string(&mut text)?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)?;
+    let (text, _) = crate::encoding::decode_file_bytes(&bytes)?
+        .ok_or_else(|| anyhow!("Binary repository file is not readable as text: {relative}"))?;
     Ok(text)
 }
 

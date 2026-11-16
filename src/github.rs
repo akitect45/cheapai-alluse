@@ -823,6 +823,9 @@ pub fn save_workspace_state(patch: Value) -> Result<Value> {
 async fn run_cmd(program: &str, args: &[&str], cwd: Option<&Path>) -> (bool, String, String) {
     let resolved_prog = crate::config::resolve_cli_program(program);
     let mut cmd = tokio::process::Command::new(resolved_prog);
+    if program.eq_ignore_ascii_case("git") {
+        cmd.args(["-c", "core.quotepath=false"]);
+    }
     cmd.args(args);
     cmd.kill_on_drop(true);
     cmd.stdin(std::process::Stdio::null())
@@ -843,11 +846,11 @@ async fn run_cmd(program: &str, args: &[&str], cwd: Option<&Path>) -> (bool, Str
     match tokio::time::timeout(std::time::Duration::from_secs(15), cmd.output()).await {
         Ok(Ok(out)) => (
             out.status.success(),
-            String::from_utf8_lossy(&out.stdout)
+            crate::encoding::decode_process_bytes(&out.stdout)
                 .trim_matches(['\r', '\n'])
                 .trim_end()
                 .to_string(),
-            String::from_utf8_lossy(&out.stderr).trim().to_string(),
+            crate::encoding::decode_process_bytes(&out.stderr).trim().to_string(),
         ),
         Ok(Err(e)) => (false, String::new(), e.to_string()),
         Err(_) => (false, String::new(), "Command timed out".to_string()),

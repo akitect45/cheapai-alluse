@@ -2583,7 +2583,7 @@ async fn eval_in_web_mode_virtual_dom(js_body: &str) -> Result<Value> {
                         base64::engine::general_purpose::STANDARD.decode(bounded_payload)
                     {
                         let slice = &bytes[..bytes.len().min(MAX_VIRTUAL_FETCH_BYTES)];
-                        fetched_html = String::from_utf8_lossy(slice).into_owned();
+                        fetched_html = crate::encoding::decode_http_bytes(slice, None);
                     }
                 } else {
                     fetched_html = urlencoding::decode(bounded_payload)
@@ -2602,6 +2602,11 @@ async fn eval_in_web_mode_virtual_dom(js_body: &str) -> Result<Value> {
                 .build()
             {
                 if let Ok(mut resp) = client.get(&active_url).send().await {
+                    let content_type = resp
+                        .headers()
+                        .get(reqwest::header::CONTENT_TYPE)
+                        .and_then(|v| v.to_str().ok())
+                        .map(str::to_owned);
                     let mut buf = Vec::new();
                     while let Ok(Some(chunk)) = resp.chunk().await {
                         let remaining = MAX_VIRTUAL_FETCH_BYTES.saturating_sub(buf.len());
@@ -2613,7 +2618,8 @@ async fn eval_in_web_mode_virtual_dom(js_body: &str) -> Result<Value> {
                             break;
                         }
                     }
-                    fetched_html = String::from_utf8_lossy(&buf).into_owned();
+                    fetched_html =
+                        crate::encoding::decode_http_bytes(&buf, content_type.as_deref());
                     drop(buf);
                 }
             }
