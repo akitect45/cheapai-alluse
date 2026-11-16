@@ -92,7 +92,12 @@ where
 fn rejects_reasoning_parameter(status: u16, body: &str) -> bool {
     let body = body.to_ascii_lowercase();
     matches!(status, 400 | 422)
-        && (body.contains("reasoning") || body.contains("effort") || body.contains("summary"))
+        && (body.contains("reasoning")
+            || body.contains("effort")
+            || body.contains("summary")
+            || body.contains("thinking")
+            || body.contains("budget_tokens")
+            || body.contains("signature"))
         && [
             "unsupported",
             "not supported",
@@ -106,6 +111,8 @@ fn rejects_reasoning_parameter(status: u16, body: &str) -> bool {
             "unexpected",
             "disallowed",
             "forbidden field",
+            "required",
+            "must",
         ]
         .iter()
         .any(|marker| body.contains(marker))
@@ -1336,7 +1343,7 @@ pub(crate) fn build_anthropic_messages_request_body(
     system_prompt: &str,
     history: &[LlmTurnMessage],
     tools: &[Value],
-    _effort: &str,
+    effort: &str,
     is_claude_oauth: bool,
 ) -> Value {
     let mut system_blocks: Vec<Value> = Vec::new();
@@ -1491,12 +1498,27 @@ pub(crate) fn build_anthropic_messages_request_body(
         }));
     }
 
+    let budget_tokens = match effort.trim().to_ascii_lowercase().as_str() {
+        "low" | "minimal" => Some(2048u64),
+        "medium" => Some(6144u64),
+        "high" => Some(16000u64),
+        "xhigh" | "ultra" | "max" => Some(24000u64),
+        _ => None,
+    };
+    let max_tokens = budget_tokens.map(|b| b + 16384).unwrap_or(16384);
+
     let mut body = json!({
         "model": model_id,
-        "max_tokens": 16384,
+        "max_tokens": max_tokens,
         "messages": messages,
         "stream": true,
     });
+    if let Some(budget) = budget_tokens {
+        body["thinking"] = json!({
+            "type": "enabled",
+            "budget_tokens": budget,
+        });
+    }
     if !system_blocks.is_empty() {
         body["system"] = Value::Array(system_blocks);
     }
@@ -1539,7 +1561,16 @@ fn apply_reasoning_fallback(
     stage: u8,
 ) -> bool {
     match style {
-        ResolvedApiStyle::AnthropicMessages => false,
+        ResolvedApiStyle::AnthropicMessages => {
+            if body.get("thinking").is_none() {
+                return false;
+            }
+            if let Some(obj) = body.as_object_mut() {
+                obj.remove("thinking");
+                obj.insert("max_tokens".to_string(), json!(16384));
+            }
+            true
+        }
         ResolvedApiStyle::ChatCompletions => {
             if body.get("reasoning_effort").is_none() {
                 return false;
@@ -2716,14 +2747,34 @@ where
     }
 
     // Fallback: if the upstream model rejects reasoning parameters, retry cleanly up to 2 stages
+    if let Some((oauth_prov, _)) = oauth_record_opt {
+        crate::oauth::update_usage_from_headers(oauth_prov, resp.headers());
+    }
     if !resp.status().is_success() {
         let status = resp.status();
+        let reset_hint = resp
+            .headers()
+            .get("retry-after")
+            .or_else(|| resp.headers().get("x-codex-primary-reset-at"))
+            .or_else(|| resp.headers().get("anthropic-ratelimit-unified-5h-reset"))
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
         let err_text = read_llm_error_body(
             resp,
             &active_auth_secret,
             "LLM HTTP error body read timed out",
         )
         .await?;
+        let err_low = err_text.to_ascii_lowercase();
+        if let Some((oauth_prov, _)) = oauth_record_opt
+            && (status.as_u16() == 429
+                || err_low.contains("usage_limit_reached")
+                || err_low.contains("rate_limit_error")
+                || err_low.contains("insufficient_quota"))
+        {
+            crate::oauth::mark_usage_exhausted(oauth_prov, &reset_hint, &err_text);
+        }
         let mut retry_body = body.clone();
         if rejects_reasoning_parameter(status.as_u16(), &err_text)
             && apply_reasoning_fallback(&mut retry_body, style, &effort, 1)
@@ -2741,6 +2792,9 @@ where
                 "LLM HTTP retry request timed out waiting for response headers (120s)",
             )
             .await?;
+            if let Some((oauth_prov, _)) = oauth_record_opt {
+                crate::oauth::update_usage_from_headers(oauth_prov, resp.headers());
+            }
             if !resp.status().is_success() {
                 let retry_status = resp.status();
                 let retry_error = read_llm_error_body(
@@ -2767,6 +2821,9 @@ where
                     "LLM HTTP fallback request timed out waiting for response headers (120s)",
                 )
                 .await?;
+                if let Some((oauth_prov, _)) = oauth_record_opt {
+                    crate::oauth::update_usage_from_headers(oauth_prov, resp.headers());
+                }
             }
         } else {
             return Err(anyhow!("LLM HTTP {}: {}", status, err_text));
@@ -2775,12 +2832,29 @@ where
 
     if !resp.status().is_success() {
         let status = resp.status();
+        let reset_hint = resp
+            .headers()
+            .get("retry-after")
+            .or_else(|| resp.headers().get("x-codex-primary-reset-at"))
+            .or_else(|| resp.headers().get("anthropic-ratelimit-unified-5h-reset"))
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
         let err_text = read_llm_error_body(
             resp,
             &active_auth_secret,
             "LLM HTTP error body read timed out",
         )
         .await?;
+        let err_low = err_text.to_ascii_lowercase();
+        if let Some((oauth_prov, _)) = oauth_record_opt
+            && (status.as_u16() == 429
+                || err_low.contains("usage_limit_reached")
+                || err_low.contains("rate_limit_error")
+                || err_low.contains("insufficient_quota"))
+        {
+            crate::oauth::mark_usage_exhausted(oauth_prov, &reset_hint, &err_text);
+        }
         return Err(anyhow!("LLM HTTP {}: {}", status, err_text));
     }
 
@@ -4545,6 +4619,9 @@ mod error_redaction_tests {
             true,
         );
         assert_eq!(body["model"], "claude-sonnet-4-6");
+        assert_eq!(body["max_tokens"], 32384);
+        assert_eq!(body["thinking"]["type"], "enabled");
+        assert_eq!(body["thinking"]["budget_tokens"], 16000);
         assert_eq!(
             body["system"][0]["text"],
             "You are Claude Code, Anthropic's official CLI for Claude."

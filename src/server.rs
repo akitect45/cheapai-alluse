@@ -1882,6 +1882,31 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
         // ─────────────────────────────────────────────────────────────────────
         ("GET", "/api/oauth/status") => Ok(crate::oauth::build_status_response()),
 
+        ("GET", "/api/oauth/usage") => {
+            let force = q
+                .get("force")
+                .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+                .unwrap_or(false);
+            Ok(crate::oauth::get_all_oauth_usage(force).await)
+        }
+
+        ("POST", p) if p.starts_with("/api/oauth/") && p.ends_with("/usage") => {
+            let raw_prov = p
+                .strip_prefix("/api/oauth/")
+                .and_then(|s| s.strip_suffix("/usage"))
+                .unwrap_or("")
+                .trim_matches('/');
+            let prov = crate::oauth::OAuthProvider::parse(raw_prov)?;
+            let force = json_opt_bool(body.get("force")).unwrap_or(true);
+            let snap = crate::oauth::fetch_usage_for_provider(prov, force).await;
+            Ok(json!({
+                "ok": true,
+                "provider": prov.as_str(),
+                "usage": snap,
+                "status": crate::oauth::build_status_response(),
+            }))
+        }
+
         ("POST", p) if p.starts_with("/api/oauth/") && p.ends_with("/start") => {
             let raw_prov = p
                 .strip_prefix("/api/oauth/")
@@ -6204,8 +6229,14 @@ mod http_security_tests {
             .await
             .expect("GET /api/oauth/status");
         assert_eq!(st["ok"], true);
-        assert!(st["providers"]["openai"].is_object());
-        assert!(st["providers"]["claude"].is_object());
+        assert!(st["providers"]["openai"]["usage"].is_object());
+        assert!(st["providers"]["claude"]["usage"].is_object());
+
+        let usg = route_api("GET", "/api/oauth/usage", "force=0", json!({}))
+            .await
+            .expect("GET /api/oauth/usage");
+        assert_eq!(usg["ok"], true);
+        assert_eq!(usg["providers"]["openai"]["status"], "unknown");
 
         let started = route_api(
             "POST",
