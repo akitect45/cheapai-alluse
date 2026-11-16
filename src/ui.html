@@ -481,45 +481,83 @@
   }
   .custom-select-trigger.variant-composer {
     height: 28px;
-    padding: 0 8px;
+    padding: 0 5px;
     border-radius: 8px;
-    background: var(--bg-sidebar);
-    border: 1px solid var(--border);
+    background: transparent;
+    border: 1px solid transparent;
+    box-shadow: none;
     color: var(--text-secondary);
     font-family: var(--font-sans);
     font-size: 12px;
     font-weight: 500;
-    gap: 5px;
+    gap: 3.5px;
     flex-shrink: 0;
+  }
+  .custom-select-trigger.variant-composer .cs-trig-left {
+    gap: 4px;
+  }
+  .custom-select-trigger.variant-composer .cs-trig-icon,
+  .custom-select-trigger.variant-composer .cs-trig-icon.allcrew-pixel-svg {
+    width: 13px;
+    height: 13px;
+    opacity: 0.78;
+    transition: opacity 0.14s ease, color 0.14s ease;
+  }
+  .custom-select-trigger.variant-composer .cs-trig-chevron {
+    width: 11px;
+    height: 11px;
+    opacity: 0.52;
+    transition: transform 0.2s var(--spring-snappy), opacity 0.14s ease, color 0.14s ease;
   }
   .custom-select-trigger.variant-composer .cs-trig-label {
     max-width: 155px;
   }
   .composer-pill:has(#model-select) {
     flex: 0 1 auto;
-    min-width: 84px;
-    max-width: 175px;
+    min-width: 102px;
+    max-width: 195px;
     overflow: hidden;
   }
   .custom-select-trigger[data-select-for="model-select"] {
-    max-width: 175px;
-    min-width: 84px;
+    max-width: 195px;
+    min-width: 102px;
     width: 100%;
     flex: 0 1 auto;
     overflow: hidden;
     text-overflow: ellipsis;
+    color: var(--text);
     font-family: var(--font-sans);
-    font-weight: 500;
+    font-weight: 600;
   }
   .custom-select-trigger[data-select-for="model-select"] .cs-trig-label {
     max-width: 100%;
     font-family: var(--font-sans);
-    font-weight: 500;
+    font-weight: 600;
   }
-  .custom-select-trigger.variant-composer:hover,
-  .custom-select-trigger.variant-composer.is-open {
+  .custom-select-trigger.variant-composer:hover {
     background: var(--bg-hover);
     color: var(--text);
+    border-color: transparent;
+    box-shadow: none;
+  }
+  .custom-select-trigger.variant-composer.is-open {
+    background: var(--bg-active);
+    color: var(--text);
+    border-color: var(--border);
+    box-shadow: none;
+  }
+  .custom-select-trigger.variant-composer:hover .cs-trig-icon,
+  .custom-select-trigger.variant-composer.is-open .cs-trig-icon,
+  .custom-select-trigger.variant-composer:hover .cs-trig-chevron,
+  .custom-select-trigger.variant-composer.is-open .cs-trig-chevron {
+    opacity: 1;
+  }
+  .custom-select-trigger.variant-composer:active {
+    transform: scale(0.985);
+  }
+  .custom-select-trigger.variant-composer:focus-visible {
+    outline: none;
+    background: var(--bg-hover);
     border-color: var(--border-focus);
   }
   .custom-select-trigger.variant-header {
@@ -679,9 +717,15 @@
     background: var(--bg-canvas);
     border: 1px solid var(--border);
     margin: 1px 2px 2px;
+    transition: border-color 0.14s ease, background 0.14s ease;
   }
   .cs-pop-search-wrap:focus-within {
     border-color: var(--border-focus);
+  }
+  [data-skin="light"] .cs-pop-search-wrap:focus-within,
+  [data-skin="lagoon"] .cs-pop-search-wrap:focus-within {
+    border-color: rgba(0, 0, 0, 0.28);
+    background: #ffffff;
   }
   .cs-pop-search-input {
     flex: 1;
@@ -693,7 +737,8 @@
     font-size: 12px;
     color: var(--text);
     font-family: inherit;
-    outline: none;
+    outline: none !important;
+    box-shadow: none !important;
   }
   .cs-pop-list {
     display: flex;
@@ -878,6 +923,7 @@
     height: 26px;
     padding: 0 8px;
     gap: 6px;
+    transition: border-color 0.14s ease, background 0.14s ease;
   }
   .omnibar-wrap:focus-within {
     border-color: var(--border-focus);
@@ -886,8 +932,10 @@
   .url-input {
     flex: 1;
     min-width: 0;
-    border: none;
-    background: transparent;
+    border: none !important;
+    background: transparent !important;
+    outline: none !important;
+    box-shadow: none !important;
     font-family: var(--font-mono);
     font-size: 12.5px;
     padding: 0;
@@ -1613,6 +1661,10 @@
   .chat-selection-bar,
   .turn-nav-rail,
   .turn-nav-popover,
+  .assistant-msg-footer,
+  .assistant-msg-footer *,
+  .chat-live-status-row,
+  .chat-live-status-row *,
   .msg-chrome {
     user-select: none !important;
     -webkit-user-select: none !important;
@@ -2085,15 +2137,20 @@
     border-radius: 16px;
     border: 1px solid var(--border-strong);
     background: var(--bg-bubble);
+    transition: border-color 0.14s ease;
+  }
+  .user-msg-editor:focus-within {
+    border-color: var(--border-focus);
   }
   .user-msg-edit-input {
     width: 100%;
     min-height: 22px;
     max-height: 320px;
     resize: none;
-    border: none;
-    outline: none;
-    background: transparent;
+    border: none !important;
+    outline: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
     color: var(--text);
     font: inherit;
     font-size: 13.5px;
@@ -2681,7 +2738,7 @@
 
   /* ── ChatGPT / Codex Rounded Prompt Composer ──────────────────────────── */
   .composer-outer {
-    padding: 14px 18px 14px;
+    padding: 12px 14px 12px;
     background: var(--bg-canvas);
     flex-shrink: 0;
   }
@@ -2777,20 +2834,29 @@
 
   .composer-card {
     background: var(--bg-elevated);
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    padding: 11px 13px 9px;
-    box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.085);
+    border-radius: 18px;
+    padding: 12px 12px 9px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.04);
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    transition: border-color 0.15s ease, box-shadow 0.18s ease;
+    gap: 6px;
+    transition: border-color 0.15s ease, box-shadow 0.18s ease, background 0.18s ease;
   }
   .composer-card:focus-within {
     border-color: var(--border-focus);
   }
   .composer-card.is-running {
     border-color: var(--border-focus);
+  }
+  [data-skin="light"] .composer-card,
+  [data-skin="lagoon"] .composer-card {
+    background: #fcfcfc;
+    border-color: rgba(0, 0, 0, 0.10);
+    box-shadow:
+      0 4px 20px rgba(0, 0, 0, 0.05),
+      0 1px 2px rgba(0, 0, 0, 0.03),
+      inset 0 1px 0 rgba(255, 255, 255, 0.9);
   }
 
   .composer-card textarea {
@@ -2800,11 +2866,14 @@
     resize: none;
     border: none;
     background: transparent;
-    padding: 0 2px;
+    padding: 0 3px;
     font-size: 13.5px;
     line-height: 1.5;
     color: var(--text);
     overflow-y: auto;
+  }
+  .composer-card textarea:focus-visible {
+    outline: none;
   }
   .composer-card textarea::placeholder {
     color: var(--text-muted);
@@ -2814,19 +2883,20 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
+    gap: 6px;
     flex-wrap: nowrap !important;
-    padding-top: 7px;
-    border-top: 1px solid var(--border-subtle);
+    padding-top: 2px;
+    border-top: none;
     min-width: 0;
   }
 
   .composer-pills {
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: 1px;
     flex: 1 1 0%;
     min-width: 0;
+    margin-left: -3px;
     flex-wrap: nowrap !important;
     overflow-x: auto;
     overflow-y: hidden;
@@ -2841,7 +2911,7 @@
     align-items: center;
     gap: 6px;
     flex-shrink: 0;
-    margin-left: 4px;
+    margin-left: 0;
   }
 
   .stream-status-badge {
@@ -2880,10 +2950,15 @@
 
   .composer-pill-divider {
     width: 1px;
-    height: 14px;
-    background: var(--border);
-    margin: 0 2px;
+    height: 13px;
+    background: rgba(255, 255, 255, 0.14);
+    opacity: 1;
+    margin: 0 3.5px;
     flex-shrink: 0;
+  }
+  [data-skin="light"] .composer-pill-divider,
+  [data-skin="lagoon"] .composer-pill-divider {
+    background: rgba(0, 0, 0, 0.13);
   }
 
   .composer-pill {
@@ -2926,7 +3001,7 @@
   .send-btn {
     width: 30px;
     height: 30px;
-    border-radius: 9px;
+    border-radius: 999px;
     border: 1px solid var(--accent);
     background: var(--accent);
     color: var(--accent-fg);
@@ -4483,7 +4558,7 @@
     }
     .composer-pills {
       flex-wrap: nowrap !important;
-      gap: 4px;
+      gap: 2px;
     }
   }
 
@@ -5409,7 +5484,19 @@
   }
   .composer-card:focus-within {
     transform: translateY(-1px);
+    border-color: rgba(255, 255, 255, 0.22);
     box-shadow: var(--shadow-md);
+  }
+  [data-skin="light"] .composer-card:focus-within,
+  [data-skin="lagoon"] .composer-card:focus-within,
+  [data-skin="light"] .composer-card.is-running,
+  [data-skin="lagoon"] .composer-card.is-running {
+    background: #ffffff;
+    border-color: rgba(0, 0, 0, 0.24);
+    box-shadow:
+      0 6px 22px rgba(0, 0, 0, 0.07),
+      0 1px 3px rgba(0, 0, 0, 0.04),
+      inset 0 1px 0 #ffffff;
   }
 
   /* Tactile Checkbox & Input Focus Animations */
@@ -5787,8 +5874,8 @@
     color-scheme: dark light;
   }
   @supports selector(:focus-visible) {
-    :where(button, [role="button"], .btn, .tab-pill, .sector-pill, .sidebar-nav-btn, input, select, textarea, summary):focus-visible {
-      outline: 2px solid var(--border-focus);
+    :where(button, [role="button"], .btn, .tab-pill, .sector-pill, .sidebar-nav-btn, summary, input[type="checkbox"], input[type="radio"]):focus-visible {
+      outline: 1.5px solid var(--border-focus);
       outline-offset: 2px;
     }
   }
@@ -5976,22 +6063,50 @@
     animation: streamBadgePulse 1.2s ease-in-out infinite;
   }
 
-  /* Composer Crew Mode Toggle Pill */
+  /* Composer Crew Mode Segmented Capsule ('[ ❖ 크루 | ? ]') */
   .composer-crew-group {
     display: inline-flex;
-    align-items: center;
-    gap: 3px;
+    align-items: stretch;
+    gap: 0;
+    height: 28px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    background: rgba(255, 255, 255, 0.03);
+    overflow: hidden;
     flex-shrink: 0;
+    transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  [data-skin="light"] .composer-crew-group,
+  [data-skin="lagoon"] .composer-crew-group {
+    background: rgba(0, 0, 0, 0.028);
+    border-color: rgba(0, 0, 0, 0.095);
+  }
+  body[data-crew-enabled="1"] .composer-crew-group,
+  .composer-crew-group:has(.composer-crew-pill.active) {
+    background: rgba(52, 211, 153, 0.10);
+    border-color: rgba(52, 211, 153, 0.36);
+    box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.08);
+  }
+  [data-skin="light"] body[data-crew-enabled="1"] .composer-crew-group,
+  [data-skin="lagoon"] body[data-crew-enabled="1"] .composer-crew-group,
+  [data-skin="light"] .composer-crew-group:has(.composer-crew-pill.active),
+  [data-skin="lagoon"] .composer-crew-group:has(.composer-crew-pill.active) {
+    background: rgba(5, 150, 105, 0.085);
+    border-color: rgba(5, 150, 105, 0.32);
+    box-shadow: none;
+  }
+  .composer-crew-group:has(.composer-crew-pill.is-crew-working) {
+    border-color: var(--crew-working-border);
   }
   .composer-crew-pill {
     display: inline-flex;
     align-items: center;
-    gap: 5.5px;
-    height: 28px;
-    padding: 0 9px;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    background: var(--bg-sidebar);
+    gap: 4.5px;
+    height: 100%;
+    padding: 0 7px 0 8px;
+    border-radius: 999px 0 0 999px;
+    border: none;
+    background: transparent;
     color: var(--text-secondary);
     font-family: var(--font-sans);
     font-size: 12px;
@@ -5999,34 +6114,41 @@
     cursor: pointer;
     white-space: nowrap;
     flex-shrink: 0;
-    transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+    box-shadow: none;
+    transition: background 0.12s ease, color 0.12s ease;
   }
   .composer-crew-pill:hover {
     background: var(--bg-hover);
-    border-color: var(--border-focus);
     color: var(--text);
   }
   .composer-crew-pill.active {
-    background: var(--bg-active);
-    border-color: var(--text-secondary);
+    background: transparent;
     color: var(--text);
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+    box-shadow: none;
   }
-  .composer-crew-pill.is-crew-working {
-    border-color: var(--crew-working-border);
+  .composer-crew-pill.active:hover {
+    background: var(--bg-hover);
+  }
+  [data-skin="light"] .composer-crew-pill.active,
+  [data-skin="lagoon"] .composer-crew-pill.active {
+    color: #065f46;
+  }
+  .composer-crew-pill:focus-visible {
+    outline: 1.5px solid var(--border-focus);
+    outline-offset: -2px;
   }
   .composer-crew-count {
     display: none;
     align-items: center;
     justify-content: center;
-    min-width: 16px;
-    height: 16px;
+    min-width: 15px;
+    height: 15px;
     padding: 0 4px;
     border-radius: 999px;
     background: var(--crew-working-bg);
     border: 1px solid var(--crew-working-border);
     color: var(--crew-working-fg);
-    font-size: 10.5px;
+    font-size: 10px;
     font-weight: 700;
     font-variant-numeric: tabular-nums;
     line-height: 1;
@@ -6065,6 +6187,44 @@
     outline: 1.5px solid var(--border-focus);
     outline-offset: 1px;
   }
+  .composer-crew-group .crew-help-trigger {
+    width: 21px;
+    height: 100%;
+    padding: 0 1px 0 0;
+    border: none;
+    border-left: 1px solid rgba(255, 255, 255, 0.075);
+    border-radius: 0 999px 999px 0;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 10.5px;
+    font-weight: 650;
+  }
+  [data-skin="light"] .composer-crew-group .crew-help-trigger,
+  [data-skin="lagoon"] .composer-crew-group .crew-help-trigger {
+    border-left-color: rgba(0, 0, 0, 0.075);
+  }
+  .composer-crew-group .crew-help-trigger:hover,
+  .composer-crew-group .crew-help-trigger[aria-expanded="true"] {
+    background: var(--bg-hover);
+    color: var(--text);
+    border-color: transparent;
+    border-left-color: rgba(255, 255, 255, 0.14);
+  }
+  [data-skin="light"] .composer-crew-group .crew-help-trigger:hover,
+  [data-skin="light"] .composer-crew-group .crew-help-trigger[aria-expanded="true"],
+  [data-skin="lagoon"] .composer-crew-group .crew-help-trigger:hover,
+  [data-skin="lagoon"] .composer-crew-group .crew-help-trigger[aria-expanded="true"] {
+    border-left-color: rgba(0, 0, 0, 0.14);
+  }
+  body[data-crew-enabled="1"] .composer-crew-group .crew-help-trigger,
+  .composer-crew-group:has(.composer-crew-pill.active) .crew-help-trigger {
+    border-left-color: var(--crew-working-border);
+    color: var(--text-secondary);
+  }
+  .composer-crew-group .crew-help-trigger:focus-visible {
+    outline: 1.5px solid var(--border-focus);
+    outline-offset: -2px;
+  }
   .crew-help-popover {
     position: fixed;
     left: 0;
@@ -6074,7 +6234,7 @@
     max-width: min(280px, calc(100vw - 20px));
     padding: 8px 11px;
     border-radius: 10px;
-    border: 1px solid var(--border-focus);
+    border: 1px solid var(--border);
     background: var(--bg-sidebar);
     color: var(--text);
     box-shadow: var(--shadow-md);
@@ -6084,6 +6244,12 @@
     flex-direction: column;
     gap: 3px;
     user-select: none;
+  }
+  [data-skin="light"] .crew-help-popover,
+  [data-skin="lagoon"] .crew-help-popover {
+    background: #ffffff;
+    border-color: rgba(0, 0, 0, 0.11);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.05);
   }
   .crew-help-popover.open {
     display: flex;
@@ -6839,6 +7005,182 @@
   }
   .crew-post-textarea:focus {
     border-color: var(--border-focus);
+  }
+
+  /* ── Task 1: Global Text Input Focus Reset (No Inner Double Outline) ─── */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):is(:focus, :focus-visible),
+  textarea:is(:focus, :focus-visible),
+  select:is(:focus, :focus-visible),
+  [contenteditable]:is(:focus, :focus-visible) {
+    outline: none !important;
+    box-shadow: none !important;
+  }
+  .composer-card textarea,
+  .composer-card textarea:is(:focus, :focus-visible),
+  .cs-pop-search-wrap input,
+  .cs-pop-search-wrap input:is(:focus, :focus-visible),
+  .omnibar-wrap input,
+  .omnibar-wrap input:is(:focus, :focus-visible),
+  .user-msg-editor textarea,
+  .user-msg-editor textarea:is(:focus, :focus-visible) {
+    border: none !important;
+    background: transparent !important;
+    outline: none !important;
+    box-shadow: none !important;
+  }
+
+  /* ── Task 2: Chat Inline Live Waiting / Thinking Status Row ──────────── */
+  .chat-live-status-row {
+    max-width: 740px;
+    width: 100%;
+    margin: 2px auto 0;
+    align-items: flex-start;
+  }
+  .chat-live-status-inner {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 24px;
+    max-width: 100%;
+    padding: 2px 0;
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  .chat-live-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-secondary);
+    flex-shrink: 0;
+    animation: chatLiveDotPulse 1.35s ease-in-out infinite;
+  }
+  @keyframes chatLiveDotPulse {
+    0%, 100% { opacity: 0.92; transform: scale(1); }
+    50% { opacity: 0.28; transform: scale(0.76); }
+  }
+  .chat-live-status-row .allcrew-pixel-svg.sm {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+  }
+  .chat-live-status-row .allcrew-pixel-svg .crew-px-n1 {
+    animation: crewNodePulse 1.05s ease-in-out infinite 0s;
+  }
+  .chat-live-status-row .allcrew-pixel-svg .crew-px-n2 {
+    animation: crewNodePulse 1.05s ease-in-out infinite 0.18s;
+  }
+  .chat-live-status-row .allcrew-pixel-svg .crew-px-n3 {
+    animation: crewNodePulse 1.05s ease-in-out infinite 0.36s;
+  }
+  .chat-live-status-text {
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    background: linear-gradient(90deg, var(--text-muted) 0%, var(--text) 48%, var(--text-muted) 100%);
+    background-size: 220% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: chatLiveShimmer 2.1s linear infinite;
+  }
+  @keyframes chatLiveShimmer {
+    0% { background-position: 100% 0; }
+    100% { background-position: -120% 0; }
+  }
+  .chat-live-status-board-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    height: 22px;
+    padding: 0 8px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    font-family: var(--font-sans);
+    font-size: 11.5px;
+    font-weight: 500;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  }
+  .chat-live-status-board-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-focus);
+    color: var(--text);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .chat-live-dot,
+    .chat-live-status-row .allcrew-pixel-svg .crew-px-n1,
+    .chat-live-status-row .allcrew-pixel-svg .crew-px-n2,
+    .chat-live-status-row .allcrew-pixel-svg .crew-px-n3 {
+      animation: none !important;
+    }
+    .chat-live-status-text {
+      animation: none !important;
+      background: none;
+      -webkit-background-clip: initial;
+      background-clip: initial;
+      color: var(--text-secondary);
+    }
+  }
+
+  /* ── Task 3: Completed Assistant Right-Bottom Timestamp + Copy Button ── */
+  .assistant-msg-footer {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 5px;
+    margin-top: 6px;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .assistant-msg-time {
+    font-family: var(--font-sans);
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted);
+    line-height: 1;
+    letter-spacing: -0.01em;
+  }
+  .assistant-msg-copy-btn {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-muted);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.12s ease, color 0.12s ease, transform 0.1s ease;
+  }
+  .assistant-msg-copy-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text);
+  }
+  .assistant-msg-copy-btn:active {
+    transform: scale(0.92);
+  }
+  .assistant-msg-copy-btn svg {
+    width: 14px;
+    height: 14px;
+  }
+  .assistant-msg-copy-btn .copy-icon-done {
+    display: none;
+  }
+  .assistant-msg-copy-btn.is-copied {
+    color: var(--text);
+  }
+  .assistant-msg-copy-btn.is-copied .copy-icon-idle {
+    display: none;
+  }
+  .assistant-msg-copy-btn.is-copied .copy-icon-done {
+    display: block;
   }
 </style>
 </head>
@@ -8051,28 +8393,6 @@
             <textarea id="chat-input" placeholder="무엇이든 물어보거나 이미지·비디오 제작, 웹 작업을 맡겨보세요..." oninput="autoResizeChatInput(this); updateCurrentThreadStreamIndicator()" onkeydown="if(event.isComposing || event.keyCode===229) return; if(event.key==='Enter' && !event.shiftKey){ event.preventDefault(); sendChat(); } else if(event.key==='Escape'){ event.preventDefault(); emergencyStop(event); }"></textarea>
             <div class="composer-footer">
               <div class="composer-pills">
-                <div class="composer-crew-group">
-                  <button type="button" class="composer-crew-pill" id="composer-crew-toggle" onclick="toggleComposerCrewModeUi()" aria-pressed="false" title="크루 병렬 협업 모드 전환">
-                    <svg class="allcrew-pixel-svg sm" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true">
-                      <rect class="crew-px-frame" x="6" y="1" width="4" height="4"/>
-                      <rect class="crew-px-core" x="7" y="2" width="2" height="2"/>
-                      <rect class="crew-px-bus" x="7" y="5" width="2" height="2"/>
-                      <rect class="crew-px-bus" x="2" y="7" width="12" height="1"/>
-                      <rect class="crew-px-bus" x="2" y="8" width="2" height="2"/>
-                      <rect class="crew-px-bus" x="7" y="8" width="2" height="2"/>
-                      <rect class="crew-px-bus" x="12" y="8" width="2" height="2"/>
-                      <rect class="crew-px-frame" x="1" y="10" width="4" height="4"/>
-                      <rect class="crew-px-node crew-px-n1" x="2" y="11" width="2" height="2"/>
-                      <rect class="crew-px-frame" x="6" y="10" width="4" height="4"/>
-                      <rect class="crew-px-node crew-px-n2" x="7" y="11" width="2" height="2"/>
-                      <rect class="crew-px-frame" x="11" y="10" width="4" height="4"/>
-                      <rect class="crew-px-node crew-px-n3" x="12" y="11" width="2" height="2"/>
-                    </svg>
-                    <span id="composer-crew-toggle-label">크루</span>
-                    <span class="composer-crew-count" id="composer-crew-count">0</span>
-                  </button>
-                  <button type="button" class="crew-help-trigger" aria-label="크루 모드 안내" aria-expanded="false" data-crew-help-title="크루 (AllCrew) 병렬 모드" data-crew-help-body="디렉터가 목표를 역할별 크루에 즉시 배정합니다. 크루가 작업 중일 때도 입력창에서 새 지시를 바로 추가할 수 있습니다.">?</button>
-                </div>
                 <div class="composer-pill has-custom-select">
                   <select class="clean-select" id="chat-mode" onchange="onComposerModeChange(this.value)" title="작업 방식 선택">
                     <option value="auto">자동 실행</option>
@@ -8095,6 +8415,29 @@
                     <option value="xhigh" selected>생각: 최고</option>
                     <option value="ultra">생각: 집중</option>
                   </select>
+                </div>
+                <span class="composer-pill-divider" aria-hidden="true"></span>
+                <div class="composer-crew-group">
+                  <button type="button" class="composer-crew-pill" id="composer-crew-toggle" onclick="toggleComposerCrewModeUi()" aria-pressed="false" title="크루 병렬 협업 모드 전환">
+                    <svg class="allcrew-pixel-svg sm" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true">
+                      <rect class="crew-px-frame" x="6" y="1" width="4" height="4"/>
+                      <rect class="crew-px-core" x="7" y="2" width="2" height="2"/>
+                      <rect class="crew-px-bus" x="7" y="5" width="2" height="2"/>
+                      <rect class="crew-px-bus" x="2" y="7" width="12" height="1"/>
+                      <rect class="crew-px-bus" x="2" y="8" width="2" height="2"/>
+                      <rect class="crew-px-bus" x="7" y="8" width="2" height="2"/>
+                      <rect class="crew-px-bus" x="12" y="8" width="2" height="2"/>
+                      <rect class="crew-px-frame" x="1" y="10" width="4" height="4"/>
+                      <rect class="crew-px-node crew-px-n1" x="2" y="11" width="2" height="2"/>
+                      <rect class="crew-px-frame" x="6" y="10" width="4" height="4"/>
+                      <rect class="crew-px-node crew-px-n2" x="7" y="11" width="2" height="2"/>
+                      <rect class="crew-px-frame" x="11" y="10" width="4" height="4"/>
+                      <rect class="crew-px-node crew-px-n3" x="12" y="11" width="2" height="2"/>
+                    </svg>
+                    <span id="composer-crew-toggle-label">크루</span>
+                    <span class="composer-crew-count" id="composer-crew-count">0</span>
+                  </button>
+                  <button type="button" class="crew-help-trigger" aria-label="크루 모드 안내" aria-expanded="false" data-crew-help-title="크루 (AllCrew) 병렬 모드" data-crew-help-body="디렉터가 목표를 역할별 크루에 즉시 배정합니다. 크루가 작업 중일 때도 입력창에서 새 지시를 바로 추가할 수 있습니다.">?</button>
                 </div>
               </div>
               <div class="composer-actions">
@@ -11497,6 +11840,18 @@ const UI_KO_TO_EN_EXACT = {
   '컨텍스트 압축됨': 'Context Compacted',
   '부모 컨텍스트 분기됨': 'Parent Context Forked',
   '고정됨': 'Pinned',
+  '크루': 'Crew',
+  '크루 병렬 협업 모드 전환': 'Toggle Crew Parallel Mode',
+  '크루 모드 안내': 'Crew Mode Guide',
+  '크루 (AllCrew) 병렬 모드': 'AllCrew Parallel Mode',
+  '디렉터가 목표를 역할별 크루에 즉시 배정합니다. 크루가 작업 중일 때도 입력창에서 새 지시를 바로 추가할 수 있습니다.': 'The Director dispatches goals to role-based crews in parallel. You can keep sending new instructions while crews are working.',
+  '크루 보드 안내': 'Crew Board Guide',
+  '크루 보드 (#순서 · @멘션)': 'Crew Board (#Seq · @Mention)',
+  '역할별 크루 상태와 #번호 순서 보드를 실시간 확인합니다. 하단 입력창에서 @크루명 또는 @all로 직접 지시할 수 있습니다.': 'Monitor role-based crew states and the sequenced board in real time. Post direct instructions via @name or @all below.',
+  '작업 공간 격리 안내': 'Workspace Isolation Guide',
+  '작업 공간 격리': 'Workspace Isolation',
+  '독립 워크트리는 별도 브랜치 사본을 생성해 병렬 파일 수정 충돌을 원천 방지합니다.': 'Isolated worktree creates a separate branch copy to prevent parallel file-edit conflicts.',
+  '클릭하여 크루 보드 제목 변경': 'Click to rename Crew Board',
   '크루 안내': 'Crew Guide',
   '디렉터 병렬 전달 중': 'Dispatching in parallel to Director',
   '대기 중 · 스트리밍 완료 후 실행': 'Queued · Runs after stream',
@@ -11509,7 +11864,29 @@ const UI_KO_TO_EN_EXACT = {
   '크루 대기 중': 'Crews standing by',
   '+ 크루 추가': '+ Add Crew',
   '전체 종료': 'Kill All',
-  '디렉터': 'Director'
+  '디렉터': 'Director',
+  '생각 중...': 'Thinking...',
+  '브라우저 작업을 준비하고 있어요...': 'Preparing browser automation...',
+  '화면 작업을 준비하고 있어요...': 'Preparing screen action...',
+  '보안 점검을 준비하고 있어요...': 'Preparing security check...',
+  '결과를 바탕으로 답변을 준비하고 있어요...': 'Preparing response from tool results...',
+  '깊이 생각하며 답변을 정리하고 있어요...': 'Reasoning deeply on your answer...',
+  '디렉터가 요청을 분석하고 있어요...': 'Director is analyzing your request...',
+  '디렉터가 작업 분할과 배정 구성을 설계하고 있어요...': 'Director is planning task breakdown and crew delegation...',
+  '디렉터가 크루 작업을 조율하고 있어요...': 'Director is coordinating crew progress...',
+  '디렉터가 역할별 크루를 편성하고 있어요...': 'Director is organizing role-based crews...',
+  '크루 보드에 작업 지시를 전달하고 있어요...': 'Posting task instructions to Crew Board...',
+  '크루 진행 상황을 확인하고 있어요...': 'Checking crew board progress...',
+  '크루 최종 결과를 정리하고 있어요...': 'Wrapping up final crew deliverable...',
+  '파일과 코드를 살펴보고 있어요...': 'Inspecting files and code...',
+  '파일을 작성·수정하고 있어요...': 'Writing and editing files...',
+  '명령어를 실행하고 있어요...': 'Running shell command...',
+  '웹 브라우저에서 작업하고 있어요...': 'Working in web browser...',
+  '화면을 확인하고 조작하고 있어요...': 'Checking and interacting with screen...',
+  '답변 복사': 'Copy response',
+  '복사됨': 'Copied',
+  '어시스턴트 답변': 'Assistant reply',
+  '복사할 텍스트가 없습니다.': 'No text to copy.'
 };
 
 const UI_EN_TO_KO_EXACT = (() => {
@@ -11677,7 +12054,7 @@ function isTranslatableUiNode(el) {
   if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'SVG' || tag === 'PATH' || tag === 'USE' || tag === 'CODE') {
     return false;
   }
-  if (el.closest && el.closest('.msg.user .user-bubble, .msg.assistant .assistant-body, #crew-board-feed, #crew-roster-grid, #mem-editor-textarea, #asl-editor, .custom-select-trigger, #custom-select-popover, #custom-context-menu, #chat-project-modal, #thread-list, #sidebar-new-chat')) {
+  if (el.closest && el.closest('.msg.user .user-bubble, .msg.assistant .assistant-body, .assistant-msg-footer, #chat-live-status-row, #crew-board-feed, #crew-roster-grid, #mem-editor-textarea, #asl-editor, .custom-select-trigger, #custom-select-popover, #custom-context-menu, #chat-project-modal, #thread-list, #sidebar-new-chat')) {
     return false;
   }
   const fc = el.firstChild;
@@ -11827,8 +12204,21 @@ function applyUiLanguage(lang) {
     if (typeof updateCurrentThreadStreamIndicator === 'function') {
       updateCurrentThreadStreamIndicator();
     }
+    if (typeof syncAllCrewChromeForActiveThread === 'function') {
+      syncAllCrewChromeForActiveThread();
+    }
     if (sidebarGroupPages.size) renderThreadSidebar();
     localizeDomSubtree(document.body, normLang);
+    if (typeof refreshAllAssistantMsgTimes === 'function') {
+      refreshAllAssistantMsgTimes();
+    }
+    if (typeof syncChatLiveStatusRow === 'function') {
+      syncChatLiveStatusRow(currentThreadId);
+    }
+    const openCrewPop = document.getElementById('crew-help-popover');
+    if (openCrewPop && openCrewPop.classList.contains('open') && typeof crewHelpPinnedTrigger !== 'undefined' && crewHelpPinnedTrigger && typeof positionCrewHelpPopover === 'function') {
+      positionCrewHelpPopover(crewHelpPinnedTrigger);
+    }
     if (typeof populateSlotSelectors === 'function') {
       populateSlotSelectors();
       if (typeof applyCurrentWorkspaceTabLayout === 'function' && workspaceStateReady) {
@@ -12630,11 +13020,15 @@ function handleRealtimeEvent(evt) {
     if (evt.step) rt.step = evt.step;
     if (!evt.running) {
       rt.activeTool = null;
+      rt.hasUsedTool = false;
       rt.thinkingBuf = '';
       rt.textBuf = '';
     }
     syncThreadRunningBadgesInDom();
     updateCurrentThreadStreamIndicator();
+    if (evtTid === currentThreadId && typeof syncChatLiveStatusRow === 'function') {
+      syncChatLiveStatusRow(evtTid);
+    }
   } else if (evt.type === 'messages_rewound') {
     if (evtTid === currentThreadId) removeRewoundMessagesFromDom(evt.removed_ids || []);
   } else if (evt.type === 'user_message_queued') {
@@ -12791,6 +13185,7 @@ function handleRealtimeEvent(evt) {
     if (evtTid === currentThreadId) {
       ensureStreamingBubble();
       syncThinkingCompact(streamingThinkingEl, rt.thinkingBuf, true);
+      if (typeof syncChatLiveStatusRow === 'function') syncChatLiveStatusRow(evtTid);
       if (scroll && !window.chatHasMoreNewer) scroll.scrollTop = scroll.scrollHeight;
     }
   } else if (evt.type === 'text_delta') {
@@ -12804,6 +13199,7 @@ function handleRealtimeEvent(evt) {
     if (evtTid === currentThreadId) {
       ensureStreamingBubble();
       streamingTextEl.innerHTML = formatMarkdownLite(rt.textBuf, { isStreaming: true });
+      if (typeof syncChatLiveStatusRow === 'function') syncChatLiveStatusRow(evtTid);
       if (scroll && !window.chatHasMoreNewer) scroll.scrollTop = scroll.scrollHeight;
     }
   } else if (evt.type === 'btw_delta') {
@@ -12893,11 +13289,16 @@ function handleRealtimeEvent(evt) {
             bodyEl.appendChild(imgEl);
           }
         }
+        if (streamingAssistantEl && (cleanMsg.trim().length > 0 || evt.image_b64) && typeof ensureAssistantMsgFooterInDom === 'function') {
+          const completedAtSec = (typeof normalizeUnixSecondsTs === 'function' ? normalizeUnixSecondsTs(evt.created_at) : 0) || Math.floor(Date.now() / 1000);
+          ensureAssistantMsgFooterInDom(streamingAssistantEl, completedAtSec);
+        }
       }
       streamingAssistantEl = null;
       rt.thinkingBuf = '';
       rt.textBuf = '';
       if (typeof syncLiveDomTurnIntoRail === 'function') syncLiveDomTurnIntoRail();
+      if (typeof syncChatLiveStatusRow === 'function') syncChatLiveStatusRow(evtTid);
       if (scroll && !window.chatHasMoreNewer) scroll.scrollTop = scroll.scrollHeight;
     } else {
       rt.thinkingBuf = '';
@@ -12906,6 +13307,7 @@ function handleRealtimeEvent(evt) {
   } else if (evt.type === 'tool_start') {
     const rt = ensureThreadRuntime(evtTid);
     rt.running = true;
+    rt.hasUsedTool = true;
     rt.scrollTop = null;
     if (evt.step) rt.step = evt.step;
     rt.activeTool = evt.name || 'tool';
@@ -12934,6 +13336,7 @@ function handleRealtimeEvent(evt) {
       `;
       appendBeforeQueuedPrompts(msgBox, div);
       applyMsgLiveEnter(div);
+      if (typeof syncChatLiveStatusRow === 'function') syncChatLiveStatusRow(evtTid);
       if (scroll && !window.chatHasMoreNewer) scroll.scrollTop = scroll.scrollHeight;
     }
   } else if (evt.type === 'tool_done') {
@@ -12943,6 +13346,7 @@ function handleRealtimeEvent(evt) {
     syncThreadRunningBadgesInDom();
     updateCurrentThreadStreamIndicator();
     if (evtTid === currentThreadId) {
+      if (typeof syncChatLiveStatusRow === 'function') syncChatLiveStatusRow(evtTid);
       loadMessages(currentThreadId);
     }
   } else if (evt.type === 'screenshot_update') {
@@ -13285,6 +13689,7 @@ function handleRealtimeEvent(evt) {
       Object.keys(threadRuntimeState).forEach(k => {
         threadRuntimeState[k].running = false;
         threadRuntimeState[k].activeTool = null;
+        threadRuntimeState[k].hasUsedTool = false;
         threadRuntimeState[k].thinkingBuf = '';
         threadRuntimeState[k].textBuf = '';
         threadRuntimeState[k].queuedPrompts = [];
@@ -13294,6 +13699,7 @@ function handleRealtimeEvent(evt) {
       const rt = ensureThreadRuntime(evtTid);
       rt.running = false;
       rt.activeTool = null;
+      rt.hasUsedTool = false;
       rt.thinkingBuf = '';
       rt.textBuf = '';
       if (evt.type === 'turn_done') {
@@ -13309,6 +13715,7 @@ function handleRealtimeEvent(evt) {
     }
     if (!evt.thread_id || evt.thread_id === currentThreadId) {
       streamingAssistantEl = null;
+      if (typeof syncChatLiveStatusRow === 'function') syncChatLiveStatusRow(currentThreadId);
       loadMessages(currentThreadId);
     }
     loadThreads();
@@ -13588,9 +13995,13 @@ async function loadThreads(opts = {}) {
     const activeThreadObj = list.find(t => t.id === currentThreadId);
     if (activeThreadObj && activeThreadObj.mode) {
       const modeSel = document.getElementById('chat-mode');
-      if (modeSel && ['auto', 'pentest', 'computer', 'browser'].includes(activeThreadObj.mode)) {
+      if (modeSel && ['auto', 'crew', 'pentest', 'computer', 'browser'].includes(activeThreadObj.mode)) {
         modeSel.value = activeThreadObj.mode;
+        if (typeof syncCustomSelectTrigger === 'function') syncCustomSelectTrigger(modeSel);
       }
+    }
+    if (typeof syncAllCrewChromeForActiveThread === 'function') {
+      syncAllCrewChromeForActiveThread();
     }
     renderThreadSidebar(savedBoxScrollTop);
     updateCurrentThreadStreamIndicator();
@@ -14165,7 +14576,7 @@ function renderChatTurnNavRail() {
   const rail = document.getElementById('chat-turn-nav-rail');
   if (!rail) return;
   const turns = Array.isArray(window.chatTurnIndex) ? window.chatTurnIndex : [];
-  if (turns.length === 0) {
+  if (turns.length === 0 || (turns.length === 1 && !turns[0].output_preview && !turns[0].bookmarked)) {
     rail.innerHTML = '';
     rail.classList.remove('visible', 'compact-ticks', 'is-hovering');
     rail.style.removeProperty('display');
@@ -14549,8 +14960,13 @@ function renderSingleChatMessageHtml(m) {
     const crewOpenHtml = (showCrewOpen && typeof renderAllCrewInlineOpenRowHtml === 'function')
       ? renderAllCrewInlineOpenRowHtml()
       : '';
+    const hasCompletedOutput = cleanContent.trim().length > 0 || Boolean(m.image_b64);
+    const completedAtSec = typeof normalizeUnixSecondsTs === 'function' ? normalizeUnixSecondsTs(m.created_at) : 0;
+    const footerHtml = (hasCompletedOutput && typeof renderAssistantMsgFooterHtml === 'function')
+      ? renderAssistantMsgFooterHtml(completedAtSec)
+      : '';
     return `
-      <div class="msg assistant" data-msg-id="${escapeHtml(m.id || '')}" data-msg-role="assistant"${showCrewOpen ? ' data-crew-turn="1"' : ''}>
+      <div class="msg assistant" data-msg-id="${escapeHtml(m.id || '')}" data-msg-role="assistant"${showCrewOpen ? ' data-crew-turn="1"' : ''}${completedAtSec > 0 ? ` data-completed-at="${completedAtSec}"` : ''}>
         <div class="assistant-body chat-msg-body">
           ${thinkHtml}
           <div class="content-box md-content">${formatMarkdownLite(bodyMd)}</div>
@@ -14558,6 +14974,7 @@ function renderSingleChatMessageHtml(m) {
           ${rawBtnHtml}
           ${crewOpenHtml}
         </div>
+        ${footerHtml}
       </div>
     `;
   }
@@ -14843,6 +15260,9 @@ async function loadMessages(tid, opts = {}) {
             }
             existingEl.setAttribute('data-msg-sig', newSig);
           }
+          if ((cleanContent.trim().length > 0 || m.image_b64) && typeof ensureAssistantMsgFooterInDom === 'function') {
+            ensureAssistantMsgFooterInDom(existingEl, m.created_at);
+          }
           // Patch thinking: update existing or insert if missing
           const thinkText = String(m.thinking || '').trim();
           const existingThinkCompact = existingEl.querySelector('.thinking-compact');
@@ -14952,6 +15372,7 @@ async function loadMessages(tid, opts = {}) {
       if (el.classList.contains('msg') && !el.getAttribute('data-msg-id')
         && !el.getAttribute('data-queued-prompt')
         && !el.getAttribute('data-live-tool')
+        && !el.getAttribute('data-ephemeral-status')
         && el !== streamingAssistantEl) {
         // Don't remove live streaming elements or pagination slots
         if (!el.id || (!el.id.startsWith('chat-older') && !el.id.startsWith('chat-newer'))) {
@@ -15076,6 +15497,9 @@ async function loadMessages(tid, opts = {}) {
     }
   }
   box.dataset.renderedThreadId = String(tid);
+  if (typeof syncChatLiveStatusRow === 'function') {
+    syncChatLiveStatusRow(tid);
+  }
   syncChatJumpLatestPill();
   updateActiveTurnFromViewport();
 }
@@ -15814,6 +16238,7 @@ async function sendChat() {
   if (!wasAlreadyRunning && !isSideQuestion && !isMemoryOrCompactCmd) {
     rt.running = true;
     rt.step = 1;
+    rt.hasUsedTool = false;
     rt.thinkingBuf = '';
     rt.textBuf = '';
     rt.activeTool = null;
@@ -15867,6 +16292,11 @@ async function sendChat() {
 
   syncThreadRunningBadgesInDom();
   updateCurrentThreadStreamIndicator();
+  if (targetTid === currentThreadId && !isSideQuestion && !isMemoryOrCompactCmd && typeof syncChatLiveStatusRow === 'function') {
+    syncChatLiveStatusRow(targetTid);
+    const sc = getChatScrollContainer();
+    if (sc && !window.chatHasMoreNewer) sc.scrollTop = sc.scrollHeight;
+  }
 
   const chatCrewRevBefore = typeof getCrewSseRev === 'function' ? getCrewSseRev(targetTid) : 0;
   api('/api/chat', 'POST', {
@@ -15929,12 +16359,14 @@ async function sendChat() {
     const doneRt = ensureThreadRuntime(targetTid);
     doneRt.running = false;
     doneRt.activeTool = null;
+    doneRt.hasUsedTool = false;
     doneRt.thinkingBuf = '';
     doneRt.textBuf = '';
     doneRt.scrollTop = null;
     syncThreadRunningBadgesInDom();
     updateCurrentThreadStreamIndicator();
     if (currentThreadId === targetTid) {
+      if (typeof syncChatLiveStatusRow === 'function') syncChatLiveStatusRow(targetTid);
       loadMessages(targetTid);
     }
     loadThreads();
@@ -15948,9 +16380,13 @@ async function sendChat() {
     } else if (!wasAlreadyRunning) {
       errRt.running = false;
       errRt.activeTool = null;
+      errRt.hasUsedTool = false;
     }
     syncThreadRunningBadgesInDom();
     updateCurrentThreadStreamIndicator();
+    if (currentThreadId === targetTid && typeof syncChatLiveStatusRow === 'function') {
+      syncChatLiveStatusRow(targetTid);
+    }
   });
 }
 
@@ -16049,6 +16485,7 @@ async function emergencyStop(ev) {
   Object.keys(threadRuntimeState).forEach(k => {
     threadRuntimeState[k].running = false;
     threadRuntimeState[k].activeTool = null;
+    threadRuntimeState[k].hasUsedTool = false;
     threadRuntimeState[k].thinkingBuf = '';
     threadRuntimeState[k].textBuf = '';
     threadRuntimeState[k].queuedPrompts = [];
@@ -16057,6 +16494,9 @@ async function emergencyStop(ev) {
   streamingAssistantEl = null;
   syncThreadRunningBadgesInDom();
   updateCurrentThreadStreamIndicator();
+  if (typeof syncChatLiveStatusRow === 'function') {
+    syncChatLiveStatusRow(currentThreadId);
+  }
   const ind = document.getElementById('stream-indicator');
   if (ind) ind.style.display = 'none';
   const stLine = document.getElementById('status-line');
@@ -22597,7 +23037,7 @@ function buildContextMenuDescriptor(targetEl, ev) {
 
     badge = msgRole === 'user' ? 'USER MSG' : 'ASSISTANT';
     title = msgRole === 'user' ? '사용자 프롬프트 메시지' : '에이전트 응답 메시지';
-    const bodyEl = msgEl.querySelector('.user-bubble, .assistant-body');
+    const bodyEl = msgEl.querySelector('.assistant-body .content-box, .user-bubble, .assistant-body');
     const msgTxt = bodyEl ? bodyEl.innerText.trim() : msgEl.innerText.trim();
 
     addItem('메시지 본문 복사', 'solar-copy', () => copyTextToClipboardUi(msgTxt, '메시지 본문'), { primary: true, kbd: modKbd('C') });
@@ -23888,6 +24328,7 @@ const CUSTOM_SELECT_META = {
   'effort-select': {
     badge: '생각 깊이',
     title: 'AI 생각 깊이 선택',
+    icon: 'solar-layers',
     options: {
       'low': { shortLabel: '생각: 빠름', tag: 'FAST', desc: '기다림 없이 가장 빠르게 답변' },
       'medium': { shortLabel: '생각: 보통', tag: 'MED', desc: '일상적인 질문과 일반 작업' },
@@ -29017,6 +29458,7 @@ function ingestCrewStatusPayload(tid, rawPayload, opts = {}) {
     }
     syncAllCrewChromeForActiveThread();
     renderCrewBoardRosterAndHeader();
+    if (typeof syncChatLiveStatusRow === 'function') syncChatLiveStatusRow(rootTid);
   }
 }
 
@@ -29547,6 +29989,7 @@ function handleAllCrewRealtimeEvent(evt) {
     if (rootTid === currentThreadId) {
       syncAllCrewChromeForActiveThread();
       renderCrewBoardRosterAndHeader();
+      if (typeof syncChatLiveStatusRow === 'function') syncChatLiveStatusRow(rootTid);
     }
     return;
   }
@@ -29566,6 +30009,7 @@ function handleAllCrewRealtimeEvent(evt) {
     if (typeof evt.seq === 'number') st.head_seq = Math.max(st.head_seq || 0, evt.seq);
     if (rootTid === currentThreadId) {
       syncAllCrewChromeForActiveThread();
+      if (typeof syncChatLiveStatusRow === 'function') syncChatLiveStatusRow(rootTid);
       if (evt.needs_user_decision && typeof showCustomToast === 'function') {
         showCustomToast(evt.summary || `@${evt.author_name || 'crew'} 확인 요청 (#${evt.seq || ''})`, 'CREW');
       }
@@ -29816,8 +30260,15 @@ function positionCrewHelpPopover(triggerEl) {
   const tr = triggerEl.getBoundingClientRect();
   const pr = pop.getBoundingClientRect();
   const margin = 10;
+  const slotEl = triggerEl.closest('.wb-split-slot, #left-split-shell');
+  const sr = slotEl ? slotEl.getBoundingClientRect() : null;
+  const useSlotBounds = Boolean(sr && sr.width >= pr.width + margin * 2);
+  const minLeft = useSlotBounds ? Math.max(margin, sr.left + margin) : margin;
+  const maxLeft = useSlotBounds
+    ? Math.min(window.innerWidth - pr.width - margin, sr.right - pr.width - margin)
+    : (window.innerWidth - pr.width - margin);
   let left = tr.left + tr.width / 2 - pr.width / 2;
-  left = Math.max(margin, Math.min(window.innerWidth - pr.width - margin, left));
+  left = Math.max(minLeft, Math.min(Math.max(minLeft, maxLeft), left));
   let top = tr.top - pr.height - 8;
   if (top < margin) {
     top = Math.min(window.innerHeight - pr.height - margin, tr.bottom + 8);
@@ -29898,6 +30349,301 @@ function bindCrewHelpPopovers() {
 }
 bindCrewHelpPopovers();
 
+/* ── Task 2: Chat Inline Live Waiting / Progress Row ───────────────────── */
+function describeActiveToolStatusLabel(toolName, lang = currentUiLang) {
+  const name = String(toolName || '').trim();
+  const low = name.toLowerCase();
+  const isEn = normalizeUiLang(lang) === 'en';
+  let ko = `도구 실행 중 (${name})...`;
+  if (low === 'crew_manage') ko = '디렉터가 역할별 크루를 편성하고 있어요...';
+  else if (low === 'crew_post') ko = '크루 보드에 작업 지시를 전달하고 있어요...';
+  else if (low === 'crew_read' || low === 'crew_wait') ko = '크루 진행 상황을 확인하고 있어요...';
+  else if (low === 'crew_callback') ko = '크루 최종 결과를 정리하고 있어요...';
+  else if (/^(fs_read|read_file|fs_list|fs_search|grep|find)/.test(low)) ko = '파일과 코드를 살펴보고 있어요...';
+  else if (/^(fs_write|fs_edit|write_file|edit_file|apply_patch)/.test(low)) ko = '파일을 작성·수정하고 있어요...';
+  else if (/^(shell_exec|run_command|exec|bash|pwsh)/.test(low)) ko = '명령어를 실행하고 있어요...';
+  else if (low.startsWith('browser_') || low.startsWith('dom_')) ko = '웹 브라우저에서 작업하고 있어요...';
+  else if (low.startsWith('computer_') || low.startsWith('cua_')) ko = '화면을 확인하고 조작하고 있어요...';
+  if (isEn) {
+    if (UI_KO_TO_EN_EXACT[ko]) return UI_KO_TO_EN_EXACT[ko];
+    return `Running tool (${name})...`;
+  }
+  return ko;
+}
+
+function computeChatLiveStatusState(tid = currentThreadId) {
+  const targetTid = tid || currentThreadId || 'thread-main';
+  if (window.chatHasMoreNewer) return null;
+  const rt = (typeof threadRuntimeState === 'object' && threadRuntimeState) ? threadRuntimeState[targetTid] : null;
+  const crewSt = (typeof ensureCrewThreadState === 'function') ? ensureCrewThreadState(targetTid) : null;
+  const modeSel = document.getElementById('chat-mode');
+  const isCrew = Boolean((crewSt && crewSt.enabled) || (targetTid === currentThreadId && modeSel && modeSel.value === 'crew'));
+  const workingCrews = Number((crewSt && crewSt.counts && crewSt.counts.working) || 0);
+  const isRunning = Boolean(rt && rt.running);
+  const lang = typeof currentUiLang === 'string' ? currentUiLang : 'ko';
+  const isEn = normalizeUiLang(lang) === 'en';
+
+  if (isRunning && String(rt.textBuf || '').trim().length > 0) {
+    return null;
+  }
+
+  if (isRunning && rt.activeTool) {
+    return {
+      mode: isCrew ? 'crew' : 'normal',
+      text: describeActiveToolStatusLabel(rt.activeTool, lang),
+      showBoardLink: false
+    };
+  }
+
+  if (isRunning && String(rt.thinkingBuf || '').trim().length > 0) {
+    const ko = isCrew
+      ? '디렉터가 작업 분할과 배정 구성을 설계하고 있어요...'
+      : '깊이 생각하며 답변을 정리하고 있어요...';
+    return {
+      mode: isCrew ? 'crew' : 'normal',
+      text: translateUiString(ko, lang),
+      showBoardLink: false
+    };
+  }
+
+  if (isRunning) {
+    const stepNum = Number(rt && rt.step) || 1;
+    const afterTool = Boolean(rt && rt.hasUsedTool) || stepNum > 1;
+    if (isCrew) {
+      const ko = afterTool
+        ? '디렉터가 크루 작업을 조율하고 있어요...'
+        : '디렉터가 요청을 분석하고 있어요...';
+      return {
+        mode: 'crew',
+        text: translateUiString(ko, lang),
+        showBoardLink: false
+      };
+    }
+    if (afterTool) {
+      return {
+        mode: 'normal',
+        text: translateUiString('결과를 바탕으로 답변을 준비하고 있어요...', lang),
+        showBoardLink: false
+      };
+    }
+    const modeVal = (targetTid === currentThreadId && modeSel) ? modeSel.value : 'auto';
+    let ko = '생각 중...';
+    if (modeVal === 'browser') ko = '브라우저 작업을 준비하고 있어요...';
+    else if (modeVal === 'computer') ko = '화면 작업을 준비하고 있어요...';
+    else if (modeVal === 'pentest') ko = '보안 점검을 준비하고 있어요...';
+    return {
+      mode: 'normal',
+      text: translateUiString(ko, lang),
+      showBoardLink: false
+    };
+  }
+
+  if (isCrew && workingCrews > 0) {
+    return {
+      mode: 'crew',
+      text: isEn
+        ? `${workingCrews} crew member${workingCrews === 1 ? '' : 's'} working in parallel...`
+        : `${workingCrews}명의 크루가 병렬로 작업하고 있어요...`,
+      showBoardLink: true
+    };
+  }
+
+  return null;
+}
+
+function syncChatLiveStatusRow(tid = currentThreadId) {
+  const targetTid = tid || currentThreadId || 'thread-main';
+  if (targetTid !== currentThreadId) return;
+  const box = typeof getChatMessagesContainer === 'function' ? getChatMessagesContainer() : document.getElementById('chat-messages');
+  if (!box) return;
+  const existing = document.getElementById('chat-live-status-row');
+  const state = computeChatLiveStatusState(targetTid);
+  if (!state) {
+    if (existing) existing.remove();
+    return;
+  }
+
+  const empty = box.querySelector('.chat-empty-state');
+  if (empty) empty.remove();
+
+  const row = existing || document.createElement('div');
+  row.id = 'chat-live-status-row';
+  row.className = 'msg assistant chat-live-status-row';
+  row.setAttribute('data-ephemeral-status', '1');
+  row.setAttribute('aria-live', 'polite');
+
+  const leadIconHtml = state.mode === 'crew'
+    ? (typeof renderAllCrewPixelSvg === 'function' ? renderAllCrewPixelSvg('sm') : '<span class="chat-live-dot" aria-hidden="true"></span>')
+    : '<span class="chat-live-dot" aria-hidden="true"></span>';
+  const boardBtnLabel = translateUiString('크루 보드 ›', currentUiLang);
+  const boardBtnHtml = state.showBoardLink
+    ? `<button type="button" class="chat-live-status-board-btn" onclick="openCrewBoardPanel({ preferSplit: true })">${escapeHtml(boardBtnLabel)}</button>`
+    : '';
+  const sig = `${state.mode}|${state.text}|${state.showBoardLink ? 1 : 0}|${currentUiLang}`;
+  if (row.dataset.statusSig !== sig) {
+    row.dataset.statusSig = sig;
+    row.innerHTML = `<div class="chat-live-status-inner">${leadIconHtml}<span class="chat-live-status-text">${escapeHtml(state.text)}</span>${boardBtnHtml}</div>`;
+  }
+
+  const firstQueued = box.querySelector('.msg.user[data-queued-prompt="1"]');
+  if (firstQueued) {
+    if (row.nextElementSibling !== firstQueued) {
+      box.insertBefore(row, firstQueued);
+    }
+  } else if (row.parentElement !== box || box.lastElementChild !== row) {
+    box.appendChild(row);
+  }
+}
+
+/* ── Task 3: Completed Assistant Right-Bottom Timestamp + Copy Button ─── */
+function normalizeUnixSecondsTs(raw) {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return n > 1e12 ? Math.floor(n / 1000) : Math.floor(n);
+}
+
+function formatExactLocalDateTime(tsSec) {
+  const sec = normalizeUnixSecondsTs(tsSec);
+  if (!sec) return '';
+  const d = new Date(sec * 1000);
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function formatRelativeCompletedTime(tsSec, lang = currentUiLang) {
+  const sec = normalizeUnixSecondsTs(tsSec);
+  if (!sec) return '';
+  const isEn = normalizeUiLang(lang) === 'en';
+  const diff = Math.max(0, Math.floor(Date.now() / 1000) - sec);
+  if (diff < 45) return isEn ? 'just now' : '방금 전';
+  if (diff < 3600) {
+    const m = Math.max(1, Math.floor(diff / 60));
+    return isEn ? `${m}m ago` : `${m}분 전`;
+  }
+  if (diff < 86400) {
+    const h = Math.floor(diff / 3600);
+    return isEn ? `${h}h ago` : `${h}시간 전`;
+  }
+  if (diff < 604800) {
+    const days = Math.floor(diff / 86400);
+    return isEn ? `${days}d ago` : `${days}일 전`;
+  }
+  const d = new Date(sec * 1000);
+  const pad = n => String(n).padStart(2, '0');
+  const sep = isEn ? '-' : '.';
+  return `${d.getFullYear()}${sep}${pad(d.getMonth() + 1)}${sep}${pad(d.getDate())}`;
+}
+
+function renderAssistantMsgFooterHtml(rawTs) {
+  const sec = normalizeUnixSecondsTs(rawTs);
+  const lang = typeof currentUiLang === 'string' ? currentUiLang : 'ko';
+  const exactTitle = sec > 0 ? formatExactLocalDateTime(sec) : '';
+  const relText = sec > 0 ? formatRelativeCompletedTime(sec, lang) : '';
+  const timeHtml = sec > 0
+    ? `<span class="assistant-msg-time" data-completed-at="${sec}" title="${escapeHtml(exactTitle)}">${escapeHtml(relText)}</span>`
+    : '';
+  const copyLabel = translateUiString('답변 복사', lang);
+  return `<div class="assistant-msg-footer">${timeHtml}<button type="button" class="assistant-msg-copy-btn" onclick="copyAssistantMessageUi(this, event)" aria-label="${escapeHtml(copyLabel)}" title="${escapeHtml(copyLabel)}"><svg class="solar-icon copy-icon-idle" aria-hidden="true"><use href="#solar-copy"/></svg><svg class="solar-icon copy-icon-done" aria-hidden="true"><use href="#solar-check"/></svg></button></div>`;
+}
+
+function ensureAssistantMsgFooterInDom(msgEl, rawTs) {
+  if (!msgEl || !msgEl.classList || !msgEl.classList.contains('assistant')) return;
+  const sec = normalizeUnixSecondsTs(rawTs || msgEl.getAttribute('data-completed-at'));
+  if (sec > 0) msgEl.setAttribute('data-completed-at', String(sec));
+  let footer = msgEl.querySelector(':scope > .assistant-msg-footer');
+  if (!footer) {
+    msgEl.insertAdjacentHTML('beforeend', renderAssistantMsgFooterHtml(sec));
+    return;
+  }
+  const copyBtn = footer.querySelector('.assistant-msg-copy-btn');
+  if (copyBtn) {
+    const lbl = translateUiString(copyBtn.classList.contains('is-copied') ? '복사됨' : '답변 복사', currentUiLang);
+    copyBtn.setAttribute('aria-label', lbl);
+    copyBtn.setAttribute('title', lbl);
+  }
+  let timeEl = footer.querySelector('.assistant-msg-time');
+  if (sec > 0) {
+    if (!timeEl) {
+      timeEl = document.createElement('span');
+      timeEl.className = 'assistant-msg-time';
+      footer.insertBefore(timeEl, footer.firstChild);
+    }
+    timeEl.setAttribute('data-completed-at', String(sec));
+    const nextExact = formatExactLocalDateTime(sec);
+    if (timeEl.getAttribute('title') !== nextExact) timeEl.setAttribute('title', nextExact);
+    const nextRel = formatRelativeCompletedTime(sec, currentUiLang);
+    if (timeEl.textContent !== nextRel) timeEl.textContent = nextRel;
+  }
+}
+
+function refreshAllAssistantMsgTimes() {
+  const copyLabel = translateUiString('답변 복사', currentUiLang);
+  const copiedLabel = translateUiString('복사됨', currentUiLang);
+  document.querySelectorAll('.assistant-msg-footer').forEach(footer => {
+    const timeEl = footer.querySelector('.assistant-msg-time[data-completed-at]');
+    if (timeEl) {
+      const sec = normalizeUnixSecondsTs(timeEl.getAttribute('data-completed-at'));
+      if (sec > 0) {
+        const nextExact = formatExactLocalDateTime(sec);
+        if (timeEl.getAttribute('title') !== nextExact) timeEl.setAttribute('title', nextExact);
+        const nextRel = formatRelativeCompletedTime(sec, currentUiLang);
+        if (timeEl.textContent !== nextRel) timeEl.textContent = nextRel;
+      }
+    }
+    const btn = footer.querySelector('.assistant-msg-copy-btn');
+    if (btn) {
+      const lbl = btn.classList.contains('is-copied') ? copiedLabel : copyLabel;
+      btn.setAttribute('aria-label', lbl);
+      btn.setAttribute('title', lbl);
+    }
+  });
+}
+
+async function copyAssistantMessageUi(btn, ev) {
+  if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation();
+  const msgEl = btn && btn.closest ? btn.closest('.msg.assistant') : null;
+  if (!msgEl) return;
+  const contentBox = msgEl.querySelector('.assistant-body .content-box');
+  let text = contentBox ? (contentBox.innerText || contentBox.textContent || '').trim() : '';
+  if (!text) {
+    const bodyClone = msgEl.querySelector('.assistant-body')?.cloneNode(true);
+    if (bodyClone) {
+      bodyClone.querySelectorAll('.thinking-compact, .allcrew-inline-open-wrap').forEach(n => n.remove());
+      text = (bodyClone.innerText || bodyClone.textContent || '').trim();
+    }
+  }
+  if (!text) {
+    if (typeof showCustomToast === 'function') {
+      showCustomToast(translateUiString('복사할 텍스트가 없습니다.', currentUiLang), 'COPY');
+    }
+    return;
+  }
+  const label = translateUiString('어시스턴트 답변', currentUiLang);
+  if (typeof copyTextToClipboardUi === 'function') {
+    await copyTextToClipboardUi(text, label);
+  } else if (navigator.clipboard && navigator.clipboard.writeText) {
+    await navigator.clipboard.writeText(text).catch(() => {});
+  }
+  if (btn) {
+    btn.classList.add('is-copied');
+    const copiedLbl = translateUiString('복사됨', currentUiLang);
+    btn.setAttribute('aria-label', copiedLbl);
+    btn.setAttribute('title', copiedLbl);
+    if (btn._copiedTimer) clearTimeout(btn._copiedTimer);
+    btn._copiedTimer = setTimeout(() => {
+      btn._copiedTimer = null;
+      btn.classList.remove('is-copied');
+      const idleLbl = translateUiString('답변 복사', currentUiLang);
+      btn.setAttribute('aria-label', idleLbl);
+      btn.setAttribute('title', idleLbl);
+    }, 1600);
+  }
+}
+
+if (!window.__assistantMsgTimeTickerBound) {
+  window.__assistantMsgTimeTickerBound = true;
+  setInterval(refreshAllAssistantMsgTimes, 30000);
+}
 </script>
 </body>
 </html>
