@@ -14302,8 +14302,8 @@ function chatProjectBusy(thread) {
     (['running', 'waiting'].includes(t.agent_status) || threadRuntimeState[t.id]?.running || threadRuntimeState[t.id]?.queuedPrompts?.length));
 }
 
-function closeChatProjectPicker() {
-  if (chatProjectPicker.saving) return;
+function closeChatProjectPicker(force = false) {
+  if (!force && chatProjectPicker.saving) return;
   chatProjectPicker.threadId = '';
   chatProjectPicker.selectedFolders = [];
   chatProjectPicker.picking = false;
@@ -14467,7 +14467,7 @@ async function saveChatProject(pathOrPaths, allowEmpty = true) {
       error.textContent = lastError;
       return;
     }
-    closeChatProjectPicker();
+    closeChatProjectPicker(true);
     await loadThreads();
   } finally {
     chatProjectPicker.saving = false;
@@ -31397,7 +31397,7 @@ function renderUserAttachmentChipsHtml(attachments) {
       return `<img class="user-msg-att-thumb" src="${escapeHtml(item.thumb_data_url)}" alt="${name}" title="${title}" />`;
     }
     const iconId = attachmentIconIdForItem(item);
-    const sub = escapeHtml(item.badge || (item.kind === 'folder' ? translateUiString('폴더', currentUiLang) : ''));
+    const sub = escapeHtml(item.kind === 'folder' ? translateUiString('폴더', currentUiLang) : (item.badge || ''));
     return `
       <div class="user-msg-att-chip" title="${title}">
         <svg class="solar-icon sm" style="color:var(--text-secondary);" aria-hidden="true"><use href="#${iconId}"/></svg>
