@@ -7,7 +7,7 @@
 pub use crate::agent::emit_event;
 use crate::agent::{
     cache_screenshot, capture_by_target_string, execute_tool_call, get_latest_screenshot_cached,
-    run_agent_turn, run_single_routine_now, subscribe_events,
+    run_single_routine_now, subscribe_events,
 };
 use crate::allscript::execute_allscript;
 use crate::browser::{
@@ -716,6 +716,7 @@ async fn handle_connection(mut stream: TcpStream) -> Result<()> {
 
 const MAX_HTTP_HEADER: usize = 16 * 1024;
 const MAX_HTTP_BODY: usize = 16 * 1024 * 1024;
+const MAX_CHAT_HTTP_BODY: usize = 64 * 1024 * 1024;
 const MAX_MEDIA_HTTP_BODY: usize = 128 * 1024 * 1024;
 
 #[derive(Debug)]
@@ -783,6 +784,8 @@ fn parse_http_head(
     let req_path = parts[1].split('?').next().unwrap_or(parts[1]);
     let body_limit = if req_path == "/api/media" || req_path.starts_with("/api/media/") {
         MAX_MEDIA_HTTP_BODY
+    } else if req_path == "/api/chat" || req_path.starts_with("/api/chat/attachments") {
+        MAX_CHAT_HTTP_BODY
     } else {
         MAX_HTTP_BODY
     };
@@ -1779,6 +1782,102 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
         }
 
         // ─────────────────────────────────────────────────────────────────────
+        // Native Dialog Picker & Chat Attachments
+        // ─────────────────────────────────────────────────────────────────────
+        ("POST", "/api/dialog/pick") => {
+            let mode = body
+                .get("mode")
+                .and_then(|v| v.as_str())
+                .unwrap_or("files")
+                .to_string();
+            let multiple = json_opt_bool(body.get("multiple"))
+                .unwrap_or(!mode.eq_ignore_ascii_case("folder"));
+            let initial_dir = body
+                .get("initial_dir")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let paths = crate::attachments::pick_native_paths(&mode, multiple, &initial_dir).await?;
+            if paths.is_empty() {
+                Ok(json!({
+                    "ok": true,
+                    "cancelled": true,
+                    "paths": [],
+                    "items": [],
+                }))
+            } else {
+                let items = crate::attachments::stage_local_paths(&paths)?;
+                Ok(json!({
+                    "ok": true,
+                    "cancelled": false,
+                    "paths": paths,
+                    "items": items,
+                }))
+            }
+        }
+
+        ("POST", "/api/chat/attachments/stage") => {
+            let mut items = Vec::new();
+            if let Some(paths_arr) = body.get("paths").and_then(|v| v.as_array()) {
+                let paths: Vec<String> = paths_arr
+                    .iter()
+                    .filter_map(|v| v.as_str().map(ToString::to_string))
+                    .collect();
+                if !paths.is_empty() {
+                    items.extend(crate::attachments::stage_local_paths(&paths)?);
+                }
+            }
+            if let Some(files_val) = body.get("files") {
+                if let Ok(files) =
+                    serde_json::from_value::<Vec<crate::attachments::UploadedAttachmentInput>>(
+                        files_val.clone(),
+                    )
+                {
+                    if !files.is_empty() {
+                        items.extend(crate::attachments::stage_uploaded_files(&files)?);
+                    }
+                }
+            }
+            Ok(json!({
+                "ok": true,
+                "items": items,
+            }))
+        }
+
+        ("POST", "/api/chat/attachments/remove") => {
+            let id = body
+                .get("id")
+                .and_then(|v| v.as_str())
+                .or_else(|| q.get("id").map(String::as_str))
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            let removed = crate::attachments::remove_staged_attachment(&id);
+            Ok(json!({
+                "ok": true,
+                "removed": removed,
+                "id": id,
+            }))
+        }
+
+        ("DELETE", p) if p.starts_with("/api/chat/attachments/") => {
+            let raw_id = p
+                .strip_prefix("/api/chat/attachments/")
+                .unwrap_or("")
+                .trim_matches('/');
+            let decoded_id = urlencoding::decode(raw_id)
+                .map(|s| s.into_owned())
+                .unwrap_or_else(|_| raw_id.to_string());
+            let clean_id = decoded_id.trim().to_string();
+            let removed = crate::attachments::remove_staged_attachment(&clean_id);
+            Ok(json!({
+                "ok": true,
+                "removed": removed,
+                "id": clean_id,
+            }))
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
         // Chat & Autonomous Agent Loop
         // ─────────────────────────────────────────────────────────────────────
         ("POST", "/api/chat") => {
@@ -1796,6 +1895,11 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
+            let attachments: Vec<Value> = body
+                .get("attachments")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
             let mode = body
                 .get("mode")
                 .and_then(|v| v.as_str())
@@ -1822,10 +1926,23 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
             }
 
             if sync {
-                let res = run_agent_turn(tid, prompt, mode, cfg).await?;
+                let res = crate::agent::run_agent_turn_with_attachments(
+                    tid,
+                    prompt,
+                    mode,
+                    cfg,
+                    attachments,
+                )
+                .await?;
                 Ok(res)
             } else {
-                Ok(crate::agent::enqueue_or_spawn_chat_turn(tid, prompt, mode, cfg))
+                Ok(crate::agent::enqueue_or_spawn_chat_turn_with_attachments(
+                    tid,
+                    prompt,
+                    mode,
+                    cfg,
+                    attachments,
+                ))
             }
         }
 
@@ -5943,5 +6060,65 @@ mod http_security_tests {
             .await
             .expect("POST /api/threads/delete");
         assert_eq!(del["ok"], true);
+    }
+
+    #[tokio::test]
+    async fn api_dialog_pick_and_chat_attachments_stage_and_delete() {
+        let dir = std::env::temp_dir().join(format!(
+            "alluse_srv_att_{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let txt_path = dir.join("note.txt");
+        std::fs::write(&txt_path, "hello attachment").unwrap();
+
+        unsafe {
+            std::env::set_var(
+                "ALLUSE_TEST_DIALOG_PATHS",
+                format!("{};{}", txt_path.display(), dir.display()),
+            );
+        }
+        let picked = route_api(
+            "POST",
+            "/api/dialog/pick",
+            "",
+            json!({ "mode": "files", "multiple": true, "initial_dir": dir.to_string_lossy() }),
+        )
+        .await
+        .expect("POST /api/dialog/pick");
+        unsafe {
+            std::env::remove_var("ALLUSE_TEST_DIALOG_PATHS");
+        }
+        assert_eq!(picked["ok"], true);
+        assert_eq!(picked["cancelled"], false);
+        let picked_items = picked["items"].as_array().unwrap();
+        assert_eq!(picked_items.len(), 2);
+        assert_eq!(picked_items[0]["kind"], "document");
+        assert_eq!(picked_items[1]["kind"], "folder");
+
+        let del_id = picked_items[0]["id"].as_str().unwrap().to_string();
+        let deleted = route_api(
+            "DELETE",
+            &format!("/api/chat/attachments/{del_id}"),
+            "",
+            json!({}),
+        )
+        .await
+        .expect("DELETE /api/chat/attachments/{id}");
+        assert_eq!(deleted["ok"], true);
+        assert_eq!(deleted["removed"], true);
+
+        let folder_id = picked_items[1]["id"].as_str().unwrap().to_string();
+        let removed_post = route_api(
+            "POST",
+            "/api/chat/attachments/remove",
+            "",
+            json!({ "id": folder_id }),
+        )
+        .await
+        .expect("POST /api/chat/attachments/remove");
+        assert_eq!(removed_post["removed"], true);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -59,6 +59,8 @@ pub struct QueuedUserPrompt {
     pub model: String,
     #[serde(default)]
     pub effort: String,
+    #[serde(default)]
+    pub attachments: Vec<Value>,
     #[serde(skip)]
     pub cfg: AppConfig,
     pub queued_at: u64,
@@ -485,6 +487,16 @@ pub fn enqueue_or_spawn_chat_turn(
     mode: String,
     cfg: AppConfig,
 ) -> Value {
+    enqueue_or_spawn_chat_turn_with_attachments(thread_id, prompt, mode, cfg, Vec::new())
+}
+
+pub fn enqueue_or_spawn_chat_turn_with_attachments(
+    thread_id: String,
+    prompt: String,
+    mode: String,
+    cfg: AppConfig,
+    attachments: Vec<Value>,
+) -> Value {
     let clean_id = {
         let trimmed = thread_id.trim();
         if trimmed.is_empty() {
@@ -498,7 +510,10 @@ pub fn enqueue_or_spawn_chat_turn(
     if is_side_question {
         let tid_cl = clean_id.clone();
         tokio::spawn(async move {
-            if let Err(err) = run_agent_turn(tid_cl.clone(), prompt, mode, cfg).await {
+            if let Err(err) =
+                run_agent_turn_with_attachments(tid_cl.clone(), prompt, mode, cfg, attachments)
+                    .await
+            {
                 emit_event(
                     "error",
                     json!({
@@ -539,6 +554,7 @@ pub fn enqueue_or_spawn_chat_turn(
             mode: mode.clone(),
             model: cfg.model.clone(),
             effort: cfg.effort.clone(),
+            attachments: attachments.clone(),
             cfg,
             queued_at: now,
         };
@@ -570,6 +586,7 @@ pub fn enqueue_or_spawn_chat_turn(
                 "queue_id": queue_id,
                 "content": prompt,
                 "mode": mode,
+                "attachments": attachments,
                 "queued_at": now,
                 "queued_count": queued_count,
             }),
@@ -592,7 +609,9 @@ pub fn enqueue_or_spawn_chat_turn(
     tokio::spawn(async move {
         let _pending_guard = PendingSpawnGuard(tid_cl.clone());
         let _stream_guard = ThreadRunGuard(tid_cl.clone(), pre_run_id);
-        if let Err(err) = run_agent_turn(tid_cl.clone(), prompt, mode, cfg).await {
+        if let Err(err) =
+            run_agent_turn_with_attachments(tid_cl.clone(), prompt, mode, cfg, attachments).await
+        {
             emit_event(
                 "error",
                 json!({
@@ -1383,11 +1402,12 @@ fn finish_thread_stream(thread_id: &str, run_id: u64) {
         );
         if !was_intr {
             if let Some(next_q) = pop_next_queued_thread_prompt(thread_id) {
-                let _ = enqueue_or_spawn_chat_turn(
+                let _ = enqueue_or_spawn_chat_turn_with_attachments(
                     thread_id.to_string(),
                     next_q.prompt,
                     next_q.mode,
                     next_q.cfg,
+                    next_q.attachments,
                 );
             }
         }
@@ -11689,18 +11709,31 @@ pub(crate) fn reconstruct_llm_history_from_db_messages(
             continue;
         }
         if m.role == "user" || m.role == "assistant" || m.tool_name == "subagent_fork_context" {
+            let (att_ctx, extra_imgs) = if m.role == "user" || m.role == "system" {
+                crate::attachments::extract_llm_attachment_fields_from_meta(&m.meta_json)
+            } else {
+                (String::new(), Vec::new())
+            };
+            let content = if att_ctx.is_empty() {
+                m.content
+            } else {
+                crate::attachments::append_attachment_context_to_user_content(&m.content, &att_ctx)
+            };
+            let image_b64 = if m.role == "user" || m.role == "system" {
+                crate::llm::encode_turn_images(&m.image_b64, &extra_imgs)
+            } else if m.image_b64.is_empty() {
+                None
+            } else {
+                Some(m.image_b64)
+            };
             history.push(LlmTurnMessage {
                 role: if m.role == "system" {
                     "user".to_string()
                 } else {
                     m.role
                 },
-                content: m.content,
-                image_b64: if m.image_b64.is_empty() {
-                    None
-                } else {
-                    Some(m.image_b64)
-                },
+                content,
+                image_b64,
                 tool_call_id: None,
                 tool_name: None,
                 tool_calls: Vec::new(),
@@ -11775,8 +11808,26 @@ pub(crate) fn reconstruct_llm_history_from_db_messages(
 pub async fn run_agent_turn(
     thread_id: String,
     user_prompt: String,
+    mode: String,
+    cfg: AppConfig,
+) -> Result<Value> {
+    Box::pin(run_agent_turn_with_attachments(
+        thread_id,
+        user_prompt,
+        mode,
+        cfg,
+        Vec::new(),
+    ))
+    .await
+}
+
+/// Runs a full multi-step autonomous agent turn on `thread_id` with optional staged attachments.
+pub async fn run_agent_turn_with_attachments(
+    thread_id: String,
+    user_prompt: String,
     mut mode: String,
     mut cfg: AppConfig,
+    attachments: Vec<Value>,
 ) -> Result<Value> {
     let thread_id = {
         let trimmed = thread_id.trim();
@@ -12180,7 +12231,21 @@ pub async fn run_agent_turn(
         }
         emit_event("threads_updated", json!({ "thread_id": thread_id }));
     } else {
-        let user_msg = append_message(&thread_id, "user", &user_prompt, "", "", "", "", "{}")?;
+        let resolved_att = crate::attachments::resolve_attachments_for_chat(&attachments);
+        let att_meta_str = serde_json::to_string(&crate::attachments::build_message_meta_value(
+            &resolved_att,
+        ))
+        .unwrap_or_else(|_| "{}".to_string());
+        let user_msg = append_message(
+            &thread_id,
+            "user",
+            &user_prompt,
+            &resolved_att.primary_image_b64,
+            "",
+            "",
+            "",
+            &att_meta_str,
+        )?;
         emit_event("user_message", serde_json::to_value(&user_msg)?);
         if !is_crew_worker && mode.eq_ignore_ascii_case("crew") {
             let _ = crate::crew::ensure_crew_mode_enabled(&thread_id);
@@ -12596,7 +12661,23 @@ pub async fn run_agent_turn(
                         ));
                     }
                     cfg = q.cfg.clone();
-                    let user_msg = append_message(&thread_id, "user", &q.prompt, "", "", "", "", "{}")?;
+                    let resolved_q =
+                        crate::attachments::resolve_attachments_for_chat(&q.attachments);
+                    let q_meta_str =
+                        serde_json::to_string(&crate::attachments::build_message_meta_value(
+                            &resolved_q,
+                        ))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    let user_msg = append_message(
+                        &thread_id,
+                        "user",
+                        &q.prompt,
+                        &resolved_q.primary_image_b64,
+                        "",
+                        "",
+                        "",
+                        &q_meta_str,
+                    )?;
                     if !is_crew_worker && mode.eq_ignore_ascii_case("crew") {
                         let _ = crate::crew::ensure_crew_mode_enabled(&thread_id);
                     }
@@ -12606,10 +12687,19 @@ pub async fn run_agent_turn(
                         obj.insert("queued_count".to_string(), json!(remaining_q));
                     }
                     emit_event("user_message", msg_val);
+                    let q_llm_content =
+                        crate::attachments::append_attachment_context_to_user_content(
+                            &q.prompt,
+                            &resolved_q.prompt_context,
+                        );
+                    let q_llm_img = crate::llm::encode_turn_images(
+                        &resolved_q.primary_image_b64,
+                        &resolved_q.extra_images_b64,
+                    );
                     history.push(LlmTurnMessage {
                         role: "user".to_string(),
-                        content: q.prompt,
-                        image_b64: None,
+                        content: q_llm_content,
+                        image_b64: q_llm_img,
                         tool_call_id: None,
                         tool_name: None,
                         tool_calls: Vec::new(),
@@ -14768,5 +14858,42 @@ mod config_tool_redaction_tests {
         assert!(echo_stdout.contains("한글테스트"), "stdout was {echo_stdout:?}");
 
         let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn reconstruct_history_injects_folder_path_and_multi_images_from_meta_without_bloating_db() {
+        let dir = std::env::temp_dir().join(format!(
+            "alluse_hist_att_{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("never_dump.txt"), "PRIVATE_FILE_NEVER_READ_AUTOMATICALLY").unwrap();
+        let staged = crate::attachments::stage_local_paths(&[dir.to_string_lossy().into_owned()]).unwrap();
+        let resolved = crate::attachments::resolve_attachments_for_chat(&[json!({
+            "id": staged[0].id
+        })]);
+        let mut meta_val = crate::attachments::build_message_meta_value(&resolved);
+        meta_val["extra_images_b64"] = json!(["data:image/png;base64,EXTRAIMG2"]);
+        let db_msg = crate::db::ChatMessage {
+            id: "m1".to_string(),
+            thread_id: "t1".to_string(),
+            role: "user".to_string(),
+            content: "이 폴더 참고해줘".to_string(),
+            thinking: String::new(),
+            tool_name: String::new(),
+            tool_args: String::new(),
+            image_b64: "data:image/png;base64,PRIMARYIMG1".to_string(),
+            meta_json: meta_val.to_string(),
+            created_at: 1,
+        };
+        let hist = super::reconstruct_llm_history_from_db_messages(vec![db_msg]);
+        assert_eq!(hist.len(), 1);
+        assert!(hist[0].content.starts_with("이 폴더 참고해줘"));
+        assert!(hist[0].content.contains("[참조 폴더 경로:"));
+        assert!(!hist[0].content.contains("PRIVATE_FILE_NEVER_READ_AUTOMATICALLY"));
+        let img = hist[0].image_b64.as_deref().unwrap_or("");
+        assert!(img.contains("PRIMARYIMG1") && img.contains("EXTRAIMG2"));
+        let _ = crate::attachments::remove_staged_attachment(&staged[0].id);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

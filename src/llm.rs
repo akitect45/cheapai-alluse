@@ -817,6 +817,42 @@ fn format_data_image_url(b64: &str) -> String {
     }
 }
 
+pub(crate) fn encode_turn_images(primary: &str, extras: &[String]) -> Option<String> {
+    let mut urls: Vec<String> = Vec::new();
+    let p = primary.trim();
+    if !p.is_empty() {
+        urls.push(p.to_string());
+    }
+    for ex in extras {
+        let t = ex.trim();
+        if !t.is_empty() {
+            urls.push(t.to_string());
+        }
+    }
+    match urls.len() {
+        0 => None,
+        1 => Some(urls.into_iter().next().unwrap()),
+        _ => serde_json::to_string(&urls).ok(),
+    }
+}
+
+fn decode_turn_image_urls(raw: &str) -> Vec<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    if trimmed.starts_with('[') {
+        if let Ok(arr) = serde_json::from_str::<Vec<String>>(trimmed) {
+            return arr
+                .into_iter()
+                .map(|s| format_data_image_url(&s))
+                .filter(|s| !s.is_empty())
+                .collect();
+        }
+    }
+    vec![format_data_image_url(trimmed)]
+}
+
 fn compute_keep_image_from(history: &[LlmTurnMessage]) -> usize {
     // Keep only the last 3 images in context to save bandwidth & tokens while preserving full text history
     let image_indices: Vec<usize> = history
@@ -985,23 +1021,26 @@ fn build_chat_completions_request_body(
             _ => {
                 if include_img {
                     if let Some(b64) = &m.image_b64 {
-                        let data_url = format_data_image_url(b64);
-                        messages.push(json!({
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": m.content
-                                },
-                                {
+                        let urls = decode_turn_image_urls(b64);
+                        if !urls.is_empty() {
+                            let mut parts = vec![json!({
+                                "type": "text",
+                                "text": m.content
+                            })];
+                            for data_url in urls {
+                                parts.push(json!({
                                     "type": "image_url",
                                     "image_url": {
                                         "url": data_url
                                     }
-                                }
-                            ]
-                        }));
-                        continue;
+                                }));
+                            }
+                            messages.push(json!({
+                                "role": "user",
+                                "content": parts
+                            }));
+                            continue;
+                        }
                     }
                 }
                 messages.push(json!({
@@ -1190,11 +1229,12 @@ pub(crate) fn build_responses_request_body(
                 })];
                 if include_img {
                     if let Some(b64) = &m.image_b64 {
-                        let data_url = format_data_image_url(b64);
-                        content_parts.push(json!({
-                            "type": "input_image",
-                            "image_url": data_url
-                        }));
+                        for data_url in decode_turn_image_urls(b64) {
+                            content_parts.push(json!({
+                                "type": "input_image",
+                                "image_url": data_url
+                            }));
+                        }
                     }
                 }
                 input.push(json!({
