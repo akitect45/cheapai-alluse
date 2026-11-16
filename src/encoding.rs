@@ -102,6 +102,7 @@ fn candidate_codepages() -> Vec<u32> {
 
 /// Portable non-Windows strict codepage decoder backed by `encoding_rs`.
 /// Returns `None` if the codepage is unmapped or any byte maps to `U+FFFD`.
+#[cfg_attr(windows, allow(dead_code))]
 pub(crate) fn decode_codepage_strict_portable(bytes: &[u8], cp: u32) -> Option<String> {
     if bytes.is_empty() {
         return Some(String::new());

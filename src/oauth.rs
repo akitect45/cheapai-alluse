@@ -26,8 +26,13 @@ pub const CLAUDE_OAUTH_MANUAL_REDIRECT_URI: &str =
     "https://console.anthropic.com/oauth/code/callback";
 pub const CLAUDE_API_DEFAULT_BASE_URL: &str = "https://api.anthropic.com";
 pub const CLAUDE_OAUTH_CALLBACK_PATH: &str = "/callback";
+pub const OPENAI_USAGE_DEFAULT_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
+pub const OPENAI_MODELS_DEFAULT_URL: &str =
+    "https://chatgpt.com/backend-api/codex/models?client_version=0.1.0";
 
 const TOKEN_REFRESH_LEEWAY_SECS: u64 = 90;
+const USAGE_CACHE_TTL_SECS: u64 = 45;
+const MODELS_CACHE_TTL_SECS: u64 = 300;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -138,6 +143,51 @@ static VAULT_CACHE: LazyLock<Mutex<Option<(PathBuf, OAuthVaultPayload)>>> =
 static REFRESH_LOCK: LazyLock<tokio::sync::Mutex<()>> =
     LazyLock::new(|| tokio::sync::Mutex::new(()));
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct OAuthUsageWindow {
+    pub label: String,
+    pub used_percent: f64,
+    pub remaining_percent: f64,
+    pub reset_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OAuthUsageSnapshot {
+    pub provider: String,
+    pub plan_type: String,
+    pub status: String, // "ok" | "warning" | "exhausted" | "unknown"
+    pub warning: bool,
+    pub exhausted: bool,
+    pub primary_window: Option<OAuthUsageWindow>,
+    pub secondary_window: Option<OAuthUsageWindow>,
+    pub updated_at: u64,
+    pub last_error: String,
+}
+
+impl OAuthUsageSnapshot {
+    pub fn unknown(provider: OAuthProvider) -> Self {
+        Self {
+            provider: provider.as_str().to_string(),
+            plan_type: String::new(),
+            status: "unknown".to_string(),
+            warning: false,
+            exhausted: false,
+            primary_window: None,
+            secondary_window: None,
+            updated_at: 0,
+            last_error: String::new(),
+        }
+    }
+}
+
+static USAGE_CACHE: LazyLock<Mutex<HashMap<OAuthProvider, OAuthUsageSnapshot>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+static MODELS_CACHE: LazyLock<Mutex<HashMap<OAuthProvider, (u64, Vec<crate::config::ModelInfo>)>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
 fn now_unix_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -194,6 +244,19 @@ pub fn claude_api_base_url() -> String {
     env_or_default("ALLUSE_CLAUDE_API_BASE_URL", CLAUDE_API_DEFAULT_BASE_URL)
         .trim_end_matches('/')
         .to_string()
+}
+
+pub fn openai_usage_url() -> String {
+    env_or_default("ALLUSE_OPENAI_USAGE_URL", OPENAI_USAGE_DEFAULT_URL)
+}
+
+pub fn openai_models_url() -> String {
+    env_or_default("ALLUSE_OPENAI_MODELS_URL", OPENAI_MODELS_DEFAULT_URL)
+}
+
+pub fn claude_usage_url() -> String {
+    let default_url = format!("{}/api/oauth/usage", claude_api_base_url());
+    env_or_default("ALLUSE_CLAUDE_USAGE_URL", &default_url)
 }
 
 pub fn oauth_vault_path() -> PathBuf {
@@ -282,42 +345,65 @@ pub fn is_provider_connected(provider: OAuthProvider) -> bool {
         .unwrap_or(false)
 }
 
+fn oauth_variants_all() -> Vec<String> {
+    vec![
+        "low".to_string(),
+        "medium".to_string(),
+        "high".to_string(),
+        "xhigh".to_string(),
+    ]
+}
+
+fn default_model_infos_for(provider: OAuthProvider) -> Vec<crate::config::ModelInfo> {
+    match provider {
+        OAuthProvider::Openai => OAuthProvider::Openai
+            .default_models()
+            .into_iter()
+            .map(|id| {
+                let name = id.strip_prefix("openai-oauth/").unwrap_or(id);
+                crate::config::ModelInfo {
+                    id: id.to_string(),
+                    name: format!("{name} (OpenAI OAuth)"),
+                    provider: "openai-oauth".to_string(),
+                    reasoning: !name.contains("4.1"),
+                    variants: oauth_variants_all(),
+                    context_limit: 272_000,
+                    output_limit: 32_768,
+                }
+            })
+            .collect(),
+        OAuthProvider::Claude => OAuthProvider::Claude
+            .default_models()
+            .into_iter()
+            .map(|id| {
+                let name = id.strip_prefix("claude-oauth/").unwrap_or(id);
+                crate::config::ModelInfo {
+                    id: id.to_string(),
+                    name: format!("{name} (Claude OAuth)"),
+                    provider: "claude-oauth".to_string(),
+                    reasoning: true,
+                    variants: oauth_variants_all(),
+                    context_limit: 200_000,
+                    output_limit: 16_384,
+                }
+            })
+            .collect(),
+    }
+}
+
 pub fn list_connected_models_for_catalog() -> Vec<crate::config::ModelInfo> {
     let mut out = Vec::new();
-    if is_provider_connected(OAuthProvider::Openai) {
-        for id in OAuthProvider::Openai.default_models() {
-            let name = id.strip_prefix("openai-oauth/").unwrap_or(id);
-            out.push(crate::config::ModelInfo {
-                id: id.to_string(),
-                name: format!("{name} (OpenAI OAuth)"),
-                provider: "openai-oauth".to_string(),
-                reasoning: !name.contains("4.1"),
-                variants: vec![
-                    "low".to_string(),
-                    "medium".to_string(),
-                    "high".to_string(),
-                ],
-                context_limit: 272_000,
-                output_limit: 32_768,
-            });
+    let cache = MODELS_CACHE.lock().unwrap();
+    for provider in [OAuthProvider::Openai, OAuthProvider::Claude] {
+        if !is_provider_connected(provider) {
+            continue;
         }
-    }
-    if is_provider_connected(OAuthProvider::Claude) {
-        for id in OAuthProvider::Claude.default_models() {
-            let name = id.strip_prefix("claude-oauth/").unwrap_or(id);
-            out.push(crate::config::ModelInfo {
-                id: id.to_string(),
-                name: format!("{name} (Claude OAuth)"),
-                provider: "claude-oauth".to_string(),
-                reasoning: true,
-                variants: vec![
-                    "low".to_string(),
-                    "medium".to_string(),
-                    "high".to_string(),
-                ],
-                context_limit: 200_000,
-                output_limit: 16_384,
-            });
+        if let Some((_, cached)) = cache.get(&provider)
+            && !cached.is_empty()
+        {
+            out.extend(cached.clone());
+        } else {
+            out.extend(default_model_infos_for(provider));
         }
     }
     out
@@ -325,91 +411,92 @@ pub fn list_connected_models_for_catalog() -> Vec<crate::config::ModelInfo> {
 
 pub async fn fetch_connected_catalog_models_with_remote() -> Vec<crate::config::ModelInfo> {
     let mut out = Vec::new();
+    let now = now_unix_secs();
+
     if is_provider_connected(OAuthProvider::Openai) {
-        for id in OAuthProvider::Openai.default_models() {
-            let name = id.strip_prefix("openai-oauth/").unwrap_or(id);
-            out.push(crate::config::ModelInfo {
-                id: id.to_string(),
-                name: format!("{name} (OpenAI OAuth)"),
-                provider: "openai-oauth".to_string(),
-                reasoning: !name.contains("4.1"),
-                variants: vec![
-                    "low".to_string(),
-                    "medium".to_string(),
-                    "high".to_string(),
-                ],
-                context_limit: 272_000,
-                output_limit: 32_768,
-            });
-        }
-    }
-    if is_provider_connected(OAuthProvider::Claude) {
-        let mut seen = std::collections::HashSet::new();
-        for id in OAuthProvider::Claude.default_models() {
-            seen.insert(id.to_string());
-            let name = id.strip_prefix("claude-oauth/").unwrap_or(id);
-            out.push(crate::config::ModelInfo {
-                id: id.to_string(),
-                name: format!("{name} (Claude OAuth)"),
-                provider: "claude-oauth".to_string(),
-                reasoning: true,
-                variants: vec![
-                    "low".to_string(),
-                    "medium".to_string(),
-                    "high".to_string(),
-                ],
-                context_limit: 200_000,
-                output_limit: 16_384,
-            });
-        }
-        if let Ok(rec) = get_valid_token(OAuthProvider::Claude).await {
-            if let Ok(client) = reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(4))
-                .build()
-            {
-                let url = format!("{}/v1/models", claude_api_base_url());
-                if let Ok(resp) = client
-                    .get(&url)
-                    .bearer_auth(rec.access_token.trim())
-                    .header("anthropic-version", "2023-06-01")
-                    .header(
-                        "anthropic-beta",
-                        "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14",
-                    )
-                    .send()
-                    .await
+        let cached_fresh = MODELS_CACHE
+            .lock()
+            .unwrap()
+            .get(&OAuthProvider::Openai)
+            .filter(|(ts, list)| now.saturating_sub(*ts) < MODELS_CACHE_TTL_SECS && !list.is_empty())
+            .map(|(_, list)| list.clone());
+
+        if let Some(list) = cached_fresh {
+            out.extend(list);
+        } else {
+            let mut oa_models = Vec::new();
+            let mut seen = std::collections::HashSet::new();
+            if let Ok(rec) = get_valid_token(OAuthProvider::Openai).await {
+                if let Ok(client) = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(4))
+                    .build()
                 {
-                    if resp.status().is_success() {
-                        if let Ok(val) = resp.json::<Value>().await {
-                            if let Some(arr) = val.get("data").and_then(|v| v.as_array()) {
-                                for item in arr {
-                                    let raw_id = item
-                                        .get("id")
-                                        .and_then(|v| v.as_str())
-                                        .map(str::trim)
-                                        .unwrap_or("");
-                                    if raw_id.is_empty() {
-                                        continue;
-                                    }
-                                    let full_id = format!("claude-oauth/{raw_id}");
-                                    if seen.insert(full_id.clone()) {
-                                        let disp = item
-                                            .get("display_name")
+                    let mut req = client
+                        .get(openai_models_url())
+                        .bearer_auth(rec.access_token.trim())
+                        .header("originator", "codex_cli_rs");
+                    if !rec.account_id.trim().is_empty() {
+                        req = req.header("ChatGPT-Account-Id", rec.account_id.trim());
+                    }
+                    if let Ok(resp) = req.send().await {
+                        if resp.status().is_success() {
+                            if let Ok(val) = resp.json::<Value>().await {
+                                let arr_opt = val
+                                    .get("models")
+                                    .or_else(|| val.get("data"))
+                                    .and_then(|v| v.as_array());
+                                if let Some(arr) = arr_opt {
+                                    for item in arr {
+                                        let raw_id = item
+                                            .get("slug")
+                                            .or_else(|| item.get("id"))
                                             .and_then(|v| v.as_str())
-                                            .unwrap_or(raw_id);
-                                        out.push(crate::config::ModelInfo {
-                                            id: full_id,
-                                            name: format!("{disp} (Claude OAuth)"),
-                                            provider: "claude-oauth".to_string(),
-                                            reasoning: true,
-                                            variants: vec![
-                                                "low".to_string(),
-                                                "medium".to_string(),
-                                                "high".to_string(),
-                                            ],
-                                            context_limit: 200_000,
-                                            output_limit: 16_384,
-                                        });
+                                            .map(str::trim)
+                                            .unwrap_or("");
+                                        if raw_id.is_empty() {
+                                            continue;
+                                        }
+                                        let full_id = format!("openai-oauth/{raw_id}");
+                                        if seen.insert(full_id.clone()) {
+                                            let disp = item
+                                                .get("display_name")
+                                                .or_else(|| item.get("name"))
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or(raw_id);
+                                            let ctx_limit = item
+                                                .get("context_window")
+                                                .or_else(|| item.get("context_length"))
+                                                .and_then(|v| v.as_u64())
+                                                .unwrap_or(272_000);
+                                            let mut variants: Vec<String> = item
+                                                .get("supported_reasoning_levels")
+                                                .and_then(|v| v.as_array())
+                                                .map(|lvls| {
+                                                    lvls.iter()
+                                                        .filter_map(|l| {
+                                                            l.get("effort")
+                                                                .or(Some(l))
+                                                                .and_then(|v| v.as_str())
+                                                                .map(str::trim)
+                                                                .filter(|s| !s.is_empty())
+                                                                .map(ToString::to_string)
+                                                        })
+                                                        .collect::<Vec<_>>()
+                                                })
+                                                .unwrap_or_default();
+                                            if variants.is_empty() {
+                                                variants = oauth_variants_all();
+                                            }
+                                            oa_models.push(crate::config::ModelInfo {
+                                                id: full_id,
+                                                name: format!("{disp} (OpenAI OAuth)"),
+                                                provider: "openai-oauth".to_string(),
+                                                reasoning: !raw_id.contains("4.1"),
+                                                variants,
+                                                context_limit: ctx_limit,
+                                                output_limit: 32_768,
+                                            });
+                                        }
                                     }
                                 }
                             }
@@ -417,9 +504,504 @@ pub async fn fetch_connected_catalog_models_with_remote() -> Vec<crate::config::
                     }
                 }
             }
+            if oa_models.is_empty() {
+                oa_models = default_model_infos_for(OAuthProvider::Openai);
+            } else {
+                for def in default_model_infos_for(OAuthProvider::Openai) {
+                    if seen.insert(def.id.clone()) {
+                        oa_models.push(def);
+                    }
+                }
+                MODELS_CACHE
+                    .lock()
+                    .unwrap()
+                    .insert(OAuthProvider::Openai, (now, oa_models.clone()));
+            }
+            out.extend(oa_models);
+        }
+    }
+
+    if is_provider_connected(OAuthProvider::Claude) {
+        let cached_fresh = MODELS_CACHE
+            .lock()
+            .unwrap()
+            .get(&OAuthProvider::Claude)
+            .filter(|(ts, list)| now.saturating_sub(*ts) < MODELS_CACHE_TTL_SECS && !list.is_empty())
+            .map(|(_, list)| list.clone());
+
+        if let Some(list) = cached_fresh {
+            out.extend(list);
+        } else {
+            let mut cl_models = Vec::new();
+            let mut seen = std::collections::HashSet::new();
+            let mut remote_ok = false;
+            if let Ok(rec) = get_valid_token(OAuthProvider::Claude).await {
+                if let Ok(client) = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(4))
+                    .build()
+                {
+                    let url = format!("{}/v1/models", claude_api_base_url());
+                    if let Ok(resp) = client
+                        .get(&url)
+                        .bearer_auth(rec.access_token.trim())
+                        .header("anthropic-version", "2023-06-01")
+                        .header(
+                            "anthropic-beta",
+                            "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14",
+                        )
+                        .send()
+                        .await
+                    {
+                        if resp.status().is_success() {
+                            if let Ok(val) = resp.json::<Value>().await {
+                                if let Some(arr) = val.get("data").and_then(|v| v.as_array()) {
+                                    for item in arr {
+                                        let raw_id = item
+                                            .get("id")
+                                            .and_then(|v| v.as_str())
+                                            .map(str::trim)
+                                            .unwrap_or("");
+                                        if raw_id.is_empty() {
+                                            continue;
+                                        }
+                                        let full_id = format!("claude-oauth/{raw_id}");
+                                        if seen.insert(full_id.clone()) {
+                                            remote_ok = true;
+                                            let disp = item
+                                                .get("display_name")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or(raw_id);
+                                            cl_models.push(crate::config::ModelInfo {
+                                                id: full_id,
+                                                name: format!("{disp} (Claude OAuth)"),
+                                                provider: "claude-oauth".to_string(),
+                                                reasoning: true,
+                                                variants: oauth_variants_all(),
+                                                context_limit: 200_000,
+                                                output_limit: 16_384,
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            for def in default_model_infos_for(OAuthProvider::Claude) {
+                if seen.insert(def.id.clone()) {
+                    cl_models.push(def);
+                }
+            }
+            if remote_ok {
+                MODELS_CACHE
+                    .lock()
+                    .unwrap()
+                    .insert(OAuthProvider::Claude, (now, cl_models.clone()));
+            }
+            out.extend(cl_models);
         }
     }
     out
+}
+
+fn unix_secs_to_iso8601(secs: u64) -> String {
+    if secs == 0 {
+        return String::new();
+    }
+    let days = (secs / 86_400) as i64;
+    let rem = secs % 86_400;
+    let hour = rem / 3_600;
+    let min = (rem % 3_600) / 60;
+    let sec = rem % 60;
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = (yoe as i64) + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = y + if m <= 2 { 1 } else { 0 };
+    format!("{year:04}-{m:02}-{d:02}T{hour:02}:{min:02}:{sec:02}Z")
+}
+
+fn normalize_reset_at_value(val_opt: Option<&Value>) -> String {
+    let Some(v) = val_opt else {
+        return String::new();
+    };
+    if let Some(n) = v.as_u64() {
+        let secs = if n > 10_000_000_000 { n / 1000 } else { n };
+        return unix_secs_to_iso8601(secs);
+    }
+    if let Some(f) = v.as_f64() {
+        if f.is_finite() && f > 0.0 {
+            let n = f as u64;
+            let secs = if n > 10_000_000_000 { n / 1000 } else { n };
+            return unix_secs_to_iso8601(secs);
+        }
+    }
+    if let Some(s) = v.as_str() {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            return String::new();
+        }
+        if trimmed.bytes().all(|b| b.is_ascii_digit()) {
+            if let Ok(n) = trimmed.parse::<u64>() {
+                let secs = if n > 10_000_000_000 { n / 1000 } else { n };
+                return unix_secs_to_iso8601(secs);
+            }
+        }
+        return trimmed.to_string();
+    }
+    String::new()
+}
+
+fn make_usage_window(label: &str, raw_used_pct: f64, reset_at: String) -> OAuthUsageWindow {
+    let used = raw_used_pct.clamp(0.0, 100.0);
+    let used_rounded = (used * 10.0).round() / 10.0;
+    let rem_rounded = ((100.0 - used_rounded).max(0.0) * 10.0).round() / 10.0;
+    OAuthUsageWindow {
+        label: label.to_string(),
+        used_percent: used_rounded,
+        remaining_percent: rem_rounded,
+        reset_at,
+    }
+}
+
+fn finalize_usage_snapshot(snap: &mut OAuthUsageSnapshot, unified_status: Option<&str>) {
+    let p_used = snap.primary_window.as_ref().map(|w| w.used_percent).unwrap_or(0.0);
+    let s_used = snap
+        .secondary_window
+        .as_ref()
+        .map(|w| w.used_percent)
+        .unwrap_or(0.0);
+    let max_used = p_used.max(s_used);
+    let st_low = unified_status.unwrap_or("").trim().to_ascii_lowercase();
+    snap.exhausted = snap.exhausted
+        || matches!(st_low.as_str(), "rejected" | "exceeded" | "rate_limited")
+        || max_used >= 100.0;
+    snap.warning = snap.exhausted || st_low == "allowed_warning" || max_used >= 80.0;
+    snap.status = if snap.exhausted {
+        "exhausted".to_string()
+    } else if snap.warning {
+        "warning".to_string()
+    } else if snap.primary_window.is_some() || snap.secondary_window.is_some() {
+        "ok".to_string()
+    } else {
+        "unknown".to_string()
+    };
+}
+
+fn emit_oauth_usage_updated() {
+    let status = build_status_response();
+    crate::agent::emit_event("oauth_usage_updated", status.clone());
+    crate::agent::emit_event("oauth_updated", status);
+}
+
+fn header_f64(headers: &reqwest::header::HeaderMap, name: &str) -> Option<f64> {
+    headers
+        .get(name)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.trim().parse::<f64>().ok())
+        .filter(|v| v.is_finite())
+}
+
+fn header_str(headers: &reqwest::header::HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+pub fn update_usage_from_headers(
+    provider: OAuthProvider,
+    headers: &reqwest::header::HeaderMap,
+) {
+    let now = now_unix_secs();
+    let mut snap = USAGE_CACHE
+        .lock()
+        .unwrap()
+        .get(&provider)
+        .cloned()
+        .unwrap_or_else(|| OAuthUsageSnapshot::unknown(provider));
+
+    let mut changed = false;
+    let mut unified_status: Option<String> = None;
+
+    match provider {
+        OAuthProvider::Claude => {
+            if let Some(st) = header_str(headers, "anthropic-ratelimit-unified-status") {
+                unified_status = Some(st);
+                changed = true;
+            }
+            if let Some(u5) = header_f64(headers, "anthropic-ratelimit-unified-5h-utilization") {
+                let pct = if u5 <= 1.0 { u5 * 100.0 } else { u5 };
+                let reset_raw = header_str(headers, "anthropic-ratelimit-unified-5h-reset")
+                    .map(|s| normalize_reset_at_value(Some(&Value::String(s))))
+                    .unwrap_or_default();
+                snap.primary_window = Some(make_usage_window("5h", pct, reset_raw));
+                changed = true;
+            }
+            if let Some(u7) = header_f64(headers, "anthropic-ratelimit-unified-7d-utilization") {
+                let pct = if u7 <= 1.0 { u7 * 100.0 } else { u7 };
+                let reset_raw = header_str(headers, "anthropic-ratelimit-unified-7d-reset")
+                    .map(|s| normalize_reset_at_value(Some(&Value::String(s))))
+                    .unwrap_or_default();
+                snap.secondary_window = Some(make_usage_window("7d", pct, reset_raw));
+                changed = true;
+            }
+            if !changed
+                && let (Some(limit), Some(rem)) = (
+                    header_f64(headers, "anthropic-ratelimit-requests-limit"),
+                    header_f64(headers, "anthropic-ratelimit-requests-remaining"),
+                )
+                && limit > 0.0
+            {
+                let pct = ((limit - rem).max(0.0) / limit) * 100.0;
+                let reset_raw = header_str(headers, "anthropic-ratelimit-requests-reset")
+                    .map(|s| normalize_reset_at_value(Some(&Value::String(s))))
+                    .unwrap_or_default();
+                snap.primary_window = Some(make_usage_window("5h", pct, reset_raw));
+                changed = true;
+            }
+        }
+        OAuthProvider::Openai => {
+            if let Some(p5) = header_f64(headers, "x-codex-primary-used-percent") {
+                let pct = if p5 > 0.0 && p5 <= 1.0 { p5 * 100.0 } else { p5 };
+                let reset_raw = header_str(headers, "x-codex-primary-reset-at")
+                    .map(|s| normalize_reset_at_value(Some(&Value::String(s))))
+                    .unwrap_or_default();
+                snap.primary_window = Some(make_usage_window("5h", pct, reset_raw));
+                changed = true;
+            }
+            if let Some(p7) = header_f64(headers, "x-codex-secondary-used-percent") {
+                let pct = if p7 > 0.0 && p7 <= 1.0 { p7 * 100.0 } else { p7 };
+                let reset_raw = header_str(headers, "x-codex-secondary-reset-at")
+                    .map(|s| normalize_reset_at_value(Some(&Value::String(s))))
+                    .unwrap_or_default();
+                snap.secondary_window = Some(make_usage_window("7d", pct, reset_raw));
+                changed = true;
+            }
+            if !changed
+                && let (Some(limit), Some(rem)) = (
+                    header_f64(headers, "x-ratelimit-limit-requests"),
+                    header_f64(headers, "x-ratelimit-remaining-requests"),
+                )
+                && limit > 0.0
+            {
+                let pct = ((limit - rem).max(0.0) / limit) * 100.0;
+                let reset_raw = header_str(headers, "x-ratelimit-reset-requests")
+                    .unwrap_or_default();
+                snap.primary_window = Some(make_usage_window("5h", pct, reset_raw));
+                changed = true;
+            }
+        }
+    }
+
+    if changed {
+        snap.exhausted = false;
+        snap.last_error.clear();
+        snap.updated_at = now;
+        finalize_usage_snapshot(&mut snap, unified_status.as_deref());
+        USAGE_CACHE.lock().unwrap().insert(provider, snap);
+        emit_oauth_usage_updated();
+    }
+}
+
+pub fn mark_usage_exhausted(provider: OAuthProvider, reset_hint: &str, msg: &str) {
+    let now = now_unix_secs();
+    let mut snap = USAGE_CACHE
+        .lock()
+        .unwrap()
+        .get(&provider)
+        .cloned()
+        .unwrap_or_else(|| OAuthUsageSnapshot::unknown(provider));
+    let clean_reset = if !reset_hint.trim().is_empty() {
+        normalize_reset_at_value(Some(&Value::String(reset_hint.trim().to_string())))
+    } else {
+        snap.primary_window
+            .as_ref()
+            .map(|w| w.reset_at.clone())
+            .unwrap_or_default()
+    };
+    snap.primary_window = Some(make_usage_window("5h", 100.0, clean_reset));
+    snap.exhausted = true;
+    snap.warning = true;
+    snap.status = "exhausted".to_string();
+    snap.updated_at = now;
+    if !msg.trim().is_empty() {
+        snap.last_error = msg.trim().chars().take(240).collect();
+    }
+    USAGE_CACHE.lock().unwrap().insert(provider, snap);
+    emit_oauth_usage_updated();
+}
+
+pub async fn fetch_usage_for_provider(
+    provider: OAuthProvider,
+    force: bool,
+) -> OAuthUsageSnapshot {
+    if !is_provider_connected(provider) {
+        return OAuthUsageSnapshot::unknown(provider);
+    }
+    let now = now_unix_secs();
+    if !force {
+        if let Some(cached) = USAGE_CACHE.lock().unwrap().get(&provider).cloned() {
+            if cached.updated_at > 0 && now.saturating_sub(cached.updated_at) < USAGE_CACHE_TTL_SECS {
+                return cached;
+            }
+        }
+    }
+
+    let mut snap = USAGE_CACHE
+        .lock()
+        .unwrap()
+        .get(&provider)
+        .cloned()
+        .unwrap_or_else(|| OAuthUsageSnapshot::unknown(provider));
+
+    let Ok(rec) = get_valid_token(provider).await else {
+        snap.last_error = "OAuth token unavailable".to_string();
+        return snap;
+    };
+    let Ok(client) = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+    else {
+        return snap;
+    };
+
+    let resp_res = match provider {
+        OAuthProvider::Openai => {
+            let mut req = client
+                .get(openai_usage_url())
+                .bearer_auth(rec.access_token.trim())
+                .header("originator", "codex_cli_rs");
+            if !rec.account_id.trim().is_empty() {
+                req = req.header("ChatGPT-Account-Id", rec.account_id.trim());
+            }
+            req.send().await
+        }
+        OAuthProvider::Claude => {
+            client
+                .get(claude_usage_url())
+                .bearer_auth(rec.access_token.trim())
+                .header("anthropic-version", "2023-06-01")
+                .header("anthropic-beta", "oauth-2025-04-20")
+                .send()
+                .await
+        }
+    };
+
+    match resp_res {
+        Ok(resp) => {
+            let status_code = resp.status();
+            let hdrs = resp.headers().clone();
+            let body_txt = resp.text().await.unwrap_or_default();
+            if status_code.as_u16() == 429 {
+                let reset_h = header_str(&hdrs, "retry-after").unwrap_or_default();
+                mark_usage_exhausted(provider, &reset_h, &body_txt);
+                return USAGE_CACHE
+                    .lock()
+                    .unwrap()
+                    .get(&provider)
+                    .cloned()
+                    .unwrap_or(snap);
+            }
+            if !status_code.is_success() {
+                snap.last_error = format!("HTTP {status_code}");
+                snap.updated_at = now;
+                USAGE_CACHE.lock().unwrap().insert(provider, snap.clone());
+                return snap;
+            }
+            if let Ok(val) = serde_json::from_str::<Value>(&body_txt) {
+                match provider {
+                    OAuthProvider::Openai => {
+                        if let Some(plan) = val.get("plan_type").and_then(|v| v.as_str()) {
+                            snap.plan_type = plan.trim().to_string();
+                        }
+                        if let Some(rl) = val.get("rate_limit") {
+                            if rl.get("limit_reached").and_then(|v| v.as_bool()) == Some(true) {
+                                snap.exhausted = true;
+                            }
+                            if let Some(pw) = rl.get("primary_window") {
+                                let pct = pw
+                                    .get("used_percent")
+                                    .and_then(|v| v.as_f64())
+                                    .unwrap_or(0.0);
+                                let rst = normalize_reset_at_value(pw.get("reset_at"));
+                                snap.primary_window = Some(make_usage_window("5h", pct, rst));
+                            }
+                            if let Some(sw) = rl.get("secondary_window") {
+                                let pct = sw
+                                    .get("used_percent")
+                                    .and_then(|v| v.as_f64())
+                                    .unwrap_or(0.0);
+                                let rst = normalize_reset_at_value(sw.get("reset_at"));
+                                snap.secondary_window = Some(make_usage_window("7d", pct, rst));
+                            }
+                        }
+                    }
+                    OAuthProvider::Claude => {
+                        if let Some(plan) = val
+                            .get("plan_type")
+                            .or_else(|| val.get("subscription_type"))
+                            .and_then(|v| v.as_str())
+                        {
+                            snap.plan_type = plan.trim().to_string();
+                        }
+                        let parse_claude_win = |obj: &Value, label: &str| -> OAuthUsageWindow {
+                            let raw = obj
+                                .get("utilization")
+                                .or_else(|| obj.get("used_percent"))
+                                .and_then(|v| v.as_f64())
+                                .unwrap_or(0.0);
+                            let pct = if raw > 0.0 && raw <= 1.0 {
+                                raw * 100.0
+                            } else {
+                                raw
+                            };
+                            let rst = normalize_reset_at_value(
+                                obj.get("resets_at").or_else(|| obj.get("reset_at")),
+                            );
+                            make_usage_window(label, pct, rst)
+                        };
+                        if let Some(w5) = val.get("five_hour").filter(|v| v.is_object()) {
+                            snap.primary_window = Some(parse_claude_win(w5, "5h"));
+                        }
+                        if let Some(w7) = val.get("seven_day").filter(|v| v.is_object()) {
+                            snap.secondary_window = Some(parse_claude_win(w7, "7d"));
+                        }
+                    }
+                }
+                snap.last_error.clear();
+                snap.updated_at = now;
+                finalize_usage_snapshot(&mut snap, None);
+                USAGE_CACHE.lock().unwrap().insert(provider, snap.clone());
+                emit_oauth_usage_updated();
+            }
+        }
+        Err(e) => {
+            snap.last_error = e.to_string();
+            snap.updated_at = now;
+            USAGE_CACHE.lock().unwrap().insert(provider, snap.clone());
+        }
+    }
+    snap
+}
+
+pub async fn get_all_oauth_usage(force: bool) -> Value {
+    let oa = fetch_usage_for_provider(OAuthProvider::Openai, force).await;
+    let cl = fetch_usage_for_provider(OAuthProvider::Claude, force).await;
+    json!({
+        "ok": true,
+        "providers": {
+            "openai": oa,
+            "claude": cl,
+        }
+    })
 }
 
 pub fn build_provider_status(provider: OAuthProvider) -> Value {
@@ -447,7 +1029,31 @@ pub fn build_provider_status(provider: OAuthProvider) -> Value {
         .as_ref()
         .map(|p| p.redirect_uri.clone())
         .unwrap_or_default();
-    let models: Vec<&str> = provider.ui_status_models();
+    let models: Vec<String> = {
+        let cached = MODELS_CACHE
+            .lock()
+            .unwrap()
+            .get(&provider)
+            .filter(|(_, list)| !list.is_empty())
+            .map(|(_, list)| list.iter().map(|m| m.id.clone()).collect::<Vec<_>>());
+        cached.unwrap_or_else(|| {
+            provider
+                .ui_status_models()
+                .into_iter()
+                .map(ToString::to_string)
+                .collect()
+        })
+    };
+    let usage = if connected {
+        USAGE_CACHE
+            .lock()
+            .unwrap()
+            .get(&provider)
+            .cloned()
+            .unwrap_or_else(|| OAuthUsageSnapshot::unknown(provider))
+    } else {
+        OAuthUsageSnapshot::unknown(provider)
+    };
 
     json!({
         "provider": provider.as_str(),
@@ -459,6 +1065,7 @@ pub fn build_provider_status(provider: OAuthProvider) -> Value {
         "authUrl": auth_url,
         "redirectUri": redirect_uri,
         "models": models,
+        "usage": usage,
     })
 }
 
@@ -1051,6 +1658,8 @@ pub async fn exchange_oauth_code(
     let rec = build_record_from_token_response(provider, &val, "", "", "")?;
     set_stored_record(provider, Some(rec))?;
     PENDING_OAUTH_SESSIONS.lock().unwrap().remove(&provider);
+    USAGE_CACHE.lock().unwrap().remove(&provider);
+    MODELS_CACHE.lock().unwrap().remove(&provider);
     cancel_provider_listeners(provider);
 
     let full_status = build_status_response();
@@ -1155,6 +1764,8 @@ pub async fn get_valid_token(provider: OAuthProvider) -> Result<OAuthTokenRecord
 pub fn disconnect_provider(provider: OAuthProvider) -> Result<Value> {
     cancel_provider_listeners(provider);
     PENDING_OAUTH_SESSIONS.lock().unwrap().remove(&provider);
+    USAGE_CACHE.lock().unwrap().remove(&provider);
+    MODELS_CACHE.lock().unwrap().remove(&provider);
     set_stored_record(provider, None)?;
 
     // Revert active config back to CheapAI default if it was pinned to the disconnected OAuth provider
@@ -1293,7 +1904,9 @@ mod tests {
                         .unwrap_or("/");
 
                     let head_low = head.to_ascii_lowercase();
-                    let (status_line, content_type, body_out) = if path == "/openai/token" {
+                    let path_only = path.split('?').next().unwrap_or(path);
+                    let mut extra_headers = String::new();
+                    let (status_line, content_type, body_out) = if path_only == "/openai/token" {
                         let resp_json = if body.contains("grant_type=refresh_token") {
                             json!({
                                 "access_token": "SECRET_OPENAI_ACCESS_REFRESHED",
@@ -1310,7 +1923,7 @@ mod tests {
                             })
                         };
                         ("HTTP/1.1 200 OK", "application/json", resp_json.to_string())
-                    } else if path == "/claude/token" {
+                    } else if path_only == "/claude/token" {
                         let resp_json = if body.contains("\"refresh_token\"") && body.contains("\"grant_type\":\"refresh_token\"") {
                             json!({
                                 "access_token": "SECRET_CLAUDE_ACCESS_REFRESHED",
@@ -1327,34 +1940,71 @@ mod tests {
                             })
                         };
                         ("HTTP/1.1 200 OK", "application/json", resp_json.to_string())
-                    } else if path == "/codex/responses" {
+                    } else if path_only == "/wham/usage" {
+                        let resp_json = json!({
+                            "plan_type": "plus",
+                            "rate_limit": {
+                                "limit_reached": false,
+                                "primary_window": { "used_percent": 35.0, "reset_at": 1794842500u64 },
+                                "secondary_window": { "used_percent": 18.0, "reset_at": 1795400000u64 }
+                            }
+                        });
+                        ("HTTP/1.1 200 OK", "application/json", resp_json.to_string())
+                    } else if path_only == "/api/oauth/usage" {
+                        let resp_json = json!({
+                            "subscription_type": "max",
+                            "five_hour": { "utilization": 0.42, "resets_at": "2026-11-17T06:00:00Z" },
+                            "seven_day": { "utilization": 0.19, "resets_at": "2026-11-22T00:00:00Z" }
+                        });
+                        ("HTTP/1.1 200 OK", "application/json", resp_json.to_string())
+                    } else if path_only == "/codex/models" {
+                        let resp_json = json!({
+                            "models": [
+                                { "slug": "gpt-5.4-custom", "display_name": "GPT-5.4 Custom", "context_window": 400000 }
+                            ]
+                        });
+                        ("HTTP/1.1 200 OK", "application/json", resp_json.to_string())
+                    } else if path_only == "/v1/models" {
+                        let resp_json = json!({
+                            "data": [
+                                { "id": "claude-custom-4", "display_name": "Claude Custom 4" }
+                            ]
+                        });
+                        ("HTTP/1.1 200 OK", "application/json", resp_json.to_string())
+                    } else if path_only == "/codex/responses" {
                         let ok_hdrs = head_low.contains("authorization: bearer secret_openai_access_refreshed")
                             && head_low.contains("chatgpt-account-id: acct_chatgpt_99")
                             && head_low.contains("originator: codex_cli_rs")
                             && body.contains("\"store\":false");
-                        if ok_hdrs {
+                        if !ok_hdrs {
+                            ("HTTP/1.1 400 Bad Request", "application/json", "{\"error\":{\"message\":\"missing codex headers or store=false\"}}".to_string())
+                        } else if body.contains("TRIGGER_429") {
+                            ("HTTP/1.1 429 Too Many Requests", "application/json", "{\"error\":{\"code\":\"usage_limit_reached\",\"message\":\"Weekly limit reached\"}}".to_string())
+                        } else {
+                            extra_headers = "x-codex-primary-used-percent: 84.0\r\nx-codex-primary-reset-at: 1794842500\r\n".to_string();
                             let sse = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Codex OAuth OK\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"model\":\"gpt-5.4\"}}\n\n";
                             ("HTTP/1.1 200 OK", "text/event-stream", sse.to_string())
-                        } else {
-                            ("HTTP/1.1 400 Bad Request", "application/json", "{\"error\":{\"message\":\"missing codex headers or store=false\"}}".to_string())
                         }
-                    } else if path == "/v1/messages" {
+                    } else if path_only == "/v1/messages" {
                         let ok_hdrs = head_low.contains("authorization: bearer secret_claude_access_refreshed")
                             && head_low.contains("anthropic-version: 2023-06-01")
                             && head_low.contains("anthropic-beta: claude-code-20250219")
                             && body.contains("You are Claude Code");
-                        if ok_hdrs {
-                            let sse = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"model\":\"claude-sonnet-4-6\"}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Claude OAuth OK\"}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
-                            ("HTTP/1.1 200 OK", "text/event-stream", sse.to_string())
-                        } else {
+                        if !ok_hdrs {
                             ("HTTP/1.1 400 Bad Request", "application/json", "{\"error\":{\"message\":\"missing claude headers\"}}".to_string())
+                        } else if body.contains("TEST_THINKING_FALLBACK") && body.contains("\"budget_tokens\":16000") {
+                            ("HTTP/1.1 400 Bad Request", "application/json", "{\"error\":{\"message\":\"thinking parameter is unsupported for this model\"}}".to_string())
+                        } else {
+                            extra_headers = "anthropic-ratelimit-unified-status: allowed_warning\r\nanthropic-ratelimit-unified-5h-utilization: 0.85\r\n".to_string();
+                            let sse = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"model\":\"claude-sonnet-4-6\"}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Think\"}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"Claude OAuth OK\"}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
+                            ("HTTP/1.1 200 OK", "text/event-stream", sse.to_string())
                         }
                     } else {
                         ("HTTP/1.1 404 Not Found", "application/json", "{\"error\":\"not_found\"}".to_string())
                     };
 
                     let http_resp = format!(
-                        "{status_line}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        "{status_line}\r\nContent-Type: {content_type}\r\n{extra_headers}Content-Length: {}\r\nConnection: close\r\n\r\n{}",
                         body_out.len(),
                         body_out
                     );
@@ -1369,7 +2019,10 @@ mod tests {
             std::env::set_var("ALLUSE_OPENAI_OAUTH_TOKEN_URL", format!("{mock_base}/openai/token"));
             std::env::set_var("ALLUSE_CLAUDE_OAUTH_TOKEN_URL", format!("{mock_base}/claude/token"));
             std::env::set_var("ALLUSE_OPENAI_CODEX_RESPONSES_URL", format!("{mock_base}/codex/responses"));
+            std::env::set_var("ALLUSE_OPENAI_USAGE_URL", format!("{mock_base}/wham/usage"));
+            std::env::set_var("ALLUSE_OPENAI_MODELS_URL", format!("{mock_base}/codex/models?client_version=0.1.0"));
             std::env::set_var("ALLUSE_CLAUDE_API_BASE_URL", &mock_base);
+            std::env::set_var("ALLUSE_CLAUDE_USAGE_URL", format!("{mock_base}/api/oauth/usage"));
         }
         *VAULT_CACHE.lock().unwrap() = None;
 
@@ -1457,16 +2110,22 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(oa_llm.content, "Codex OAuth OK");
+        let st_warn_oa = build_status_response();
+        assert_eq!(st_warn_oa["providers"]["openai"]["usage"]["warning"], true);
+        assert_eq!(st_warn_oa["providers"]["openai"]["usage"]["status"], "warning");
+        assert_eq!(st_warn_oa["providers"]["openai"]["usage"]["primaryWindow"]["usedPercent"], 84.0);
 
+        // 4c. Claude thinking effort=high + fallback retry when upstream rejects thinking
         let mut cl_cfg = crate::config::AppConfig::default();
         cl_cfg.model = "claude-oauth/claude-sonnet-4-6".to_string();
+        cl_cfg.effort = "high".to_string();
         cl_cfg.api_key = String::new();
         let cl_llm = crate::llm::call_llm_streaming(
             &cl_cfg,
             "sys",
             &[crate::llm::LlmTurnMessage {
                 role: "user".to_string(),
-                content: "hi".to_string(),
+                content: "TEST_THINKING_FALLBACK".to_string(),
                 image_b64: None,
                 tool_call_id: None,
                 tool_name: None,
@@ -1478,6 +2137,50 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(cl_llm.content, "Claude OAuth OK");
+        assert_eq!(cl_llm.thinking, "Think");
+        let st_warn_cl = build_status_response();
+        assert_eq!(st_warn_cl["providers"]["claude"]["usage"]["warning"], true);
+        assert_eq!(st_warn_cl["providers"]["claude"]["usage"]["primaryWindow"]["usedPercent"], 85.0);
+
+        // 4d. Dynamic models + active usage endpoints + xhigh variants
+        let dyn_models = fetch_connected_catalog_models_with_remote().await;
+        assert!(dyn_models.iter().any(|m| m.id == "openai-oauth/gpt-5.4-custom" && m.variants.contains(&"xhigh".to_string())));
+        assert!(dyn_models.iter().any(|m| m.id == "claude-oauth/claude-custom-4" && m.variants.contains(&"xhigh".to_string())));
+        let active_usage = get_all_oauth_usage(true).await;
+        assert_eq!(active_usage["providers"]["openai"]["planType"], "plus");
+        assert_eq!(active_usage["providers"]["openai"]["primaryWindow"]["usedPercent"], 35.0);
+        assert_eq!(active_usage["providers"]["claude"]["planType"], "max");
+        assert_eq!(active_usage["providers"]["claude"]["primaryWindow"]["usedPercent"], 42.0);
+
+        // 4e. HTTP 429 triggers exhausted state + SSE oauth_usage_updated
+        let mut sse_rx = crate::agent::subscribe_events();
+        let err_429 = crate::llm::call_llm_streaming(
+            &oa_cfg,
+            "sys",
+            &[crate::llm::LlmTurnMessage {
+                role: "user".to_string(),
+                content: "TRIGGER_429".to_string(),
+                image_b64: None,
+                tool_call_id: None,
+                tool_name: None,
+                tool_calls: Vec::new(),
+            }],
+            &[],
+            |_| {},
+        )
+        .await;
+        assert!(err_429.is_err());
+        let st_429 = build_status_response();
+        assert_eq!(st_429["providers"]["openai"]["usage"]["exhausted"], true);
+        assert_eq!(st_429["providers"]["openai"]["usage"]["status"], "exhausted");
+        assert_eq!(st_429["providers"]["openai"]["usage"]["primaryWindow"]["usedPercent"], 100.0);
+        let mut saw_usage_sse = false;
+        while let Ok(ev) = sse_rx.try_recv() {
+            if ev.get("type").and_then(|v| v.as_str()) == Some("oauth_usage_updated") {
+                saw_usage_sse = true;
+            }
+        }
+        assert!(saw_usage_sse);
 
         // 5. Disconnect revokes token cleanly
         disconnect_provider(OAuthProvider::Openai).unwrap();
@@ -1491,7 +2194,10 @@ mod tests {
             std::env::remove_var("ALLUSE_OPENAI_OAUTH_TOKEN_URL");
             std::env::remove_var("ALLUSE_CLAUDE_OAUTH_TOKEN_URL");
             std::env::remove_var("ALLUSE_OPENAI_CODEX_RESPONSES_URL");
+            std::env::remove_var("ALLUSE_OPENAI_USAGE_URL");
+            std::env::remove_var("ALLUSE_OPENAI_MODELS_URL");
             std::env::remove_var("ALLUSE_CLAUDE_API_BASE_URL");
+            std::env::remove_var("ALLUSE_CLAUDE_USAGE_URL");
         }
         *VAULT_CACHE.lock().unwrap() = None;
         let _ = std::fs::remove_dir_all(&tmp_dir);
