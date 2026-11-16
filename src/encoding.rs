@@ -100,6 +100,29 @@ fn candidate_codepages() -> Vec<u32> {
     cps
 }
 
+/// Portable non-Windows strict codepage decoder backed by `encoding_rs`.
+/// Returns `None` if the codepage is unmapped or any byte maps to `U+FFFD`.
+pub(crate) fn decode_codepage_strict_portable(bytes: &[u8], cp: u32) -> Option<String> {
+    if bytes.is_empty() {
+        return Some(String::new());
+    }
+    if bytes.is_ascii() {
+        return std::str::from_utf8(bytes).ok().map(str::to_owned);
+    }
+    let encoding = match cp {
+        949 | 51949 => encoding_rs::EUC_KR,
+        932 => encoding_rs::SHIFT_JIS,
+        936 => encoding_rs::GBK,
+        950 => encoding_rs::BIG5,
+        1252 | 28591 => encoding_rs::WINDOWS_1252,
+        65001 => encoding_rs::UTF_8,
+        _ => return None,
+    };
+    encoding
+        .decode_without_bom_handling_and_without_replacement(bytes)
+        .map(|cow| cow.into_owned())
+}
+
 /// Decodes `bytes` strictly under a specific Windows codepage.
 /// Returns `None` if any byte sequence is invalid or maps to `U+FFFD`.
 pub fn try_decode_codepage_strict(bytes: &[u8], cp: u32) -> Option<String> {
@@ -163,8 +186,7 @@ pub fn try_decode_codepage_strict(bytes: &[u8], cp: u32) -> Option<String> {
 
     #[cfg(not(windows))]
     {
-        let _ = cp;
-        None
+        decode_codepage_strict_portable(bytes, cp)
     }
 }
 
@@ -701,5 +723,36 @@ mod tests {
         mixed_line.extend_from_slice(&[0xC0, 0xA7, 0xC4, 0xA1]); // 위치
         let recovered = decode_mixed_line_body(&mixed_line, &english_ci_cps);
         assert_eq!(recovered, "UTF8정상: 위치");
+    }
+
+    #[test]
+    fn test_portable_codepage_strict_decodes_cp949_cjk_and_rejects_invalid() {
+        // CP949 CSV bytes used by non-Windows attachment parser ("상품명,가격\r\n사과,1500\r\n")
+        let cp949_csv: Vec<u8> = vec![
+            0xBB, 0xF3, 0xC7, 0xB0, 0xB8, 0xED, b',', 0xB0, 0xA1, 0xB0, 0xDD, b'\r', b'\n',
+            0xBB, 0xE7, 0xB0, 0xFA, b',', b'1', b'5', b'0', b'0', b'\r', b'\n',
+        ];
+        assert_eq!(
+            decode_codepage_strict_portable(&cp949_csv, 949).as_deref(),
+            Some("상품명,가격\r\n사과,1500\r\n")
+        );
+        assert_eq!(
+            decode_codepage_strict_portable(&cp949_csv, 51949).as_deref(),
+            Some("상품명,가격\r\n사과,1500\r\n")
+        );
+        // Extended UHC/CP949 syllable outside 7-bit EUC-KR (똞 = 0x8C 0x61)
+        assert_eq!(
+            decode_codepage_strict_portable(&[0x8C, 0x61], 949).as_deref(),
+            Some("똞")
+        );
+        assert_eq!(
+            decode_codepage_strict_portable(&[0x8C, 0x61], 949),
+            try_decode_codepage_strict(&[0x8C, 0x61], 949)
+        );
+        // Truncated/invalid CP949 sequence must fail closed (None)
+        assert!(decode_codepage_strict_portable(&[0xBB], 949).is_none());
+        assert!(decode_codepage_strict_portable(&[0xFF, 0xFF], 949).is_none());
+        // Unmapped codepage must return None
+        assert!(decode_codepage_strict_portable(&cp949_csv, 99999).is_none());
     }
 }

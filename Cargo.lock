@@ -37,6 +37,7 @@ dependencies = [
  "base64 0.22.1",
  "calamine",
  "dpi",
+ "encoding_rs",
  "flate2",
  "futures-util",
  "gtk",
