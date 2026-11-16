@@ -183,15 +183,148 @@ fn configure_mingw_static_unwind_and_delayload(
     }
 }
 
-fn embed_windows_as_invoker_manifest(
+fn is_valid_ico_bytes(bytes: &[u8]) -> bool {
+    if bytes.len() < 22 || &bytes[0..4] != &[0, 0, 1, 0] {
+        return false;
+    }
+    let count = u16::from_le_bytes([bytes[4], bytes[5]]) as usize;
+    count > 0 && 6 + count * 16 <= bytes.len()
+}
+
+fn build_png_fallback_ico_bytes(png_bytes: &[u8]) -> Option<Vec<u8>> {
+    const PNG_SIG: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
+    if png_bytes.len() < 24 || !png_bytes.starts_with(PNG_SIG) || &png_bytes[12..16] != b"IHDR" {
+        return None;
+    }
+    let width = u32::from_be_bytes([png_bytes[16], png_bytes[17], png_bytes[18], png_bytes[19]]);
+    let height = u32::from_be_bytes([png_bytes[20], png_bytes[21], png_bytes[22], png_bytes[23]]);
+    let ico_w = if width >= 256 || width == 0 {
+        0u8
+    } else {
+        width.min(255) as u8
+    };
+    let ico_h = if height >= 256 || height == 0 {
+        0u8
+    } else {
+        height.min(255) as u8
+    };
+    let len_u32 = u32::try_from(png_bytes.len()).ok()?;
+    let mut out = Vec::with_capacity(22 + png_bytes.len());
+    out.extend_from_slice(&[0, 0, 1, 0, 1, 0]);
+    out.extend_from_slice(&[ico_w, ico_h, 0, 0]);
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&32u16.to_le_bytes());
+    out.extend_from_slice(&len_u32.to_le_bytes());
+    out.extend_from_slice(&22u32.to_le_bytes());
+    out.extend_from_slice(png_bytes);
+    Some(out)
+}
+
+fn resolve_windows_ico_bytes(manifest_dir: &Path) -> Option<Vec<u8>> {
+    let candidates = [
+        manifest_dir
+            .join("target")
+            .join("installer-icons")
+            .join("alluse.ico"),
+        manifest_dir.join("assets").join("alluse.ico"),
+    ];
+    for path in candidates {
+        if let Ok(bytes) = fs::read(&path) {
+            if is_valid_ico_bytes(&bytes) {
+                return Some(bytes);
+            }
+        }
+    }
+    let png_path = manifest_dir.join("assets").join("cheapai_logo_icon.png");
+    let png_bytes = fs::read(png_path).ok()?;
+    build_png_fallback_ico_bytes(&png_bytes)
+}
+
+fn push_win32_res_entry(
+    out: &mut Vec<u8>,
+    res_type: u16,
+    res_id: u16,
+    memory_flags: u16,
+    data: &[u8],
+) -> Option<()> {
+    let data_size = u32::try_from(data.len()).ok()?;
+    out.extend_from_slice(&data_size.to_le_bytes()); // DataSize
+    out.extend_from_slice(&32u32.to_le_bytes()); // HeaderSize
+    out.extend_from_slice(&0xFFFFu16.to_le_bytes()); // Type ordinal marker
+    out.extend_from_slice(&res_type.to_le_bytes());
+    out.extend_from_slice(&0xFFFFu16.to_le_bytes()); // Name ordinal marker
+    out.extend_from_slice(&res_id.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes()); // DataVersion
+    out.extend_from_slice(&memory_flags.to_le_bytes()); // MemoryFlags
+    out.extend_from_slice(&0x0409u16.to_le_bytes()); // LanguageId (en-US)
+    out.extend_from_slice(&0u32.to_le_bytes()); // Version
+    out.extend_from_slice(&0u32.to_le_bytes()); // Characteristics
+    out.extend_from_slice(data);
+    while out.len() % 4 != 0 {
+        out.push(0);
+    }
+    Some(())
+}
+
+/// Pure-Rust Win32 `.res` serializer (`RT_ICON` 1..=N + `RT_GROUP_ICON` id 1) so
+/// MSVC (`link.exe`) embeds multi-resolution PE icons deterministically without requiring `rc.exe` on `PATH`.
+fn build_win32_icon_res(ico: &[u8]) -> Option<Vec<u8>> {
+    if !is_valid_ico_bytes(ico) {
+        return None;
+    }
+    let count = u16::from_le_bytes([ico[4], ico[5]]);
+    let mut out = Vec::with_capacity(64 + ico.len());
+    // Standard 32-byte null Win32 RES file header
+    out.extend_from_slice(&[
+        0, 0, 0, 0, 32, 0, 0, 0, 0xFF, 0xFF, 0, 0, 0xFF, 0xFF, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0,
+    ]);
+
+    let mut grp = Vec::with_capacity(6 + usize::from(count) * 14);
+    grp.extend_from_slice(&0u16.to_le_bytes()); // idReserved
+    grp.extend_from_slice(&1u16.to_le_bytes()); // idType = ICON
+    grp.extend_from_slice(&count.to_le_bytes()); // idCount
+
+    for idx in 0..usize::from(count) {
+        let off = 6 + idx * 16;
+        let entry = &ico[off..off + 16];
+        let size_in_res = u32::from_le_bytes([entry[8], entry[9], entry[10], entry[11]]) as usize;
+        let img_off = u32::from_le_bytes([entry[12], entry[13], entry[14], entry[15]]) as usize;
+        let end = img_off.checked_add(size_in_res)?;
+        if end > ico.len() || size_in_res == 0 {
+            return None;
+        }
+        let icon_id = u16::try_from(idx + 1).ok()?;
+        push_win32_res_entry(&mut out, 3, icon_id, 0x1010, &ico[img_off..end])?;
+        grp.extend_from_slice(&entry[0..12]);
+        grp.extend_from_slice(&icon_id.to_le_bytes());
+    }
+    push_win32_res_entry(&mut out, 14, 1, 0x1030, &grp)?;
+    Some(out)
+}
+
+fn embed_windows_manifest_and_icon(
     out_path: &Path,
+    manifest_dir: &Path,
     target_env: &str,
     home_dirs: &[PathBuf],
     mingw_triple: &str,
 ) {
+    let ico_bytes = resolve_windows_ico_bytes(manifest_dir);
+    let ico_out = out_path.join("alluse.ico");
+    let has_ico_file = ico_bytes
+        .as_ref()
+        .is_some_and(|b| fs::write(&ico_out, b).is_ok());
+
     if target_env == "msvc" {
         println!("cargo:rustc-link-arg=/MANIFEST:EMBED");
         println!("cargo:rustc-link-arg=/MANIFESTUAC:level='asInvoker' uiAccess='false'");
+        let ico = ico_bytes.expect("Windows icon bytes must resolve for MSVC PE embedding");
+        let res_bytes =
+            build_win32_icon_res(&ico).expect("build_win32_icon_res failed for MSVC icon");
+        let res_path = out_path.join("alluse_icon.res");
+        fs::write(&res_path, &res_bytes).expect("failed to write alluse_icon.res");
+        println!("cargo:rustc-link-arg={}", res_path.display());
         return;
     }
 
@@ -216,13 +349,18 @@ fn embed_windows_as_invoker_manifest(
         "</assembly>\n",
     );
     let manifest_path = out_path.join("alluse.manifest");
-    let rc_path = out_path.join("alluse_manifest.rc");
-    let obj_path = out_path.join("alluse_manifest.o");
+    let rc_path = out_path.join("alluse_resources.rc");
+    let obj_path = out_path.join("alluse_resources.o");
 
     if fs::write(&manifest_path, manifest_xml.as_bytes()).is_err() {
         return;
     }
-    if fs::write(&rc_path, b"1 24 \"alluse.manifest\"\n").is_err() {
+    let rc_script = if has_ico_file {
+        "1 ICON \"alluse.ico\"\n1 24 \"alluse.manifest\"\n"
+    } else {
+        "1 24 \"alluse.manifest\"\n"
+    };
+    if fs::write(&rc_path, rc_script.as_bytes()).is_err() {
         return;
     }
 
@@ -231,23 +369,32 @@ fn embed_windows_as_invoker_manifest(
             .current_dir(out_path)
             .args([
                 "-i",
-                "alluse_manifest.rc",
+                "alluse_resources.rc",
                 "-O",
                 "coff",
                 "-o",
-                "alluse_manifest.o",
+                "alluse_resources.o",
             ])
             .status();
         if status.is_ok_and(|s| s.success()) && obj_path.is_file() {
             println!("cargo:rustc-link-arg={}", obj_path.display());
+            return;
         }
+        panic!(
+            "windres ({}) failed compiling alluse_resources.rc",
+            windres.display()
+        );
     }
+
+    panic!("No windres executable found to embed Windows PE icon and manifest");
 }
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=assets/alluse.ico");
     println!("cargo:rerun-if-changed=assets/cheapai_logo_icon.png");
     println!("cargo:rerun-if-changed=assets/cheapai-logo.webp");
+    println!("cargo:rerun-if-changed=target/installer-icons/alluse.ico");
 
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
@@ -369,6 +516,12 @@ fn main() {
         configure_mingw_static_unwind_and_delayload(&out_path, &home_dirs, mingw_triple);
     }
 
-    // 4. Embed Windows UAC `asInvoker` RT_MANIFEST (`1 24`) into PE binaries (`msvc` & `gnu`/`gnullvm`)
-    embed_windows_as_invoker_manifest(&out_path, &target_env, &home_dirs, mingw_triple);
+    // 4. Embed Windows UAC `asInvoker` RT_MANIFEST (`1 24`) and multi-resolution RT_GROUP_ICON
+    embed_windows_manifest_and_icon(
+        &out_path,
+        &manifest_dir,
+        &target_env,
+        &home_dirs,
+        mingw_triple,
+    );
 }

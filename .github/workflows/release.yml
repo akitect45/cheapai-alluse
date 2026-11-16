@@ -316,6 +316,39 @@ jobs:
           & ".\$setupOut" --verify-payload
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+          Add-Type -AssemblyName System.Drawing
+          Add-Type -TypeDefinition @"
+          using System;
+          using System.Runtime.InteropServices;
+          public static class PeResGuard {
+              [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+              public static extern IntPtr LoadLibraryExW(string lpFileName, IntPtr hFile, uint dwFlags);
+              [DllImport("kernel32.dll", SetLastError = true)]
+              public static extern bool FreeLibrary(IntPtr hModule);
+              [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+              public static extern IntPtr FindResourceW(IntPtr hModule, IntPtr lpName, IntPtr lpType);
+              public static bool HasGroupIcon(string path) {
+                  IntPtr hMod = LoadLibraryExW(path, IntPtr.Zero, 0x22);
+                  if (hMod == IntPtr.Zero) return false;
+                  try {
+                      return FindResourceW(hMod, (IntPtr)1, (IntPtr)14) != IntPtr.Zero;
+                  } finally {
+                      FreeLibrary(hMod);
+                  }
+              }
+          }
+          "@
+          foreach ($peCheck in @((Resolve-Path $binSrc).Path, (Resolve-Path $setupOut).Path)) {
+              if (-not [PeResGuard]::HasGroupIcon($peCheck)) {
+                  throw "Missing PE RT_GROUP_ICON (id=1, type=14) in $peCheck"
+              }
+              $icoObj = [System.Drawing.Icon]::ExtractAssociatedIcon($peCheck)
+              if (-not $icoObj -or $icoObj.Width -le 0) {
+                  throw "ExtractAssociatedIcon failed for $peCheck"
+              }
+              $icoObj.Dispose()
+          }
+
           if ("$ARCH" -eq "x64") {
             Copy-Item $setupOut "dist\AllUse-Setup-${VERSION}.exe" -Force
           }
