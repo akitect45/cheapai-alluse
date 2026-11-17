@@ -6039,6 +6039,22 @@
   .settings-row .custom-select-trigger.variant-block { width:100%; }
   .settings-row input[type="checkbox"] { width:16px; height:16px; justify-self:start; }
   .settings-note { color:var(--text-secondary); font-size:12px; margin:8px 0 0; line-height:1.45; max-width:420px; }
+  .cfg-rules-card { margin-top:14px; padding:12px 13px; border-radius:10px; border:1px solid var(--border); background:var(--bg-elevated); display:flex; flex-direction:column; gap:10px; width:100%; box-sizing:border-box; }
+  .cfg-rules-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+  .cfg-rules-title-wrap { display:inline-flex; align-items:center; gap:7px; min-width:0; }
+  .cfg-rules-title { font-size:12.5px; font-weight:700; color:var(--text); }
+  .cfg-rules-controls { display:inline-flex; align-items:center; gap:8px; flex-shrink:0; }
+  .cfg-rules-toggle-lbl { display:inline-flex; align-items:center; gap:5px; font-size:12px; color:var(--text-secondary); cursor:pointer; user-select:none; }
+  .cfg-rules-summary { font-size:11.5px; color:var(--text-secondary); font-variant-numeric:tabular-nums; }
+  .cfg-rules-list { display:flex; flex-direction:column; gap:6px; max-height:240px; overflow-y:auto; }
+  .cfg-rules-group-title { font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.04em; margin-top:2px; }
+  .cfg-rules-item { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 8px; border-radius:7px; border:1px solid var(--border-subtle); background:var(--bg-input); font-size:11.5px; min-width:0; }
+  .cfg-rules-item-left { display:flex; align-items:center; gap:7px; min-width:0; flex:1; }
+  .cfg-rules-scope-pill { display:inline-flex; align-items:center; height:17px; padding:0 6px; border-radius:999px; font-family:var(--font-mono); font-size:10px; font-weight:700; background:var(--bg-hover); border:1px solid var(--border); color:var(--text-secondary); flex-shrink:0; }
+  .cfg-rules-path { font-family:var(--font-mono); font-size:11.5px; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .cfg-rules-item-right { display:inline-flex; align-items:center; gap:6px; flex-shrink:0; font-size:11px; color:var(--text-muted); font-variant-numeric:tabular-nums; }
+  .cfg-rules-state-pill { display:inline-flex; align-items:center; height:17px; padding:0 6px; border-radius:999px; font-size:10.5px; font-weight:600; border:1px solid var(--border); background:var(--bg-canvas); color:var(--text-secondary); }
+  .cfg-rules-empty { font-size:12px; color:var(--text-muted); padding:6px 2px; line-height:1.45; }
   .settings-system-panel .panel-scroll { padding:0; overflow:visible; }
   .settings-system-panel h3 { flex-direction:column; align-items:stretch; flex-wrap:nowrap; gap:8px; }
   .settings-system-panel h3 > .card-title-left { flex:none; width:100%; }
@@ -8579,6 +8595,26 @@
         <input id="cfg-artex-enabled" type="checkbox" onchange="setArtexEnabled(this.checked)" />
       </div>
       <p class="settings-note">보안 점검 도구와 메뉴를 사용합니다. 채팅에서도 “ARTEX 꺼줘 / 켜줘”로 변경할 수 있습니다.</p>
+      <div class="cfg-rules-card" id="cfg-rules-card">
+        <div class="cfg-rules-head">
+          <div class="cfg-rules-title-wrap">
+            <svg class="solar-icon sm"><use href="#solar-document"/></svg>
+            <span class="cfg-rules-title" id="cfg-rules-title">자동 룰스 로드 (AGENTS.md · CLAUDE.md · GEMINI.md)</span>
+          </div>
+          <div class="cfg-rules-controls">
+            <label class="cfg-rules-toggle-lbl" for="cfg-auto-load-rules">
+              <input id="cfg-auto-load-rules" type="checkbox" checked onchange="setAutoLoadRulesEnabled(this.checked)" />
+              <span id="cfg-auto-load-rules-label">자동 주입</span>
+            </label>
+            <button type="button" class="btn" id="btn-cfg-refresh-rules" style="height:24px; padding:0 8px; font-size:11.5px;" onclick="refreshRulesStatusUi(true)">
+              <svg class="solar-icon sm"><use href="#solar-refresh"/></svg>
+              <span id="btn-cfg-refresh-rules-label">새로고침</span>
+            </button>
+          </div>
+        </div>
+        <div class="cfg-rules-summary" id="cfg-rules-summary-badge">불러오는 중...</div>
+        <div class="cfg-rules-list" id="cfg-rules-list"></div>
+      </div>
     </section>
     <section id="settings-account" class="settings-section" role="tabpanel" aria-labelledby="settings-tab-account" hidden>
     <!-- CheapAI OAuth & Account Quick Bar -->
@@ -11551,6 +11587,130 @@ async function setArtexEnabled(enabled) {
     showCustomToast(error.message, '설정');
   } finally { input.disabled = false; }
 }
+
+let autoLoadUserRulesEnabled = true;
+let lastRulesStatusPayload = null;
+
+function applyAutoLoadRulesToggle(enabled) {
+  autoLoadUserRulesEnabled = enabled !== false;
+  const chk = document.getElementById('cfg-auto-load-rules');
+  if (chk) chk.checked = autoLoadUserRulesEnabled;
+}
+
+function formatRuleBytesCompact(bytes) {
+  const n = Number(bytes || 0);
+  if (!Number.isFinite(n) || n <= 0) return '0 B';
+  if (n < 1024) return Math.round(n) + ' B';
+  return (n / 1024).toFixed(1) + ' KB';
+}
+
+function renderRulesStatusUi(payload) {
+  const badgeEl = document.getElementById('cfg-rules-summary-badge');
+  const listEl = document.getElementById('cfg-rules-list');
+  if (!badgeEl || !listEl) return;
+  const isEn = currentUiLang === 'en';
+  const data = payload && typeof payload === 'object' ? payload : null;
+  const enabled = data && typeof data.enabled === 'boolean' ? data.enabled : autoLoadUserRulesEnabled;
+
+  if (!data) {
+    badgeEl.textContent = isEn ? 'Loading rules status...' : '룰스 상태 확인 중...';
+    listEl.innerHTML = '';
+    return;
+  }
+
+  const globalList = Array.isArray(data.globalRules) ? data.globalRules : [];
+  const wsList = Array.isArray(data.workspaceRules) ? data.workspaceRules : [];
+  const estTok = Number(data.estimatedTokens || 0);
+  const budgetTok = Number(data.budgetTokens || 20000);
+
+  if (!enabled) {
+    badgeEl.textContent = isEn ? 'Disabled' : '비활성화됨';
+  } else {
+    badgeEl.textContent = isEn
+      ? `${globalList.length} global · ${wsList.length} workspace · ~${estTok.toLocaleString()} / ${budgetTok.toLocaleString()} tok`
+      : `글로벌 ${globalList.length}개 · 워크스페이스 ${wsList.length}개 · 약 ${estTok.toLocaleString()} / ${budgetTok.toLocaleString()} tok`;
+  }
+
+  const renderRuleRow = (r, scopeFallback) => {
+    const scopeRaw = String(r.scope || scopeFallback || 'workspace').toLowerCase();
+    const scopeTag = scopeRaw === 'user_global' || scopeRaw === 'global'
+      ? 'GLOBAL'
+      : (scopeRaw === 'ancestor' ? 'ANCESTOR' : 'WORKSPACE');
+    const fullPath = String(r.path || r.label || '');
+    const inlined = r.inlined !== false;
+    const statusTxt = inlined
+      ? (r.truncated ? (isEn ? 'Trimmed' : '일부 절단') : (isEn ? 'Applied' : '적용됨'))
+      : (isEn ? 'Pointer' : '포인터');
+    return `
+      <div class="cfg-rules-item">
+        <div class="cfg-rules-item-left">
+          <span class="cfg-rules-scope-pill">${escapeHtml(scopeTag)}</span>
+          <span class="cfg-rules-path" title="${escapeHtml(fullPath)}">${escapeHtml(fullPath)}</span>
+        </div>
+        <div class="cfg-rules-item-right">
+          <span>${escapeHtml(formatRuleBytesCompact(r.bytes))}</span>
+          <span class="cfg-rules-state-pill">${escapeHtml(statusTxt)}</span>
+        </div>
+      </div>`;
+  };
+
+  const sections = [];
+  sections.push(`<div class="cfg-rules-group-title">${escapeHtml(isEn ? 'Global Rules (user_global)' : '글로벌 룰스 (user_global)')}</div>`);
+  if (globalList.length > 0) {
+    sections.push(globalList.map(r => renderRuleRow(r, 'user_global')).join(''));
+  } else {
+    sections.push(`<div class="cfg-rules-empty">${escapeHtml(isEn ? 'No global rules detected' : '감지된 글로벌 룰스 없음')}</div>`);
+  }
+
+  sections.push(`<div class="cfg-rules-group-title">${escapeHtml(isEn ? 'Project Hierarchy Rules (ancestor / workspace)' : '프로젝트 계층 룰스 (ancestor / workspace)')}</div>`);
+  const wsPath = String(data.workspacePath || '').trim();
+  if (!wsPath) {
+    sections.push(`<div class="cfg-rules-empty">${escapeHtml(isEn ? 'No project folder attached to this chat — applying global rules only' : '현재 대화에 연결된 프로젝트 폴더 없음 — 글로벌 룰스만 자동 적용 중')}</div>`);
+  } else if (wsList.length > 0) {
+    sections.push(`<div class="cfg-rules-empty" style="padding-top:0; padding-bottom:2px; font-family:var(--font-mono);" title="${escapeHtml(wsPath)}">${escapeHtml(wsPath)}</div>`);
+    sections.push(wsList.map(r => renderRuleRow(r, 'workspace')).join(''));
+  } else {
+    sections.push(`<div class="cfg-rules-empty">${escapeHtml(wsPath)} — ${escapeHtml(isEn ? 'No workspace rules detected' : '감지된 워크스페이스 룰스 없음')}</div>`);
+  }
+  listEl.innerHTML = sections.join('');
+}
+
+async function refreshRulesStatusUi(showToast = false) {
+  const btn = document.getElementById('btn-cfg-refresh-rules');
+  if (btn) btn.disabled = true;
+  try {
+    const tid = typeof currentThreadId === 'string' ? currentThreadId : '';
+    const res = await api(`/api/rules/status?thread_id=${encodeURIComponent(tid)}`, 'GET');
+    if (res && res.ok !== false) {
+      lastRulesStatusPayload = res;
+      if (typeof res.enabled === 'boolean') applyAutoLoadRulesToggle(res.enabled);
+      renderRulesStatusUi(res);
+      if (showToast && typeof showCustomToast === 'function') {
+        showCustomToast(currentUiLang === 'en' ? 'Rules status refreshed' : '룰스 목록을 새로고침했습니다.', 'RULES');
+      }
+    }
+  } catch (_) {
+    if (!lastRulesStatusPayload) renderRulesStatusUi(null);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function setAutoLoadRulesEnabled(enabled) {
+  const input = document.getElementById('cfg-auto-load-rules');
+  if (input) input.disabled = true;
+  try {
+    const res = await api('/api/config', 'POST', { auto_load_user_rules: Boolean(enabled) });
+    if (!res || res.ok === false || res.error) throw new Error(res?.error || '설정을 저장하지 못했습니다.');
+    applyAutoLoadRulesToggle(Boolean(enabled));
+    await refreshRulesStatusUi(false);
+  } catch (err) {
+    if (input) input.checked = autoLoadUserRulesEnabled;
+    if (typeof showCustomToast === 'function') showCustomToast(err.message || '설정을 저장하지 못했습니다.', 'RULES');
+  } finally {
+    if (input) input.disabled = false;
+  }
+}
 function selectSettingsTab(name) {
   if (!['general', 'account', 'system'].includes(name)) name = 'general';
   document.querySelectorAll('.settings-section').forEach(el => el.hidden = el.id !== 'settings-' + name);
@@ -11641,6 +11801,7 @@ function openApiSettingsModal(section = 'general') {
   if (typeof refreshExternalOAuthStatus === 'function') refreshExternalOAuthStatus();
   if (typeof refreshExternalOAuthUsage === 'function') refreshExternalOAuthUsage(false);
   refreshModelsFromConnectedBaseUrl({ notify: true, useModalInputs: false });
+  if (typeof refreshRulesStatusUi === 'function') void refreshRulesStatusUi(false);
   if (typeof syncUiOverlayCutoutWithHost === 'function') syncUiOverlayCutoutWithHost();
 }
 
@@ -12059,7 +12220,8 @@ async function saveApiSettings() {
     default_image_model,
     default_video_model,
     image_save_dir,
-    video_save_dir
+    video_save_dir,
+    auto_load_user_rules: document.getElementById('cfg-auto-load-rules')?.checked ?? autoLoadUserRulesEnabled
   });
   if (res && res.ok) {
     applyPublicApiKeyState(res, true);
@@ -12106,6 +12268,10 @@ async function resetDefaultApiConfig() {
     }
     const esel = document.getElementById('effort-select');
     if (esel) esel.value = defEffort;
+    if (typeof applyAutoLoadRulesToggle === 'function') {
+      applyAutoLoadRulesToggle(res.auto_load_user_rules !== false);
+      void refreshRulesStatusUi(false);
+    }
     const aiEnabled = res.ai_self_heal_enabled !== false;
     const cfgAiChk = document.getElementById('cfg-ai-self-heal');
     if (cfgAiChk) cfgAiChk.checked = aiEnabled;
@@ -13148,7 +13314,9 @@ const UI_KO_TO_EN_EXACT = {
   '크루 · 도구 · 보드(#번호, @멘션) 검색...': 'Search crew, tools, or board (#seq, @mention)...',
   '새 대화 시작': 'Fresh context',
   '디렉터 맥락 분기': 'Fork director context',
-  '사용량 관리': 'Manage Usage'
+  '사용량 관리': 'Manage Usage',
+  '자동 룰스 로드 (AGENTS.md · CLAUDE.md · GEMINI.md)': 'Auto-Loaded Rules (AGENTS.md · CLAUDE.md · GEMINI.md)',
+  '자동 주입': 'Auto Inject'
 };
 
 const UI_EN_TO_KO_EXACT = (() => {
@@ -13316,7 +13484,7 @@ function isTranslatableUiNode(el) {
   if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'SVG' || tag === 'PATH' || tag === 'USE' || tag === 'CODE') {
     return false;
   }
-  if (el.closest && el.closest('.msg.user .user-bubble, .msg.assistant .assistant-body, .assistant-msg-footer, #chat-live-status-row, #crew-board-feed, #crew-roster-grid, #mem-editor-textarea, #asl-editor, .custom-select-trigger, #custom-select-popover, #custom-context-menu, #chat-project-modal, #thread-list, #sidebar-new-chat')) {
+  if (el.closest && el.closest('.msg.user .user-bubble, .msg.assistant .assistant-body, .assistant-msg-footer, #chat-live-status-row, #crew-board-feed, #crew-roster-grid, #cfg-rules-summary-badge, #cfg-rules-list, #mem-editor-textarea, #asl-editor, .custom-select-trigger, #custom-select-popover, #custom-context-menu, #chat-project-modal, #thread-list, #sidebar-new-chat')) {
     return false;
   }
   const fc = el.firstChild;
@@ -13483,6 +13651,9 @@ function applyUiLanguage(lang) {
     if (typeof refreshExternalOAuthUiLocale === 'function') {
       refreshExternalOAuthUiLocale();
     }
+    if (typeof renderRulesStatusUi === 'function' && lastRulesStatusPayload) {
+      renderRulesStatusUi(lastRulesStatusPayload);
+    }
     const openCrewPop = document.getElementById('crew-help-popover');
     if (openCrewPop && openCrewPop.classList.contains('open') && typeof crewHelpPinnedTrigger !== 'undefined' && crewHelpPinnedTrigger && typeof positionCrewHelpPopover === 'function') {
       positionCrewHelpPopover(crewHelpPinnedTrigger);
@@ -13563,6 +13734,10 @@ async function initApp() {
     applyPublicApiKeyState(st.config, true);
     document.getElementById('cfg-model-id').value = effModel;
     syncMediaConfigFieldsToDom(st.config);
+    if (typeof applyAutoLoadRulesToggle === 'function') {
+      applyAutoLoadRulesToggle(st.config.auto_load_user_rules !== false);
+      void refreshRulesStatusUi(false);
+    }
     const aiEnabled = st.config.ai_self_heal_enabled !== false;
     const cfgAiChk = document.getElementById('cfg-ai-self-heal');
     if (cfgAiChk) cfgAiChk.checked = aiEnabled;
@@ -15254,6 +15429,7 @@ async function saveChatProject(pathOrPaths, allowEmpty = true) {
     }
     closeChatProjectPicker(true);
     await loadThreads();
+    if (typeof refreshRulesStatusUi === 'function') void refreshRulesStatusUi(false);
   } finally {
     chatProjectPicker.saving = false;
     document.querySelectorAll('#chat-project-modal button').forEach(el => el.disabled = false);
@@ -15496,6 +15672,7 @@ async function selectThread(id) {
     expandedChatProjects.add(selectedThreadObj.workspace_path);
     rememberExpandedProjects();
   }
+  if (typeof refreshRulesStatusUi === 'function') void refreshRulesStatusUi(false);
   if (selectedThreadObj && selectedThreadObj.mode) {
     const modeSel = document.getElementById('chat-mode');
     if (modeSel && ['auto', 'crew', 'pentest', 'computer', 'browser'].includes(selectedThreadObj.mode)) {
