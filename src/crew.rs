@@ -2516,7 +2516,7 @@ fn normalize_crew_model_id(raw_model: &str, cfg: &crate::config::AppConfig) -> S
 }
 
 #[allow(clippy::too_many_arguments)]
-fn add_single_crew_member(
+pub(crate) fn add_single_crew_member(
     root_id: &str,
     added_by: &str,
     raw_name: &str,
@@ -4397,15 +4397,9 @@ pub fn get_crew_member_log(
     };
 
     let eff_limit = limit.clamp(1, 500);
-    let raw_msgs = crate::db::list_messages(&member.thread_id).unwrap_or_default();
-    let total = raw_msgs.len();
-    let msgs: Vec<crate::db::ChatMessage> = if total > eff_limit {
-        raw_msgs.into_iter().skip(total - eff_limit).collect()
-    } else {
-        raw_msgs
-    };
+    let msgs = crate::db::list_messages(&member.thread_id).unwrap_or_default();
 
-    let (_, _, all_posts) = read_crew_board(&root_id, None, 200, None, None, None)?;
+    let (_, _, all_posts) = read_crew_board(&root_id, None, 500, None, None, None)?;
     let member_posts: Vec<CrewBoardPostRecord> = all_posts
         .into_iter()
         .filter(|p| {
@@ -4501,11 +4495,28 @@ pub fn get_crew_member_log(
             cur_ended_at = cur_ended_at.max(ts);
             let preview: String = m.content.chars().take(600).collect();
             let summary = format_crew_tool_summary(&m.tool_name, &m.tool_args);
+            let post_text = if m.tool_name == "crew_post" {
+                serde_json::from_str::<Value>(&m.tool_args)
+                    .ok()
+                    .and_then(|v| {
+                        v.get("text")
+                            .or_else(|| v.get("content"))
+                            .or_else(|| v.get("message"))
+                            .and_then(|s| s.as_str())
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .map(ToString::to_string)
+                    })
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
             cur_steps.push(json!({
                 "kind": "tool",
                 "tool_name": m.tool_name,
                 "tool_summary": summary,
                 "tool_args": m.tool_args,
+                "post_text": post_text,
                 "content": "",
                 "result_preview": preview,
                 "created_at": ts,
@@ -4529,12 +4540,26 @@ pub fn get_crew_member_log(
         last["worked_ms"] = json!(member.last_worked_ms);
     }
 
+    let total_turns = turns.len();
+    let sliced_turns = if total_turns > eff_limit {
+        turns.split_off(total_turns - eff_limit)
+    } else {
+        turns
+    };
+    let total_msgs = msgs.len();
+    let sliced_msgs: Vec<crate::db::ChatMessage> = if total_msgs > eff_limit {
+        msgs.into_iter().skip(total_msgs - eff_limit).collect()
+    } else {
+        msgs
+    };
+
     Ok(json!({
         "ok": true,
         "root_thread_id": root_id,
         "member": member,
-        "turns": turns,
-        "messages": msgs,
+        "total_turns": total_turns,
+        "turns": sliced_turns,
+        "messages": sliced_msgs,
         "board_posts": member_posts,
     }))
 }
@@ -6541,5 +6566,104 @@ mod tests {
         cleanup_crew_session_resources(&root_id);
         cleanup_crew_session_resources(&root_conc);
         server_task.abort();
+    }
+
+    #[test]
+    fn get_crew_member_log_groups_all_turns_before_slicing_and_preserves_crew_post_text() {
+        let root_t = crate::db::create_thread("Log Turn Pagination Root", "crew", "gpt-6-astra", "low")
+            .unwrap();
+        let cfg = crate::config::AppConfig::default();
+        let (member_rec, _) = add_single_crew_member(
+            &root_t.id,
+            "director",
+            "long-worker",
+            "worker",
+            "30-turn stress test",
+            "",
+            "",
+            "inherit",
+            false,
+            0,
+            None,
+            &cfg,
+            false,
+        )
+        .unwrap();
+
+        // Simulate 30 turns * 10 raw messages/turn = 300 raw messages
+        for t in 1..=30 {
+            crate::db::append_message(
+                &member_rec.thread_id,
+                "user",
+                &format!("Turn {t} instruction"),
+                "",
+                "",
+                "",
+                "",
+                "",
+            )
+            .unwrap();
+            for step in 1..=4 {
+                crate::db::append_message(
+                    &member_rec.thread_id,
+                    "tool",
+                    &format!("ok {t}.{step}"),
+                    "",
+                    "fs_read_file",
+                    &format!(r#"{{"path":"src/file_{step}.rs"}}"#),
+                    "",
+                    "",
+                )
+                .unwrap();
+                crate::db::append_message(
+                    &member_rec.thread_id,
+                    "assistant",
+                    "",
+                    &format!("Thinking {t}.{step}"),
+                    "",
+                    "",
+                    "",
+                    "",
+                )
+                .unwrap();
+            }
+            let long_post = format!("@verifier Turn {t} deliverable summary — {}", "x".repeat(250));
+            crate::db::append_message(
+                &member_rec.thread_id,
+                "tool",
+                "{\"status\":\"posted\"}",
+                "",
+                "crew_post",
+                &json!({ "text": long_post }).to_string(),
+                "",
+                "",
+            )
+            .unwrap();
+        }
+
+        // Requesting limit=10 must return turns 21..=30 with fixed turn_index (NOT 1..=10 and NOT clipped mid-turn!)
+        let tail_10 = get_crew_member_log(&root_t.id, "long-worker", 10).unwrap();
+        assert_eq!(tail_10["total_turns"], 30);
+        let t10 = tail_10["turns"].as_array().unwrap();
+        assert_eq!(t10.len(), 10);
+        assert_eq!(t10[0]["turn_index"], 21);
+        assert_eq!(t10[9]["turn_index"], 30);
+
+        // Requesting limit=200 must return all 30 turns intact + untruncated crew_post tool_args / post_text
+        let all_30 = get_crew_member_log(&root_t.id, "long-worker", 200).unwrap();
+        assert_eq!(all_30["total_turns"], 30);
+        let t30 = all_30["turns"].as_array().unwrap();
+        assert_eq!(t30.len(), 30);
+        assert_eq!(t30[0]["turn_index"], 1);
+        assert_eq!(t30[29]["turn_index"], 30);
+        let last_steps = t30[29]["steps"].as_array().unwrap();
+        let post_step = last_steps
+            .iter()
+            .find(|s| s["tool_name"] == "crew_post")
+            .unwrap();
+        assert!(post_step["post_text"].as_str().unwrap().contains("Turn 30 deliverable summary"));
+        assert!(post_step["tool_args"].as_str().unwrap().contains(&"x".repeat(250)));
+
+        cleanup_crew_session_resources(&root_t.id);
     }
 }

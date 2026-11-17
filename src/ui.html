@@ -7362,64 +7362,73 @@
     gap: 6px;
     flex-wrap: wrap;
   }
+  .crew-insp-viewport {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--bg-canvas);
+  }
   .crew-insp-scroll {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    padding: 16px 22px;
+    padding: 22px 22px 18px 26px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    user-select: text;
+    -webkit-user-select: text;
   }
-  .crew-insp-brief-card {
-    padding: 10px 12px;
-    border-radius: 10px;
-    border: 1px solid var(--border);
-    background: var(--bg-elevated);
+  .crew-insp-messages {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    width: 100%;
+    max-width: 740px;
+    margin: 0 auto;
+    flex: 1 0 auto;
+    min-width: 0;
+  }
+  .crew-worker-inspector .crew-insp-messages > *,
+  .crew-worker-inspector .crew-insp-messages .msg {
+    flex-shrink: 0 !important;
+  }
+  .crew-insp-trace-group {
+    margin: 0;
+  }
+  .crew-insp-trace-group > .tool-compact > .tool-group-body {
+    gap: 4px;
+    margin-top: 4px;
+  }
+  .crew-insp-trigger-note {
+    font-size: 12px;
+    color: var(--text-muted);
+    padding: 4px 8px;
+    border-left: 2px solid var(--border-strong);
+    margin: 2px 0;
+    overflow-wrap: anywhere;
+  }
+  .crew-insp-err-banner {
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    background: rgba(239, 68, 68, 0.06);
+    color: #ef4444;
+    font-size: 12.5px;
+    line-height: 1.45;
+    flex-shrink: 0;
+  }
+  .crew-insp-live-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
     font-size: 12.5px;
     color: var(--text-secondary);
-    line-height: 1.5;
-  }
-  .crew-insp-turn {
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: var(--bg-elevated);
-    overflow: hidden;
-  }
-  .crew-insp-turn summary {
-    padding: 8px 12px;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text-secondary);
-    cursor: pointer;
-    user-select: none;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    background: var(--bg-sidebar);
-    border-bottom: 1px solid var(--border-subtle);
-  }
-  .crew-insp-turn-body {
-    padding: 10px 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .crew-insp-step {
-    padding: 6px 9px;
-    border-radius: 7px;
-    background: var(--bg-canvas);
-    border: 1px solid var(--border-subtle);
-    font-size: 12px;
-    line-height: 1.45;
-  }
-  .crew-insp-step-kind {
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-    font-weight: 700;
-    color: var(--text-muted);
-    margin-bottom: 2px;
+    padding: 4px 2px;
+    flex-shrink: 0;
   }
   .crew-insp-composer {
     padding: 10px 18px 14px;
@@ -9453,7 +9462,15 @@
           <div class="crew-insp-head-left" id="crew-insp-head-left"></div>
           <div class="crew-insp-head-actions" id="crew-insp-head-actions"></div>
         </div>
-        <div class="crew-insp-scroll" id="crew-insp-scroll"></div>
+        <div class="chat-viewport crew-insp-viewport">
+          <div class="chat-scroll crew-insp-scroll" id="crew-insp-scroll" onscroll="syncCrewInspectorJumpLatestPill()">
+            <div class="chat-messages crew-insp-messages" id="crew-insp-messages"></div>
+          </div>
+          <button type="button" class="chat-jump-latest-pill" id="crew-insp-jump-latest" onclick="jumpToLatestCrewInspector()">
+            <svg class="solar-icon sm"><use href="#solar-chevron-down"/></svg>
+            <span>최신 대화로 이동</span>
+          </button>
+        </div>
         <div class="crew-insp-composer">
           <textarea id="crew-insp-input" rows="1" placeholder="이 크루에게 직접 지시 또는 후속 질문 입력 (Enter 전송)..." onkeydown="if(event.isComposing || event.keyCode===229) return; if(event.key==='Enter' && !event.shiftKey){ event.preventDefault(); void sendCrewInspectorMessageUi(); }"></textarea>
           <button type="button" class="btn primary" style="height:36px; padding:0 14px; font-size:12.5px;" id="crew-insp-send-btn" onclick="void sendCrewInspectorMessageUi()">전송</button>
@@ -13484,7 +13501,7 @@ function isTranslatableUiNode(el) {
   if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'SVG' || tag === 'PATH' || tag === 'USE' || tag === 'CODE') {
     return false;
   }
-  if (el.closest && el.closest('.msg.user .user-bubble, .msg.assistant .assistant-body, .assistant-msg-footer, #chat-live-status-row, #crew-board-feed, #crew-roster-grid, #cfg-rules-summary-badge, #cfg-rules-list, #mem-editor-textarea, #asl-editor, .custom-select-trigger, #custom-select-popover, #custom-context-menu, #chat-project-modal, #thread-list, #sidebar-new-chat')) {
+  if (el.closest && el.closest('.msg.user .user-bubble, .msg.assistant .assistant-body, .assistant-msg-footer, #chat-live-status-row, #crew-board-feed, #crew-roster-grid, #crew-insp-messages, #cfg-rules-summary-badge, #cfg-rules-list, #mem-editor-textarea, #asl-editor, .custom-select-trigger, #custom-select-popover, #custom-context-menu, #chat-project-modal, #thread-list, #sidebar-new-chat')) {
     return false;
   }
   const fc = el.firstChild;
@@ -34230,19 +34247,137 @@ function renderCrewCollaborationGraph() {
   paintAllCrewPixelAvatarsNow();
 }
 
+const crewInspectorOpenTraceKeys = new Set();
+let crewInspectorLastRenderedKey = '';
+
+function toggleCrewTurnTraceUi(summaryEl, turnKey) {
+  const compact = summaryEl && summaryEl.parentElement;
+  if (!compact) return;
+  const open = compact.classList.toggle('open');
+  if (open) crewInspectorOpenTraceKeys.add(turnKey);
+  else crewInspectorOpenTraceKeys.delete(turnKey);
+}
+
+function syncCrewInspectorJumpLatestPill() {
+  const sc = document.getElementById('crew-insp-scroll');
+  const pill = document.getElementById('crew-insp-jump-latest');
+  if (!sc || !pill) return;
+  const distFromBottom = sc.scrollHeight - (sc.scrollTop + sc.clientHeight);
+  pill.classList.toggle('visible', distFromBottom > 120);
+}
+
+function jumpToLatestCrewInspector() {
+  const sc = document.getElementById('crew-insp-scroll');
+  if (!sc) return;
+  sc.scrollTo({ top: sc.scrollHeight, behavior: 'smooth' });
+}
+
+function formatCrewToolStepDetailText(raw) {
+  const str = String(raw || '').trim();
+  if (!str) return '';
+  if ((str.startsWith('{') && str.endsWith('}')) || (str.startsWith('[') && str.endsWith(']'))) {
+    try {
+      const obj = JSON.parse(str);
+      if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+        if (typeof obj.content === 'string' && Object.keys(obj).length <= 3) {
+          return obj.content;
+        }
+        return JSON.stringify(obj, null, 2);
+      }
+    } catch (_) {}
+  }
+  return str;
+}
+
+function summarizeCrewBoardTriggerLine(rawTrigger) {
+  const txt = String(rawTrigger || '').trim();
+  if (!txt) return '';
+  const headMatch = txt.match(/^\[CREW_BOARD\s+(#\d+)\s+from\s+(@[\w-]+)(?:[^\]]*)\]/i);
+  if (headMatch) {
+    const bodyRest = txt.slice(headMatch[0].length).replace(/\s+/g, ' ').trim();
+    return `${headMatch[1]} · ${headMatch[2]}${bodyRest ? ' — ' + bodyRest.slice(0, 140) : ''}`;
+  }
+  return txt.replace(/\s+/g, ' ').trim();
+}
+
+function renderCrewInspectorStepToolHtml(s) {
+  const rawDetail = s.result_preview || s.content || s.tool_args || '';
+  const info = typeof summarizeToolRow === 'function'
+    ? summarizeToolRow(s.tool_name || '', s.tool_args || rawDetail)
+    : { verb: s.tool_name || 'Tool', subject: '' };
+  const verb = info.verb || (s.tool_name ? String(s.tool_name) : 'Tool');
+  const subject = s.tool_summary || info.subject || '';
+  const detailText = formatCrewToolStepDetailText(rawDetail);
+  return `
+    <div class="msg tool" data-msg-role="tool" data-tool-name="${escapeHtml(s.tool_name || '')}">
+      <div class="tool-compact">
+        <div class="tool-compact-summary" onclick="this.parentElement.classList.toggle('open')">
+          <span class="tool-verb">${escapeHtml(verb)}</span>
+          ${subject ? `<span class="tool-subject">${escapeHtml(subject)}</span>` : ''}
+          <span class="tool-chevron">›</span>
+        </div>
+        ${detailText ? `<div class="tool-detail chat-msg-body">${escapeHtml(detailText.slice(0, 4000))}</div>` : ''}
+      </div>
+    </div>`;
+}
+
+function extractCrewPostTextsFromStep(s) {
+  const out = [];
+  if (!s || typeof s !== 'object') return out;
+  let postSeq = Number(s.post_seq || s.seq || 0);
+  let text = String(s.post_text || '').trim();
+  const tryParseObj = (raw) => {
+    const str = String(raw || '').trim();
+    if (!str || !str.startsWith('{')) return null;
+    try { return JSON.parse(str); } catch (_) { return null; }
+  };
+  const argsObj = tryParseObj(s.tool_args);
+  if (!text && argsObj && typeof argsObj === 'object') {
+    text = String(argsObj.text || argsObj.content || argsObj.message || '').trim();
+  }
+  const resObj = tryParseObj(s.result_preview || s.content);
+  if (resObj && typeof resObj === 'object') {
+    const postObj = resObj.post && typeof resObj.post === 'object' ? resObj.post : resObj;
+    if (!postSeq && postObj.seq) postSeq = Number(postObj.seq || 0);
+    if (!text && (postObj.content || postObj.text)) {
+      text = String(postObj.content || postObj.text || '').trim();
+    }
+  }
+  if (text) out.push({ seq: postSeq, text });
+  return out;
+}
+
+function renderCrewInspectorAssistantHtml(text, seqNum = 0) {
+  const clean = typeof stripLeadingEmoji === 'function' ? stripLeadingEmoji(String(text || '').trim()) : String(text || '').trim();
+  if (!clean) return '';
+  const rendered = typeof formatCrewBoardPostBodyHtml === 'function'
+    ? formatCrewBoardPostBodyHtml(clean)
+    : (typeof formatMarkdownLite === 'function' ? formatMarkdownLite(clean) : escapeHtml(clean));
+  const seqBadge = seqNum > 0
+    ? `<span class="crew-seq-ref" style="margin-right:6px;" onclick="jumpToCrewPostSeq(${Number(seqNum)})">#${Number(seqNum)}</span>`
+    : '';
+  return `
+    <div class="msg assistant" data-msg-role="assistant">
+      <div class="assistant-body chat-msg-body">
+        <div class="content-box md-content">${seqBadge}${rendered}</div>
+      </div>
+    </div>`;
+}
+
 async function openCrewMemberInspector(name) {
   const memberName = String(name || '').trim();
   if (!memberName || memberName === 'director') {
     closeCrewMemberInspector(true);
     return;
   }
+  const changedMember = activeCrewInspectorMember !== memberName;
   activeCrewInspectorMember = memberName;
+  if (changedMember) crewInspectorLastRenderedKey = '';
   const panelChat = document.getElementById('panel-chat');
   if (panelChat) panelChat.classList.add('has-crew-inspector');
   const insp = document.getElementById('crew-worker-inspector');
   if (insp) insp.hidden = false;
 
-  // Ensure chat panel is visible in a split slot if not already mounted
   if (typeof isPanelMountedInStage === 'function' && !isPanelMountedInStage('chat') && typeof switchPanel === 'function') {
     switchPanel('chat');
   }
@@ -34252,6 +34387,7 @@ async function openCrewMemberInspector(name) {
 
 function closeCrewMemberInspector(focusMainChat = false) {
   activeCrewInspectorMember = '';
+  crewInspectorLastRenderedKey = '';
   const panelChat = document.getElementById('panel-chat');
   if (panelChat) panelChat.classList.remove('has-crew-inspector');
   const insp = document.getElementById('crew-worker-inspector');
@@ -34266,7 +34402,7 @@ async function refreshActiveCrewInspectorUi() {
   if (!activeCrewInspectorMember) return;
   const tid = currentThreadId || 'thread-main';
   const name = activeCrewInspectorMember;
-  const res = await api(`/api/crew/member_log?thread_id=${encodeURIComponent(tid)}&name=${encodeURIComponent(name)}&limit=120`);
+  const res = await api(`/api/crew/member_log?thread_id=${encodeURIComponent(tid)}&name=${encodeURIComponent(name)}&limit=200`);
   if (!activeCrewInspectorMember || activeCrewInspectorMember !== name) return;
 
   const st = ensureCrewThreadState(tid);
@@ -34304,47 +34440,168 @@ async function refreshActiveCrewInspectorUi() {
     `;
   }
 
-  const body = document.getElementById('crew-insp-scroll');
-  if (body) {
+  const scroller = document.getElementById('crew-insp-scroll');
+  const msgBox = document.getElementById('crew-insp-messages');
+  if (scroller && msgBox) {
+    const viewKey = `${tid}::${name}`;
+    const isInitialOpen = crewInspectorLastRenderedKey !== viewKey;
+    crewInspectorLastRenderedKey = viewKey;
+    const prevScrollTop = scroller.scrollTop;
+    const wasNearBottom = (scroller.scrollHeight - (scroller.scrollTop + scroller.clientHeight)) < 90;
+
     const turns = (res && Array.isArray(res.turns)) ? res.turns : [];
-    const briefHtml = member.brief
-      ? `<div class="crew-insp-brief-card"><strong>${currentUiLang === 'en' ? 'Brief' : '임무 브리핑'}</strong>: ${escapeHtml(member.brief)}${member.last_error ? `<div class="crew-row-err" style="margin-top:6px; white-space:normal;">${escapeHtml((member.cancel_source ? '[' + member.cancel_source + '] ' : '') + member.last_error)}</div>` : ''}</div>`
-      : '';
-    let turnsHtml = '';
+    const blocks = [];
+
+    if (member.brief) {
+      blocks.push(`
+        <div class="msg user" data-msg-role="user">
+          <div class="user-bubble chat-msg-body">${escapeHtml(String(member.brief))}</div>
+        </div>
+      `);
+    }
+    if (member.last_error && isStopped) {
+      blocks.push(`
+        <div class="crew-insp-err-banner">${escapeHtml((member.cancel_source ? '[' + member.cancel_source + '] ' : '') + member.last_error)}</div>
+      `);
+    }
+
     if (turns.length === 0) {
       const fallbackPosts = (crewBoardPostsByThread[tid] || []).filter(p => p && (p.author_name === name || (Array.isArray(p.mentions) && p.mentions.includes(name))));
-      turnsHtml = fallbackPosts.length > 0
-        ? fallbackPosts.map(p => `<div class="crew-insp-step"><div class="crew-insp-step-kind">#${Number(p.seq || 0)} · @${escapeHtml(p.author_name || '')}</div><div class="md-content">${formatCrewBoardPostBodyHtml(p.content || '')}</div></div>`).join('')
-        : `<div class="crew-roster-empty">${escapeHtml(currentUiLang === 'en' ? 'No execution steps recorded yet for this worker.' : '아직 이 크루의 실행 스텝이 기록되지 않았습니다.')}</div>`;
-    } else {
-      turnsHtml = turns.map((turn, idx) => {
-        const dur = formatCrewElapsedCompact(0, turn.worked_ms) || (turn.worked_ms ? Math.round(turn.worked_ms) + 'ms' : '0s');
-        const isLast = idx === turns.length - 1;
-        const steps = Array.isArray(turn.steps) ? turn.steps : [];
-        const stepsHtml = steps.map(s => {
-          const kind = String(s.kind || 'assistant').toUpperCase();
-          const label = s.tool_summary || s.tool_name || kind;
-          const content = s.result_preview || s.content || s.tool_args || '';
-          return `
-            <div class="crew-insp-step">
-              <div class="crew-insp-step-kind">${escapeHtml(kind)}${s.tool_summary || s.tool_name ? ' · ' + escapeHtml(label) : ''}</div>
-              ${content ? `<div class="md-content" style="white-space:pre-wrap; overflow-wrap:anywhere;">${escapeHtml(String(content).slice(0, 1200))}</div>` : ''}
-            </div>`;
-        }).join('');
-        return `
-          <details class="crew-insp-turn"${isLast ? ' open' : ''}>
-            <summary>
-              <span>Worked for ${escapeHtml(dur)}</span>
-              <span style="font-family:var(--font-mono); font-size:11px; color:var(--text-muted);">Turn #${Number(turn.turn_index || idx + 1)}</span>
-            </summary>
-            <div class="crew-insp-turn-body">
-              ${turn.trigger_prompt ? `<div class="crew-insp-step"><div class="crew-insp-step-kind">TRIGGER</div><div>${escapeHtml(turn.trigger_prompt)}</div></div>` : ''}
-              ${stepsHtml}
+      if (fallbackPosts.length > 0) {
+        fallbackPosts.forEach(p => {
+          blocks.push(`
+            <div class="msg assistant" data-msg-role="assistant">
+              <div class="assistant-body chat-msg-body">
+                <div style="font-family:var(--font-mono); font-size:11px; color:var(--text-muted); margin-bottom:4px;">#${Number(p.seq || 0)} · @${escapeHtml(p.author_name || '')}</div>
+                <div class="content-box md-content">${formatCrewBoardPostBodyHtml(p.content || '')}</div>
+              </div>
             </div>
-          </details>`;
-      }).join('');
+          `);
+        });
+      } else if (!member.brief) {
+        blocks.push(`<div class="crew-roster-empty">${escapeHtml(currentUiLang === 'en' ? 'No execution steps recorded yet for this worker.' : '아직 이 크루의 실행 스텝이 기록되지 않았습니다.')}</div>`);
+      }
+    } else {
+      const briefTrimmed = String(member.brief || '').trim();
+      turns.forEach((turn, idx) => {
+        const turnNo = Number(turn.turn_index || idx + 1);
+        const turnKey = `${viewKey}:turn:${turnNo}`;
+        const dur = formatCrewElapsedCompact(0, turn.worked_ms) || (turn.worked_ms ? Math.round(turn.worked_ms) + 'ms' : '0s');
+        const steps = Array.isArray(turn.steps) ? turn.steps : [];
+
+        const rawTrig = String(turn.trigger_prompt || '').trim();
+        const isSameAsBrief = rawTrig && briefTrimmed && rawTrig === briefTrimmed;
+        const isBoardTrigger = /^\[CREW_BOARD/i.test(rawTrig);
+        let triggerNoteHtml = '';
+        if (rawTrig && !isSameAsBrief) {
+          if (isBoardTrigger) {
+            triggerNoteHtml = `<div class="crew-insp-trigger-note">${escapeHtml(summarizeCrewBoardTriggerLine(rawTrig))}</div>`;
+          } else {
+            blocks.push(`
+              <div class="msg user" data-msg-role="user">
+                <div class="user-bubble chat-msg-body">${escapeHtml(rawTrig)}</div>
+              </div>
+            `);
+          }
+        }
+
+        const traceItemsHtml = [];
+        const assistantTexts = [];
+        const crewPostFallbacks = [];
+        let toolStepCount = 0;
+
+        steps.forEach(s => {
+          if (!s || typeof s !== 'object') return;
+          const kindLow = String(s.kind || '').toLowerCase();
+          const toolLow = String(s.tool_name || '').toLowerCase();
+          if (kindLow === 'thinking' || kindLow === 'reasoning') {
+            const tRaw = String(s.content || s.result_preview || '').trim();
+            if (tRaw && typeof renderThinkingCompactHtml === 'function') {
+              traceItemsHtml.push(renderThinkingCompactHtml(tRaw));
+            }
+          } else if (kindLow === 'tool' || s.tool_name) {
+            toolStepCount += 1;
+            traceItemsHtml.push(renderCrewInspectorStepToolHtml(s));
+            if (toolLow === 'crew_post' || toolLow === 'post_message') {
+              extractCrewPostTextsFromStep(s).forEach(entry => crewPostFallbacks.push(entry));
+            }
+          } else {
+            const bodyTxt = String(s.content || s.result_preview || '').trim();
+            if (bodyTxt) assistantTexts.push(bodyTxt);
+          }
+        });
+
+        const turnBoardPosts = Array.isArray(turn.board_posts)
+          ? turn.board_posts
+              .filter(p => p && String(p.author_name || '').trim() === name && String(p.content || p.text || '').trim())
+              .map(p => ({ seq: Number(p.seq || 0), text: String(p.content || p.text || '').trim() }))
+          : [];
+        const fallbackPostsToRender = turnBoardPosts.length > 0 ? turnBoardPosts : crewPostFallbacks;
+
+        const hasTraceContent = traceItemsHtml.length > 0 || Boolean(triggerNoteHtml);
+        if (hasTraceContent) {
+          const isOpen = crewInspectorOpenTraceKeys.has(turnKey);
+          const countHint = toolStepCount > 0
+            ? (currentUiLang === 'en' ? `${toolStepCount} step${toolStepCount > 1 ? 's' : ''}` : `도구 ${toolStepCount}회`)
+            : '';
+          blocks.push(`
+            <div class="msg tool crew-insp-trace-group" data-crew-turn="${turnNo}">
+              <div class="tool-compact${isOpen ? ' open' : ''}">
+                <div class="tool-compact-summary" onclick="toggleCrewTurnTraceUi(this, '${escapeJsAttr(turnKey)}')">
+                  <span class="tool-verb">Worked for ${escapeHtml(dur)}</span>
+                  ${countHint ? `<span class="tool-subject">${escapeHtml(countHint)}</span>` : ''}
+                  <span class="tool-chevron">›</span>
+                </div>
+                <div class="tool-group-body">
+                  ${triggerNoteHtml}
+                  ${traceItemsHtml.join('')}
+                </div>
+              </div>
+            </div>
+          `);
+        } else if (turn.worked_ms > 0 && (assistantTexts.length > 0 || fallbackPostsToRender.length > 0)) {
+          blocks.push(`
+            <div class="msg tool crew-insp-trace-group" data-crew-turn="${turnNo}">
+              <div class="tool-compact">
+                <div class="tool-compact-summary" style="cursor:default;">
+                  <span class="tool-verb">Worked for ${escapeHtml(dur)}</span>
+                </div>
+              </div>
+            </div>
+          `);
+        }
+
+        if (assistantTexts.length > 0) {
+          const combinedMd = assistantTexts.join('\n\n');
+          const msgHtml = renderCrewInspectorAssistantHtml(combinedMd);
+          if (msgHtml) blocks.push(msgHtml);
+        } else if (fallbackPostsToRender.length > 0) {
+          fallbackPostsToRender.forEach(entry => {
+            const msgHtml = renderCrewInspectorAssistantHtml(entry.text, entry.seq);
+            if (msgHtml) blocks.push(msgHtml);
+          });
+        }
+      });
     }
-    body.innerHTML = briefHtml + turnsHtml;
+
+    if (isWorking) {
+      const liveText = member.tool_summary || member.current_tool || (currentUiLang === 'en' ? 'Working...' : '작업 중...');
+      blocks.push(`
+        <div class="crew-insp-live-row">
+          <span class="crew-state-dot-inline"></span>
+          <span>${escapeHtml(liveText)}</span>
+        </div>
+      `);
+    }
+
+    msgBox.innerHTML = blocks.join('');
+
+    if (isInitialOpen || wasNearBottom || isWorking) {
+      scroller.scrollTop = scroller.scrollHeight;
+    } else {
+      scroller.scrollTop = prevScrollTop;
+    }
+    syncCrewInspectorJumpLatestPill();
   }
 
   const inp = document.getElementById('crew-insp-input');
