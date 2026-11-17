@@ -21,9 +21,13 @@ pub const OPENAI_OAUTH_CALLBACK_PATH: &str = "/auth/callback";
 
 pub const CLAUDE_OAUTH_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 pub const CLAUDE_OAUTH_DEFAULT_AUTHORIZE_URL: &str = "https://claude.ai/oauth/authorize";
-pub const CLAUDE_OAUTH_DEFAULT_TOKEN_URL: &str = "https://console.anthropic.com/v1/oauth/token";
+pub const CLAUDE_OAUTH_DEFAULT_TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
+pub const CLAUDE_OAUTH_FALLBACK_TOKEN_URL: &str = "https://console.anthropic.com/v1/oauth/token";
 pub const CLAUDE_OAUTH_MANUAL_REDIRECT_URI: &str =
-    "https://console.anthropic.com/oauth/code/callback";
+    "https://platform.claude.com/oauth/code/callback";
+pub const CLAUDE_OAUTH_SCOPE: &str =
+    "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers";
+pub const CLAUDE_OAUTH_CLI_USER_AGENT: &str = "claude-cli/2.1.76 (external, cli)";
 pub const CLAUDE_API_DEFAULT_BASE_URL: &str = "https://api.anthropic.com";
 pub const CLAUDE_OAUTH_CALLBACK_PATH: &str = "/callback";
 pub const OPENAI_CLI_USER_AGENT: &str = "codex_cli_rs/0.104.0 (Windows 11; arm64)";
@@ -476,6 +480,83 @@ async fn send_openai_backend_get(
     Ok(resp)
 }
 
+async fn send_claude_oauth_get(
+    client: &reqwest::Client,
+    url: &str,
+    rec: &OAuthTokenRecord,
+    beta_header: &str,
+    allow_refresh: bool,
+) -> std::result::Result<reqwest::Response, String> {
+    async fn attempt(
+        client: &reqwest::Client,
+        url: &str,
+        token: &str,
+        beta_header: &str,
+    ) -> std::result::Result<reqwest::Response, reqwest::Error> {
+        client
+            .get(url)
+            .bearer_auth(token.trim())
+            .header("User-Agent", CLAUDE_OAUTH_CLI_USER_AGENT)
+            .header("Accept", "application/json")
+            .header("anthropic-version", "2023-06-01")
+            .header("anthropic-beta", beta_header)
+            .send()
+            .await
+    }
+
+    let mut resp = attempt(client, url, &rec.access_token, beta_header)
+        .await
+        .map_err(|e| e.to_string())?;
+    if resp.status().as_u16() == 401 && allow_refresh {
+        if let Ok(refreshed) = refresh_provider_token(OAuthProvider::Claude).await {
+            resp = attempt(client, url, &refreshed.access_token, beta_header)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(resp)
+}
+
+async fn post_claude_oauth_json(
+    client: &reqwest::Client,
+    payload: &Value,
+    context_label: &str,
+) -> Result<reqwest::Response> {
+    let primary = claude_token_url();
+    let allow_fallback = env_override("ALLUSE_CLAUDE_OAUTH_TOKEN_URL").is_none()
+        && !primary.eq_ignore_ascii_case(CLAUDE_OAUTH_FALLBACK_TOKEN_URL);
+
+    let send_to = |url: &str| {
+        client
+            .post(url)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
+            .header("User-Agent", CLAUDE_OAUTH_CLI_USER_AGENT)
+            .json(payload)
+            .send()
+    };
+
+    match send_to(&primary).await {
+        Ok(resp) => {
+            let code = resp.status().as_u16();
+            if allow_fallback && (code == 404 || code >= 500) {
+                if let Ok(fb_resp) = send_to(CLAUDE_OAUTH_FALLBACK_TOKEN_URL).await {
+                    return Ok(fb_resp);
+                }
+            }
+            Ok(resp)
+        }
+        Err(err) => {
+            if allow_fallback {
+                if let Ok(fb_resp) = send_to(CLAUDE_OAUTH_FALLBACK_TOKEN_URL).await {
+                    return Ok(fb_resp);
+                }
+            }
+            Err(anyhow::Error::new(err)).context(context_label.to_string())
+        }
+    }
+}
+
 pub async fn fetch_connected_catalog_models_with_remote() -> Vec<crate::config::ModelInfo> {
     let mut out = Vec::new();
     let now = now_unix_secs();
@@ -603,16 +684,14 @@ pub async fn fetch_connected_catalog_models_with_remote() -> Vec<crate::config::
                     .build()
                 {
                     let url = format!("{}/v1/models", claude_api_base_url());
-                    if let Ok(resp) = client
-                        .get(&url)
-                        .bearer_auth(rec.access_token.trim())
-                        .header("anthropic-version", "2023-06-01")
-                        .header(
-                            "anthropic-beta",
-                            "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14",
-                        )
-                        .send()
-                        .await
+                    if let Ok(resp) = send_claude_oauth_get(
+                        &client,
+                        &url,
+                        &rec,
+                        "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14",
+                        true,
+                    )
+                    .await
                     {
                         if resp.status().is_success() {
                             if let Ok(val) = resp.json::<Value>().await {
@@ -953,14 +1032,8 @@ pub async fn fetch_usage_for_provider(
             }
         }
         OAuthProvider::Claude => {
-            client
-                .get(claude_usage_url())
-                .bearer_auth(rec.access_token.trim())
-                .header("anthropic-version", "2023-06-01")
-                .header("anthropic-beta", "oauth-2025-04-20")
-                .send()
-                .await
-                .map_err(|e| e.to_string())
+            let url = claude_usage_url();
+            send_claude_oauth_get(&client, &url, &rec, "oauth-2025-04-20", true).await
         }
     };
 
@@ -1123,7 +1196,16 @@ pub async fn fetch_usage_for_provider(
                                     parse_reset(w7),
                                 ));
                             }
-                            // (Claude null-window synthesis lands in Claude OAuth commit)
+                            if snap.primary_window.is_none()
+                                && snap.secondary_window.is_none()
+                                && (val.get("subscription_type").is_some()
+                                    || val.get("plan_type").is_some()
+                                    || val.get("five_hour").is_some()
+                                    || val.get("seven_day").is_some())
+                            {
+                                snap.primary_window =
+                                    Some(make_usage_window("5h", 0.0, String::new()));
+                            }
                         }
                     }
                     snap.last_error.clear();
@@ -1279,8 +1361,11 @@ fn generate_pkce_pair() -> (String, String, String, String) {
     let code_verifier = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&raw_verifier);
     let digest = Sha256::digest(code_verifier.as_bytes());
     let code_challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest);
-    let state = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .encode(uuid::Uuid::new_v4().as_bytes());
+    // Match Claude CLI / RFC 7636 entropy: 32 random bytes -> 43-char base64url state.
+    let mut raw_state = Vec::with_capacity(32);
+    raw_state.extend_from_slice(uuid::Uuid::new_v4().as_bytes());
+    raw_state.extend_from_slice(uuid::Uuid::new_v4().as_bytes());
+    let state = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&raw_state);
     let session_id = format!("oa_{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     (session_id, state, code_verifier, code_challenge)
 }
@@ -1524,7 +1609,7 @@ pub async fn start_oauth_flow(
                     ("client_id", CLAUDE_OAUTH_CLIENT_ID),
                     ("response_type", "code"),
                     ("redirect_uri", &redirect_uri),
-                    ("scope", "org:create_api_key user:profile user:inference"),
+                    ("scope", CLAUDE_OAUTH_SCOPE),
                     ("code_challenge", &code_challenge),
                     ("code_challenge_method", "S256"),
                     ("state", &state),
@@ -1814,20 +1899,16 @@ pub async fn exchange_oauth_code(
                 .context("Failed to contact OpenAI token endpoint")?
         }
         OAuthProvider::Claude => {
-            client
-                .post(claude_token_url())
-                .header("Content-Type", "application/json")
-                .json(&json!({
-                    "grant_type": "authorization_code",
-                    "client_id": CLAUDE_OAUTH_CLIENT_ID,
-                    "code": code,
-                    "state": state_to_send,
-                    "redirect_uri": pending.redirect_uri,
-                    "code_verifier": pending.code_verifier,
-                }))
-                .send()
-                .await
-                .context("Failed to contact Claude token endpoint")?
+            let payload = json!({
+                "grant_type": "authorization_code",
+                "client_id": CLAUDE_OAUTH_CLIENT_ID,
+                "code": code,
+                "state": state_to_send,
+                "redirect_uri": pending.redirect_uri,
+                "code_verifier": pending.code_verifier,
+            });
+            post_claude_oauth_json(&client, &payload, "Failed to contact Claude token endpoint")
+                .await?
         }
     };
 
@@ -1892,17 +1973,13 @@ pub async fn refresh_provider_token(provider: OAuthProvider) -> Result<OAuthToke
                 .context("Failed to refresh OpenAI OAuth token")?
         }
         OAuthProvider::Claude => {
-            client
-                .post(claude_token_url())
-                .header("Content-Type", "application/json")
-                .json(&json!({
-                    "grant_type": "refresh_token",
-                    "client_id": CLAUDE_OAUTH_CLIENT_ID,
-                    "refresh_token": current.refresh_token,
-                }))
-                .send()
-                .await
-                .context("Failed to refresh Claude OAuth token")?
+            let payload = json!({
+                "grant_type": "refresh_token",
+                "client_id": CLAUDE_OAUTH_CLIENT_ID,
+                "refresh_token": current.refresh_token,
+            });
+            post_claude_oauth_json(&client, &payload, "Failed to refresh Claude OAuth token")
+                .await?
         }
     };
 
@@ -2389,6 +2466,241 @@ mod tests {
             std::env::remove_var("ALLUSE_CLAUDE_USAGE_URL");
         }
         *VAULT_CACHE.lock().unwrap() = None;
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[tokio::test]
+    async fn claude_pkce_state_urls_and_openai_usage_resilience() {
+        let (_sid, state, verifier, _challenge) = generate_pkce_pair();
+        assert_eq!(verifier.len(), 43);
+        assert_eq!(state.len(), 43);
+
+        let (c1, s1) = parse_manual_oauth_input(
+            "https://platform.claude.com/oauth/code/callback?code=abc123&state=st456",
+        );
+        assert_eq!(c1, "abc123");
+        assert_eq!(s1.as_deref(), Some("st456"));
+        let (c2, s2) = parse_manual_oauth_input(
+            "https://console.anthropic.com/oauth/code/callback?code=old99&state=st99",
+        );
+        assert_eq!(c2, "old99");
+        assert_eq!(s2.as_deref(), Some("st99"));
+
+        let tmp_dir = std::env::temp_dir().join(format!(
+            "alluse_oauth_res_{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&tmp_dir).unwrap();
+        let vault_file = tmp_dir.join("vault.dat");
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let mock_base = format!("http://127.0.0.1:{port}");
+        let mode = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mode_srv = mode.clone();
+
+        let server_handle = tokio::spawn(async move {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else {
+                    break;
+                };
+                let m = mode_srv.clone();
+                tokio::spawn(async move {
+                    let mut buf = vec![0u8; 8192];
+                    let n = stream.read(&mut buf).await.unwrap_or(0);
+                    let raw = String::from_utf8_lossy(&buf[..n]).to_string();
+                    let head = raw.split("\r\n\r\n").next().unwrap_or("");
+                    let head_low = head.to_ascii_lowercase();
+                    let req_line = head.lines().next().unwrap_or("");
+                    let path = req_line.split_whitespace().nth(1).unwrap_or("/");
+                    let path_only = path.split('?').next().unwrap_or(path);
+
+                    let (status_line, body_out) = if path_only == "/wham/usage" {
+                        let has_ua = head_low.contains("user-agent: codex_cli_rs/");
+                        let has_orig = head_low.contains("originator: codex_cli_rs");
+                        let has_acct = head_low.contains("chatgpt-account-id:");
+                        let cur_mode = m.load(std::sync::atomic::Ordering::SeqCst);
+                        if !has_ua || !has_orig {
+                            ("HTTP/1.1 403 Forbidden", "{\"detail\":\"missing codex UA\"}".to_string())
+                        } else if cur_mode == 0 {
+                            if has_acct {
+                                ("HTTP/1.1 403 Forbidden", "{\"detail\":\"bad org id\"}".to_string())
+                            } else {
+                                (
+                                    "HTTP/1.1 200 OK",
+                                    json!({
+                                        "plan_type": "plus",
+                                        "rate_limit": {
+                                            "primary_window": {
+                                                "used_percent": 27.0,
+                                                "reset_after_seconds": 1800
+                                            }
+                                        }
+                                    })
+                                    .to_string(),
+                                )
+                            }
+                        } else if cur_mode == 1 {
+                            (
+                                "HTTP/1.1 200 OK",
+                                json!({
+                                    "plan_type": "plus",
+                                    "rate_limit": {
+                                        "primary_window": null,
+                                        "secondary_window": null
+                                    }
+                                })
+                                .to_string(),
+                            )
+                        } else {
+                            if head_low.contains("bearer expired_tok") {
+                                ("HTTP/1.1 401 Unauthorized", "{\"detail\":\"expired\"}".to_string())
+                            } else {
+                                (
+                                    "HTTP/1.1 200 OK",
+                                    json!({
+                                        "plan_type": "pro",
+                                        "rate_limit": {
+                                            "primary_window": { "used_percent": 11.0, "reset_after_seconds": 900 }
+                                        }
+                                    })
+                                    .to_string(),
+                                )
+                            }
+                        }
+                    } else if path_only == "/openai/token" {
+                        (
+                            "HTTP/1.1 200 OK",
+                            json!({
+                                "access_token": "refreshed_tok",
+                                "refresh_token": "ref_2",
+                                "expires_in": 3600
+                            })
+                            .to_string(),
+                        )
+                    } else if path_only == "/api/oauth/usage" {
+                        if !head_low.contains("user-agent: claude-cli/") {
+                            ("HTTP/1.1 403 Forbidden", "{\"error\":\"missing claude-cli UA\"}".to_string())
+                        } else {
+                            (
+                                "HTTP/1.1 200 OK",
+                                json!({
+                                    "subscription_type": "max",
+                                    "five_hour": null,
+                                    "seven_day": null
+                                })
+                                .to_string(),
+                            )
+                        }
+                    } else {
+                        ("HTTP/1.1 404 Not Found", "{}".to_string())
+                    };
+                    let http_resp = format!(
+                        "{status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        body_out.len(),
+                        body_out
+                    );
+                    let _ = stream.write_all(http_resp.as_bytes()).await;
+                    let _ = stream.shutdown().await;
+                });
+            }
+        });
+
+        unsafe {
+            std::env::set_var("ALLUSE_OAUTH_VAULT_PATH", &vault_file);
+            std::env::set_var("ALLUSE_OPENAI_OAUTH_TOKEN_URL", format!("{mock_base}/openai/token"));
+            std::env::set_var("ALLUSE_OPENAI_USAGE_URL", format!("{mock_base}/wham/usage"));
+            std::env::set_var("ALLUSE_CLAUDE_USAGE_URL", format!("{mock_base}/api/oauth/usage"));
+        }
+        *VAULT_CACHE.lock().unwrap() = None;
+        USAGE_CACHE.lock().unwrap().clear();
+
+        let cl_start = start_oauth_flow(OAuthProvider::Claude, false, "manual")
+            .await
+            .unwrap();
+        let cl_url = cl_start["authUrl"].as_str().unwrap();
+        assert!(cl_url.contains("platform.claude.com%2Foauth%2Fcode%2Fcallback"));
+        assert!(cl_url.contains("user%3Asessions%3Aclaude_code"));
+        let cl_state = parse_form_or_query_pairs(cl_url.split_once('?').unwrap().1)
+            .get("state")
+            .cloned()
+            .unwrap();
+        assert_eq!(cl_state.len(), 43);
+
+        set_stored_record(
+            OAuthProvider::Openai,
+            Some(OAuthTokenRecord {
+                provider: "openai".to_string(),
+                access_token: "expired_tok".to_string(),
+                refresh_token: "ref_1".to_string(),
+                id_token: String::new(),
+                email: "u@example.com".to_string(),
+                account_id: "org-stale-99".to_string(),
+                expires_at: now_unix_secs() + 3600,
+                updated_at: now_unix_secs(),
+            }),
+        )
+        .unwrap();
+        set_stored_record(
+            OAuthProvider::Claude,
+            Some(OAuthTokenRecord {
+                provider: "claude".to_string(),
+                access_token: "claude_tok".to_string(),
+                refresh_token: "cl_ref_1".to_string(),
+                id_token: String::new(),
+                email: "c@example.com".to_string(),
+                account_id: String::new(),
+                expires_at: now_unix_secs() + 3600,
+                updated_at: now_unix_secs(),
+            }),
+        )
+        .unwrap();
+
+        // Mode 0: ChatGPT-Account-Id 403 triggers no-header retry + reset_after_seconds -> ISO resetAt
+        let s0 = fetch_usage_for_provider(OAuthProvider::Openai, true).await;
+        assert_eq!(s0.last_error, "");
+        assert_eq!(s0.primary_window.as_ref().unwrap().used_percent, 27.0);
+        assert!(s0.primary_window.as_ref().unwrap().reset_at.ends_with('Z'));
+
+        // Mode 1: null windows on valid 200 OK synthesize 5h 0% window
+        mode.store(1, std::sync::atomic::Ordering::SeqCst);
+        let s1 = fetch_usage_for_provider(OAuthProvider::Openai, true).await;
+        assert_eq!(s1.last_error, "");
+        assert_eq!(s1.primary_window.as_ref().unwrap().used_percent, 0.0);
+        assert_eq!(s1.primary_window.as_ref().unwrap().remaining_percent, 100.0);
+
+        let cl_s = fetch_usage_for_provider(OAuthProvider::Claude, true).await;
+        assert_eq!(cl_s.last_error, "");
+        assert_eq!(cl_s.plan_type, "max");
+        assert_eq!(cl_s.primary_window.as_ref().unwrap().used_percent, 0.0);
+
+        // Mode 2: 401 triggers refresh_provider_token + retry
+        mode.store(2, std::sync::atomic::Ordering::SeqCst);
+        let s2 = fetch_usage_for_provider(OAuthProvider::Openai, true).await;
+        assert_eq!(s2.last_error, "");
+        assert_eq!(s2.plan_type, "pro");
+        assert_eq!(s2.primary_window.as_ref().unwrap().used_percent, 11.0);
+
+        // warm_connected_usage_if_empty populates empty cache when /api/oauth/status opens
+        USAGE_CACHE.lock().unwrap().clear();
+        warm_connected_usage_if_empty().await;
+        let st = build_status_response();
+        assert_eq!(st["providers"]["openai"]["usage"]["planType"], "pro");
+        assert_eq!(st["providers"]["claude"]["usage"]["planType"], "max");
+
+        disconnect_provider(OAuthProvider::Openai).unwrap();
+        disconnect_provider(OAuthProvider::Claude).unwrap();
+        server_handle.abort();
+        unsafe {
+            std::env::remove_var("ALLUSE_OAUTH_VAULT_PATH");
+            std::env::remove_var("ALLUSE_OPENAI_OAUTH_TOKEN_URL");
+            std::env::remove_var("ALLUSE_OPENAI_USAGE_URL");
+            std::env::remove_var("ALLUSE_CLAUDE_USAGE_URL");
+        }
+        *VAULT_CACHE.lock().unwrap() = None;
+        USAGE_CACHE.lock().unwrap().clear();
+        MODELS_CACHE.lock().unwrap().clear();
         let _ = std::fs::remove_dir_all(&tmp_dir);
     }
 }
