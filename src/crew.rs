@@ -19,8 +19,9 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 use tokio::sync::{Notify, watch};
 
-pub const MAX_CREW_MEMBERS_PER_SESSION: usize = 12;
-pub const MAX_SHARD_COPIES: usize = 8;
+pub const MAX_CREW_MEMBERS_PER_SESSION: usize = 128;
+pub const MAX_SHARD_COPIES: usize = 64;
+pub const MAX_CONCURRENT_WORKING_CREWS: usize = 12;
 pub const MAX_BOARD_CONTENT_CHARS: usize = 24_000;
 pub const DEFAULT_WAIT_TIMEOUT_MS: u64 = 60_000;
 pub const MIN_WAIT_TIMEOUT_MS: u64 = 100;
@@ -170,6 +171,7 @@ struct CrewRoom {
     director_wake_counts: Mutex<(u64, usize)>,
     last_watchdog_seq: AtomicU64,
     override_endpoint: Mutex<Option<(String, String, String, String)>>,
+    working_sem: Arc<tokio::sync::Semaphore>,
 }
 
 impl CrewRoom {
@@ -186,6 +188,7 @@ impl CrewRoom {
             director_wake_counts: Mutex::new((0, 0)),
             last_watchdog_seq: AtomicU64::new(0),
             override_endpoint: Mutex::new(None),
+            working_sem: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_WORKING_CREWS)),
         }
     }
 
@@ -2863,6 +2866,15 @@ fn spawn_crew_worker_turn_internal(
         );
     }
 
+    let pre_permit = room.working_sem.clone().try_acquire_owned().ok();
+    let initial_turn_state = if pre_permit.is_some() { "working" } else { "waiting" };
+    let initial_tool_summary = if pre_permit.is_some() {
+        "Thinking..."
+    } else {
+        "Queued (concurrency slot)"
+    };
+    let initial_started_at = if pre_permit.is_some() { now_unix_secs() as i64 } else { 0 };
+
     let member_opt = {
         let conn = crate::db::lock_db();
         let m = get_member_by_name_conn(&conn, root_id, &norm_target);
@@ -2873,25 +2885,45 @@ fn spawn_crew_worker_turn_internal(
             let read_floor = delivered_seq.unwrap_or(0) as i64;
             let _ = conn.execute(
                 "UPDATE crew_members
-                 SET state = 'working',
-                     last_read_seq = MAX(last_read_seq, ?1),
+                 SET state = ?1,
+                     last_read_seq = MAX(last_read_seq, ?2),
                      waiting_since = 0,
                      wait_mentions_only = 1,
                      current_tool = '',
-                     tool_summary = 'Thinking...',
+                     tool_summary = ?3,
                      current_step = 0,
-                     working_started_at = ?2,
+                     working_started_at = ?4,
                      last_error = '',
                      cancel_source = '',
                      cancel_reason = '',
-                     last_active_at = ?2,
-                     updated_at = ?2
-                 WHERE id = ?3",
-                params![read_floor, now, rec.id],
+                     last_active_at = ?5,
+                     updated_at = ?5
+                 WHERE id = ?6",
+                params![
+                    initial_turn_state,
+                    read_floor,
+                    initial_tool_summary,
+                    initial_started_at,
+                    now,
+                    rec.id
+                ],
             );
             let _ = conn.execute(
-                "UPDATE threads SET agent_status = 'running', updated_at = ?1 WHERE id = ?2",
-                params![now, rec.thread_id],
+                "UPDATE threads SET agent_status = ?1, updated_at = ?2 WHERE id = ?3",
+                params![
+                    if pre_permit.is_some() { "running" } else { "idle" },
+                    now,
+                    rec.thread_id
+                ],
+            );
+            let _ = conn.execute(
+                "UPDATE crew_sessions
+                 SET watchdog_epoch = watchdog_epoch + 1,
+                     active_watchdog_json = '',
+                     last_watchdog_fingerprint = '',
+                     updated_at = ?1
+                 WHERE root_thread_id = ?2",
+                params![now, root_id],
             );
             get_member_by_name_conn(&conn, root_id, &rec.name)
         } else {
@@ -2922,9 +2954,9 @@ fn spawn_crew_worker_turn_internal(
             turns.insert(member.name.clone(), tracker);
         }
     }
-    member.state = "working".to_string();
-    member.state_label = "작업 중".to_string();
-    emit_crew_member_and_status_sse("working", &member);
+    member.state = initial_turn_state.to_string();
+    member.state_label = state_label_ko(initial_turn_state).to_string();
+    emit_crew_member_and_status_sse(initial_turn_state, &member);
 
     let room_ov = room
         .override_endpoint
@@ -2939,16 +2971,73 @@ fn spawn_crew_worker_turn_internal(
     );
 
     let tid = member.thread_id.clone();
+    let member_id = member.id.clone();
     let name_cl = member.name.clone();
+    let root_cl = member.root_thread_id.clone();
     let room_cl = room.clone();
     crate::agent::clear_thread_interrupt(&tid);
     ensure_watchdog_running();
 
     tokio::spawn(async move {
         let mut abort_guard = ActiveTurnAbortGuard {
-            room: room_cl,
-            member_name: name_cl,
+            room: room_cl.clone(),
+            member_name: name_cl.clone(),
             armed: true,
+        };
+        let _sem_permit = match pre_permit {
+            Some(p) => p,
+            None => {
+                let cancel_thread = room_cl.cancel_notify_for(&tid);
+                let cancel_name = room_cl.cancel_notify_for(&name_cl);
+                let sem_res = tokio::select! {
+                    res = room_cl.working_sem.clone().acquire_owned() => res.ok(),
+                    _ = cancel_thread.notified() => None,
+                    _ = cancel_name.notified() => None,
+                };
+                let Some(permit) = sem_res else {
+                    abort_guard.armed = false;
+                    on_crew_turn_finished(&tid, "", true, "");
+                    return;
+                };
+                if crate::cua::is_interrupted() || crate::agent::is_thread_interrupted(&tid) {
+                    abort_guard.armed = false;
+                    on_crew_turn_finished(&tid, "", true, "");
+                    return;
+                }
+                {
+                    let mut turns = room_cl.active_turns.lock().unwrap_or_else(|p| p.into_inner());
+                    if let Some(t) = turns.get_mut(&name_cl) {
+                        t.started_ms = now_unix_millis();
+                    }
+                }
+                let promoted_opt = {
+                    let conn = crate::db::lock_db();
+                    let now = now_unix_secs() as i64;
+                    let _ = conn.execute(
+                        "UPDATE crew_members
+                         SET state = 'working',
+                             tool_summary = 'Thinking...',
+                             working_started_at = ?1,
+                             last_active_at = ?1,
+                             updated_at = ?1
+                         WHERE id = ?2 AND state != 'killed'",
+                        params![now, member_id],
+                    );
+                    let _ = conn.execute(
+                        "UPDATE threads SET agent_status = 'running', updated_at = ?1 WHERE id = ?2",
+                        params![now, tid],
+                    );
+                    get_member_by_name_conn(&conn, &root_cl, &name_cl)
+                };
+                if let Some(ref promoted) = promoted_opt {
+                    if promoted.state == "killed" {
+                        abort_guard.armed = false;
+                        return;
+                    }
+                    emit_crew_member_and_status_sse("working", promoted);
+                }
+                permit
+            }
         };
         let fut = Box::pin(crate::agent::run_agent_turn(
             tid.clone(),
@@ -4498,19 +4587,64 @@ pub fn render_crew_prompt_context(thread_id: &str) -> String {
     }
 
     if let Some(st) = status {
+        let live_members: Vec<&CrewMemberRecord> =
+            st.members.iter().filter(|m| m.state != "killed").collect();
+        let killed_count = st.members.len().saturating_sub(live_members.len());
         out.push_str(&format!(
-            "\n[현재 크루 보드 현황 (title=`{}`, head=#{})]\n",
+            "\n[현재 크루 보드 현황 (title=`{}`, head=#{}, 활성/대기={}명, 작업중={}, 대기={}, 중단={}, 종료(숨김)={})]\n",
             if st.title.is_empty() { "미지정" } else { &st.title },
-            st.head_seq
+            st.head_seq,
+            live_members.len(),
+            st.counts.working,
+            st.counts.waiting,
+            st.counts.stopped,
+            killed_count,
         ));
-        if st.members.is_empty() {
-            out.push_str("- 현재 등록된 크루가 없습니다.\n");
-        } else {
-            for mem in &st.members {
+        if live_members.is_empty() {
+            out.push_str("- 현재 등록된 활성/대기 크루가 없습니다.\n");
+        } else if live_members.len() <= 16 {
+            for mem in &live_members {
                 out.push_str(&format!(
                     "- `@{}` ({}, role=`{}`, state=`{}` / {}, model=`{}`)\n",
                     mem.name, mem.display_name, mem.role, mem.state, mem.state_label, mem.model
                 ));
+            }
+        } else {
+            let active_or_stopped: Vec<&&CrewMemberRecord> = live_members
+                .iter()
+                .filter(|m| m.state != "waiting")
+                .collect();
+            let waiting_only: Vec<&&CrewMemberRecord> = live_members
+                .iter()
+                .filter(|m| m.state == "waiting")
+                .collect();
+            for mem in active_or_stopped {
+                out.push_str(&format!(
+                    "- `@{}` ({}, role=`{}`, state=`{}` / {}, model=`{}`)\n",
+                    mem.name, mem.display_name, mem.role, mem.state, mem.state_label, mem.model
+                ));
+            }
+            if !waiting_only.is_empty() {
+                let compact_preview: Vec<String> = waiting_only
+                    .iter()
+                    .take(16)
+                    .map(|m| format!("@{}({})", m.name, m.role))
+                    .collect();
+                let extra = waiting_only.len().saturating_sub(16);
+                if extra > 0 {
+                    out.push_str(&format!(
+                        "- 대기 중(`waiting`, {}명): {} ... 외 {}명 (전체 조회: `crew_read(status=true)`)\n",
+                        waiting_only.len(),
+                        compact_preview.join(", "),
+                        extra
+                    ));
+                } else {
+                    out.push_str(&format!(
+                        "- 대기 중(`waiting`, {}명): {}\n",
+                        waiting_only.len(),
+                        compact_preview.join(", ")
+                    ));
+                }
             }
         }
     }
@@ -6167,5 +6301,201 @@ mod tests {
 
         let _ = manage_crew(&root_id, &json!({ "action": "kill_all" }), &cfg, false).await;
         let _ = waiter.await;
+    }
+
+    #[tokio::test]
+    async fn large_roster_40_members_with_active_concurrency_guard_and_concise_prompt() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let root_id = unique_root("large-40");
+        let cfg = AppConfig::default();
+
+        // 1. Add 35 sharded members + 5 extra = 40 members in a single session (> previous 12 cap).
+        let tasks_35: Vec<String> = (1..=35).map(|i| format!("슬라이스 {i} 작업")).collect();
+        let res_35 = manage_crew(
+            &root_id,
+            &json!({
+                "action": "add",
+                "name": "worker",
+                "role": "coder",
+                "brief": "대조직 병렬 작업",
+                "tasks": tasks_35,
+            }),
+            &cfg,
+            false,
+        )
+        .await
+        .unwrap();
+        assert_eq!(res_35["added"].as_array().unwrap().len(), 35);
+
+        for i in 1..=5 {
+            manage_crew(
+                &root_id,
+                &json!({
+                    "action": "add",
+                    "name": format!("qa-spec-{i}"),
+                    "role": "verifier",
+                    "brief": "추가 검수 대기"
+                }),
+                &cfg,
+                false,
+            )
+            .await
+            .unwrap();
+        }
+        let st_40 = get_crew_status(&root_id).unwrap();
+        assert_eq!(st_40.counts.total, 40, "Must support >= 35-40 members in one session");
+
+        // 2. Kill 3 members and verify `render_crew_prompt_context` excludes killed & compresses >16 waiting.
+        for k in 1..=3 {
+            manage_crew(
+                &root_id,
+                &json!({ "action": "kill", "name": format!("worker-{k}") }),
+                &cfg,
+                false,
+            )
+            .await
+            .unwrap();
+        }
+        let prompt_ctx = render_crew_prompt_context(&root_id);
+        assert!(!prompt_ctx.contains("@worker-1 ("));
+        assert!(!prompt_ctx.contains("@worker-1("));
+        assert!(prompt_ctx.contains("종료(숨김)=3"));
+        assert!(prompt_ctx.contains("외 21명"), "Prompt must compact large waiting lists: {prompt_ctx}");
+
+        // 3. Semaphore concurrency guard test: wake 16 workers concurrently -> peak in-flight <= 12, 0 lost turns.
+        let root_conc = unique_root("conc-16");
+        let in_flight = Arc::new(AtomicU64::new(0));
+        let peak_in_flight = Arc::new(AtomicU64::new(0));
+        let total_calls = Arc::new(AtomicU64::new(0));
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let inf_cl = in_flight.clone();
+        let peak_cl = peak_in_flight.clone();
+        let calls_cl = total_calls.clone();
+
+        let server_task = tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    break;
+                };
+                let inf_i = inf_cl.clone();
+                let peak_i = peak_cl.clone();
+                let calls_i = calls_cl.clone();
+                tokio::spawn(async move {
+                    let mut buf = Vec::new();
+                    let mut tmp = [0u8; 4096];
+                    let header_end;
+                    loop {
+                        let n = socket.read(&mut tmp).await.unwrap_or(0);
+                        if n == 0 {
+                            return;
+                        }
+                        buf.extend_from_slice(&tmp[..n]);
+                        if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                            header_end = pos + 4;
+                            break;
+                        }
+                    }
+                    let hdrs = String::from_utf8_lossy(&buf[..header_end]);
+                    let content_len = hdrs
+                        .lines()
+                        .find_map(|l| {
+                            let (k, v) = l.split_once(':')?;
+                            k.trim().eq_ignore_ascii_case("content-length").then(|| v.trim().parse::<usize>().ok())?
+                        })
+                        .unwrap_or(0);
+                    while buf.len() < header_end + content_len {
+                        let n = socket.read(&mut tmp).await.unwrap_or(0);
+                        if n == 0 {
+                            break;
+                        }
+                        buf.extend_from_slice(&tmp[..n]);
+                    }
+                    let cur = inf_i.fetch_add(1, Ordering::SeqCst) + 1;
+                    let mut prev_peak = peak_i.load(Ordering::SeqCst);
+                    while cur > prev_peak {
+                        match peak_i.compare_exchange(prev_peak, cur, Ordering::SeqCst, Ordering::SeqCst) {
+                            Ok(_) => break,
+                            Err(actual) => prev_peak = actual,
+                        }
+                    }
+                    tokio::time::sleep(Duration::from_millis(60)).await;
+                    calls_i.fetch_add(1, Ordering::SeqCst);
+                    inf_i.fetch_sub(1, Ordering::SeqCst);
+
+                    let ok_body = json!({
+                        "id": "chatcmpl-conc",
+                        "object": "chat.completion",
+                        "model": "gpt-6-astra",
+                        "choices": [{
+                            "index": 0,
+                            "message": { "role": "assistant", "content": "슬라이스 완료" },
+                            "finish_reason": "stop"
+                        }]
+                    })
+                    .to_string();
+                    let http_resp = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        ok_body.len(),
+                        ok_body
+                    );
+                    let _ = socket.write_all(http_resp.as_bytes()).await;
+                    let _ = socket.shutdown().await;
+                });
+            }
+        });
+
+        let mut conc_cfg = AppConfig::default();
+        conc_cfg.provider_name = "openai".to_string();
+        conc_cfg.api_style = "chat_completions".to_string();
+        conc_cfg.base_url = format!("http://127.0.0.1:{port}/v1");
+        conc_cfg.api_key = "sk-test-conc-16".to_string();
+        conc_cfg.model = "gpt-6-astra".to_string();
+        conc_cfg.effort = "none".to_string();
+
+        let tasks_16: Vec<String> = (1..=16).map(|i| format!("병렬 단위 {i}")).collect();
+        manage_crew(
+            &root_conc,
+            &json!({
+                "action": "add",
+                "name": "sprinter",
+                "role": "coder",
+                "brief": "동시성 제한 테스트",
+                "tasks": tasks_16,
+            }),
+            &conc_cfg,
+            true,
+        )
+        .await
+        .unwrap();
+
+        tokio::time::timeout(Duration::from_secs(8), async {
+            loop {
+                if total_calls.load(Ordering::SeqCst) == 16 {
+                    let st = get_crew_status(&root_conc).unwrap();
+                    if st.counts.working == 0 {
+                        break;
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("All 16 queued workers must finish cleanly under concurrency semaphore");
+
+        let peak = peak_in_flight.load(Ordering::SeqCst) as usize;
+        assert!(
+            peak <= MAX_CONCURRENT_WORKING_CREWS && peak >= 2,
+            "Expected peak concurrent active turns <= {} (actual {})",
+            MAX_CONCURRENT_WORKING_CREWS,
+            peak
+        );
+        assert_eq!(total_calls.load(Ordering::SeqCst), 16);
+
+        cleanup_crew_session_resources(&root_id);
+        cleanup_crew_session_resources(&root_conc);
+        server_task.abort();
     }
 }

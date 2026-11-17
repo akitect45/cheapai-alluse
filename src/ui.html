@@ -33726,6 +33726,8 @@ function drawCrewPixelAvatarCanvas(canvas, tick) {
 
 function paintAllCrewPixelAvatarsNow() {
   document.querySelectorAll('canvas.crew-pixel-canvas[data-crew-avatar]').forEach(c => {
+    if (c.offsetParent === null) return;
+    c.dataset.drawnTick = '';
     drawCrewPixelAvatarCanvas(c, crewPixelFrameTick);
   });
 }
@@ -33735,7 +33737,20 @@ if (!window.__crewPixelAnimTimer) {
     const canvases = document.querySelectorAll('canvas.crew-pixel-canvas[data-crew-avatar]');
     if (canvases.length === 0) return;
     crewPixelFrameTick = (crewPixelFrameTick + 1) % 64;
-    canvases.forEach(c => drawCrewPixelAvatarCanvas(c, crewPixelFrameTick));
+    canvases.forEach(c => {
+      if (c.offsetParent === null) return;
+      const st = (c.getAttribute('data-crew-state') || 'waiting').toLowerCase();
+      if (st === 'stopped' || st === 'killed') {
+        const key = `${st}:${c.getAttribute('data-crew-avatar')}`;
+        if (c.dataset.drawnStatic === key) return;
+        c.dataset.drawnStatic = key;
+        drawCrewPixelAvatarCanvas(c, crewPixelFrameTick);
+        return;
+      }
+      if (st !== 'working' && (crewPixelFrameTick % 4 !== 0) && c.dataset.drawnStatic) return;
+      c.dataset.drawnStatic = st;
+      drawCrewPixelAvatarCanvas(c, crewPixelFrameTick);
+    });
   }, 150);
 }
 
@@ -33765,10 +33780,11 @@ function renderCrewCollaborationGraph() {
   ];
 
   const W = Math.max(stage.clientWidth || 360, 340);
-  const maxCols = Math.max(1, Math.min(3, Math.floor((W - 24) / 180)));
+  const maxCols = Math.max(1, Math.min(4, Math.floor((W - 24) / 172)));
   const cols = Math.min(maxCols, Math.max(1, members.length || 1));
   const rowsCount = Math.ceil(members.length / cols);
-  const H = Math.max(320, 140 + rowsCount * 96);
+  const rowStep = members.length > 16 ? 78 : 92;
+  const H = Math.max(320, 158 + Math.max(0, rowsCount - 1) * rowStep + 72);
   stage.style.height = H + 'px';
 
   const posMap = new Map();
@@ -33778,7 +33794,7 @@ function renderCrewCollaborationGraph() {
     const c = idx % cols;
     const itemsInRow = (r === rowsCount - 1 && members.length % cols !== 0) ? (members.length % cols) : cols;
     const x = Math.round(((c + 0.5) / itemsInRow) * (W - 28) + 14);
-    const y = 158 + r * 92;
+    const y = 158 + r * rowStep;
     posMap.set(String(m.name), { x, y });
   });
 
@@ -33799,7 +33815,7 @@ function renderCrewCollaborationGraph() {
     const ms = Array.isArray(p.mentions) ? p.mentions : [];
     ms.forEach(rawT => {
       const t = String(rawT || '').trim();
-      if (t === 'all') {
+      if (t === 'all' && members.length <= 16) {
         members.forEach(m => {
           if (m && m.name && m.name !== from) {
             const k = `${from}->${m.name}`;
