@@ -8594,6 +8594,10 @@
           <svg class="solar-icon sm"><use href="#solar-globe"/></svg>
           <span>CheapAI OAuth 로그인</span>
         </button>
+        <button type="button" class="btn" id="cfg-auth-manage-usage-btn" style="height:28px; padding:0 10px; font-size:12.5px; display:none;" onclick="openCheapAiUsageManage()">
+          <svg class="solar-icon sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><path d="M9 7h8v8"/></svg>
+          <span id="cfg-auth-manage-usage-label">사용량 관리</span>
+        </button>
         <button class="btn" id="cfg-auth-logout-btn" style="height:28px; padding:0 10px; font-size:12.5px; display:none;" onclick="logoutCheapAiAccount()">로그아웃</button>
       </div>
     </div>
@@ -11658,7 +11662,16 @@ function updateProviderPillAuthBadge(cfg, auth) {
   const titleEl = document.getElementById('cfg-auth-status-title');
   const subEl = document.getElementById('cfg-auth-status-sub');
   const logoutBtn = document.getElementById('cfg-auth-logout-btn');
+  const manageUsageBtn = document.getElementById('cfg-auth-manage-usage-btn');
+  const manageUsageLbl = document.getElementById('cfg-auth-manage-usage-label');
   const loginBtn = document.getElementById('cfg-auth-login-btn');
+
+  const baseUrlEl = document.getElementById('cfg-base-url');
+  const explicitWebOrigin = (cfg && (cfg.web_origin || cfg.webOrigin)) || (auth && (auth.webOrigin || auth.web_origin)) || '';
+  if (explicitWebOrigin) {
+    window.cheapaiWebOrigin = String(explicitWebOrigin).trim();
+    if (baseUrlEl) baseUrlEl.dataset.webOrigin = window.cheapaiWebOrigin;
+  }
 
   const prov = (cfg && cfg.provider_name) || 'cheapai';
   const signedIn = Boolean(
@@ -11694,6 +11707,10 @@ function updateProviderPillAuthBadge(cfg, auth) {
       : 'OAuth 브라우저 인증 또는 API 키로 연결하면 /models 목록을 자동으로 불러옵니다.';
   }
   if (logoutBtn) logoutBtn.style.display = signedIn ? 'inline-flex' : 'none';
+  if (manageUsageBtn) manageUsageBtn.style.display = signedIn ? 'inline-flex' : 'none';
+  if (manageUsageLbl && typeof translateUiString === 'function') {
+    manageUsageLbl.textContent = translateUiString('사용량 관리', currentUiLang);
+  }
   if (loginBtn) loginBtn.style.display = signedIn ? 'none' : 'inline-flex';
 }
 
@@ -13117,7 +13134,8 @@ const UI_KO_TO_EN_EXACT = {
   '이 크루에게 직접 지시 또는 후속 질문 입력 (Enter 전송)...': 'Message this crew directly or send follow-up instructions (Enter)...',
   '크루 · 도구 · 보드(#번호, @멘션) 검색...': 'Search crew, tools, or board (#seq, @mention)...',
   '새 대화 시작': 'Fresh context',
-  '디렉터 맥락 분기': 'Fork director context'
+  '디렉터 맥락 분기': 'Fork director context',
+  '사용량 관리': 'Manage Usage'
 };
 
 const UI_EN_TO_KO_EXACT = (() => {
@@ -29531,7 +29549,34 @@ function recalcVideoStudioVCreditCost() {
 }
 
 const USAGE_RING_CIRC = 2 * Math.PI * 9.25;
-const USAGE_MANAGE_URL = 'https://cheapai.im/settings?tab=billing';
+const USAGE_MANAGE_URL = 'https://cheapai.im/api/dashboard';
+function getCheapAiUsageManageUrl() {
+  const rawOrigin = String(
+    window.cheapaiWebOrigin ||
+    document.getElementById('cfg-base-url')?.dataset?.webOrigin ||
+    ''
+  ).trim();
+  if (rawOrigin) {
+    return rawOrigin.replace(/\/+$/, '') + '/api/dashboard';
+  }
+  try {
+    const base = String(document.getElementById('cfg-base-url')?.value || '').trim();
+    if (base) {
+      const u = new URL(base);
+      const host = u.hostname.toLowerCase();
+      if (host === 'api.cheapai.im' || host === 'cheapai.im' || host.endsWith('.cheapai.im')) {
+        return 'https://cheapai.im/api/dashboard';
+      }
+      if (host === '127.0.0.1' || host === 'localhost') {
+        return u.origin + '/api/dashboard';
+      }
+    }
+  } catch (_) {}
+  return USAGE_MANAGE_URL;
+}
+function openCheapAiUsageManage() {
+  return openCheapAiExternalUrl(getCheapAiUsageManageUrl());
+}
 let usageSnapshot = { state: 'loading' };
 let usagePopOpen = false;
 
@@ -29671,7 +29716,10 @@ function renderUsagePop() {
   }
   body.innerHTML = rows.join('');
   if (actionLabel) {
-    actionLabel.textContent = action === 'login' ? '로그인' : (action === 'retry' ? '다시 시도' : '사용량 관리');
+    const rawActionLabel = action === 'login' ? '로그인' : (action === 'retry' ? '다시 시도' : '사용량 관리');
+    actionLabel.textContent = typeof translateUiString === 'function'
+      ? translateUiString(rawActionLabel, currentUiLang)
+      : rawActionLabel;
   }
   if (actionBtn) {
     actionBtn.setAttribute('data-usage-action', action);
@@ -29757,7 +29805,7 @@ function runUsagePopAction(action) {
     refreshVCreditBalanceUi();
   } else {
     closeUsagePop();
-    void openCheapAiExternalUrl(USAGE_MANAGE_URL);
+    void openCheapAiUsageManage();
   }
 }
 
