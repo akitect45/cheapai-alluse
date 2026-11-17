@@ -2078,12 +2078,14 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
                 .map(str::trim)
                 .filter(|s| !s.is_empty() && !matches!(s.to_ascii_lowercase().as_str(), "*" | "all"))
             {
+                crate::crew::mark_thread_cancel_forensics(tid, "ui_stop", "User clicked thread stop button");
                 let stopped_ids = crate::agent::interrupt_thread_subtree(tid);
                 emit_event(
                     "emergency_stop",
                     json!({ "source": "ui_button", "thread_id": tid, "stopped_ids": stopped_ids }),
                 );
             } else {
+                crate::crew::mark_all_active_cancel_forensics("ui_stop", "User clicked global stop button");
                 crate::agent::interrupt_all_active_threads();
                 emit_event("emergency_stop", json!({ "source": "ui_button" }));
             }
@@ -4840,9 +4842,27 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
                 "head_seq": status.head_seq,
                 "open_board_link": status.open_board_link,
                 "counts": status.counts,
+                "director": status.director,
                 "members": status.members,
                 "status": status,
             }))
+        }
+
+        ("GET", "/api/crew/member_log") => {
+            let tid = non_empty_thread_id(
+                q.get("thread_id")
+                    .or_else(|| q.get("root_thread_id"))
+                    .or_else(|| q.get("id"))
+                    .map(|s| s.as_str()),
+            );
+            let name = q
+                .get("name")
+                .or_else(|| q.get("member"))
+                .or_else(|| q.get("worker"))
+                .map(|s| s.as_str())
+                .unwrap_or("");
+            let limit = parse_query_limit(&q, "limit", None, 120, 500);
+            crate::crew::get_crew_member_log(tid, name, limit)
         }
 
         ("GET", "/api/crew/board") => {
@@ -6107,6 +6127,29 @@ mod http_security_tests {
         .expect("POST /api/crew/action model");
         assert_eq!(model_sw["ok"], true);
         assert_eq!(model_sw["member"]["model"], "gemini-4-carbon-high");
+
+        let models_res = route_api(
+            "POST",
+            "/api/crew/action",
+            "",
+            json!({ "thread_id": tid, "action": "models" }),
+        )
+        .await
+        .expect("POST /api/crew/action models");
+        assert_eq!(models_res["ok"], true);
+        assert!(models_res["groups"].as_array().is_some());
+
+        let mlog = route_api(
+            "GET",
+            "/api/crew/member_log",
+            &format!("thread_id={tid}&name=coder&limit=50"),
+            json!({}),
+        )
+        .await
+        .expect("GET /api/crew/member_log");
+        assert_eq!(mlog["ok"], true);
+        assert_eq!(mlog["member"]["name"], "coder");
+        assert!(mlog["turns"].is_array());
 
         let msgs = route_api("GET", "/api/messages", &format!("thread_id={tid}"), json!({}))
             .await

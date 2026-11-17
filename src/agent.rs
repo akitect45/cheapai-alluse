@@ -286,11 +286,26 @@ fn append_thread_text_delta(thread_id: &str, delta: &str) {
 }
 
 fn set_thread_active_tool(thread_id: &str, tool_name: &str, tool_args: &str) {
-    if let Some(st) = ACTIVE_THREAD_STREAMS.lock().unwrap().get_mut(thread_id) {
-        st.active_tool_name = tool_name.to_string();
-        st.active_tool = tool_name.to_string();
-        st.active_tool_args = tool_args.to_string();
-        st.updated_at = now_unix_secs();
+    let step_u32 = {
+        let mut map = ACTIVE_THREAD_STREAMS.lock().unwrap();
+        if let Some(st) = map.get_mut(thread_id) {
+            st.active_tool_name = tool_name.to_string();
+            st.active_tool = tool_name.to_string();
+            st.active_tool_args = tool_args.to_string();
+            st.updated_at = now_unix_secs();
+            Some(st.step as u32)
+        } else {
+            None
+        }
+    };
+    if let Some(step) = step_u32 {
+        crate::crew::update_thread_crew_telemetry(
+            thread_id,
+            Some("working"),
+            Some(step),
+            tool_name,
+            tool_args,
+        );
     }
 }
 
@@ -360,9 +375,6 @@ pub fn interrupt_thread_subtree(thread_id: &str) -> Vec<String> {
             }
         }
         crate::cua::set_agent_turn_active_count(map.len());
-        if map.is_empty() && !removed.is_empty() {
-            crate::cua::trigger_interrupt();
-        }
         removed
     };
     for tid in &ids {
@@ -750,6 +762,42 @@ pub fn spawn_background_agent_turn(
             emit_event(
                 "subagent_update",
                 json!({ "thread_id": clean_id, "status": "error", "error": e.to_string() }),
+            );
+        }
+    });
+}
+
+/// Spawns a non-blocking Director synthesis turn on `root_thread_id` after Crew callbacks arrive.
+pub fn spawn_crew_director_wake_turn(root_thread_id: String, cfg: AppConfig) {
+    let clean_id = root_thread_id.trim().to_string();
+    if clean_id.is_empty() || is_interrupted() || is_thread_interrupted(&clean_id) {
+        return;
+    }
+    if !consume_tree_wake_budget(&clean_id) {
+        return;
+    }
+    {
+        let active_now = get_active_thread_stream(&clean_id).is_some();
+        let mut pending = PENDING_BACKGROUND_SPAWNS.lock().unwrap();
+        if active_now || !pending.insert(clean_id.clone()) {
+            return;
+        }
+    }
+    clear_thread_interrupt(&clean_id);
+    let _ = crate::db::update_thread_agent_status(&clean_id, "running");
+    tokio::spawn(async move {
+        let _pending_guard = PendingSpawnGuard(clean_id.clone());
+        let fut = Box::pin(run_agent_turn(
+            clean_id.clone(),
+            "[CREW_DIRECTOR_AUTO_WAKE]".to_string(),
+            "crew".to_string(),
+            cfg,
+        ));
+        if let Err(e) = fut.await {
+            let _ = crate::db::update_thread_agent_status(&clean_id, "error");
+            emit_event(
+                "error",
+                json!({ "thread_id": clean_id, "error": e.to_string() }),
             );
         }
     });
@@ -4780,6 +4828,25 @@ pub(crate) fn execute_fs_search(args: &Value, cfg: &AppConfig) -> Result<Value> 
     }))
 }
 
+static FILE_WRITE_PATH_LOCKS: LazyLock<
+    Mutex<std::collections::HashMap<String, std::sync::Arc<Mutex<()>>>>,
+> = LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+
+fn lock_for_local_write_path(path: &std::path::Path) -> std::sync::Arc<Mutex<()>> {
+    let key = path
+        .canonicalize()
+        .unwrap_or_else(|_| path.to_path_buf())
+        .to_string_lossy()
+        .to_ascii_lowercase();
+    let mut map = FILE_WRITE_PATH_LOCKS.lock().unwrap_or_else(|p| p.into_inner());
+    if map.len() >= 1024 {
+        map.retain(|_, arc| std::sync::Arc::strong_count(arc) > 1);
+    }
+    map.entry(key)
+        .or_insert_with(|| std::sync::Arc::new(Mutex::new(())))
+        .clone()
+}
+
 pub(crate) fn execute_fs_write_file(args: &Value, cfg: &AppConfig) -> Result<Value> {
     let raw_path = args
         .get("path")
@@ -4805,6 +4872,8 @@ pub(crate) fn execute_fs_write_file(args: &Value, cfg: &AppConfig) -> Result<Val
         .unwrap_or("");
     let append = json_bool(args.get("append")).unwrap_or(false);
     let path = resolve_local_fs_path(raw_path, &cfg.default_workspace);
+    let path_lock = lock_for_local_write_path(&path);
+    let _write_guard = path_lock.lock().unwrap_or_else(|p| p.into_inner());
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {
@@ -4870,6 +4939,8 @@ pub(crate) fn execute_fs_edit_file(args: &Value, cfg: &AppConfig) -> Result<Valu
     .unwrap_or(false);
 
     let path = resolve_local_fs_path(raw_path, &cfg.default_workspace);
+    let path_lock = lock_for_local_write_path(&path);
+    let _write_guard = path_lock.lock().unwrap_or_else(|p| p.into_inner());
     let (existing, detected_enc) = crate::encoding::read_text_file_lossless(&path)?;
 
     let (updated, count) = if existing.contains(target) {
@@ -11750,13 +11821,20 @@ pub(crate) fn reconstruct_llm_history_from_db_messages(
             } else {
                 Some(m.image_b64)
             };
+            let is_crew_cb = m.tool_name == "crew_callback";
+            let mapped_role = if is_crew_cb || m.role == "system" {
+                "user".to_string()
+            } else {
+                m.role
+            };
+            let mapped_content = if is_crew_cb && !content.starts_with("[CREW") {
+                format!("[CREW BOARD CALLBACK]\n{content}")
+            } else {
+                content
+            };
             history.push(LlmTurnMessage {
-                role: if m.role == "system" {
-                    "user".to_string()
-                } else {
-                    m.role
-                },
-                content,
+                role: mapped_role,
+                content: mapped_content,
                 image_b64,
                 tool_call_id: None,
                 tool_name: None,
@@ -12207,6 +12285,7 @@ pub async fn run_agent_turn_with_attachments(
     if !is_thread_interrupted(&thread_id) {
         if thread_meta.as_ref().map(|m| m.depth == 0).unwrap_or(true)
             && user_prompt.trim() != "[SUBAGENT_AUTO_WAKE]"
+            && user_prompt.trim() != "[CREW_DIRECTOR_AUTO_WAKE]"
         {
             clear_interrupt();
             reset_tree_wake_budget(&thread_id);
@@ -12254,6 +12333,8 @@ pub async fn run_agent_turn_with_attachments(
             );
         }
         emit_event("threads_updated", json!({ "thread_id": thread_id }));
+    } else if user_prompt.trim() == "[CREW_DIRECTOR_AUTO_WAKE]" {
+        emit_event("threads_updated", json!({ "thread_id": thread_id }));
     } else {
         let (user_msg, _resolved_att) =
             persist_user_chat_message_with_attachments(&thread_id, &user_prompt, &attachments)?;
@@ -12273,6 +12354,18 @@ pub async fn run_agent_turn_with_attachments(
 
     let db_msgs = crate::db::list_active_context_messages(&thread_id).unwrap_or_default();
     let mut history: Vec<LlmTurnMessage> = reconstruct_llm_history_from_db_messages(db_msgs);
+    if user_prompt.trim() == "[CREW_DIRECTOR_AUTO_WAKE]"
+        && history.last().is_none_or(|m| m.role != "user")
+    {
+        history.push(LlmTurnMessage {
+            role: "user".to_string(),
+            content: "[CREW_DIRECTOR_AUTO_WAKE] 크루 보고가 도착했습니다. 결과를 종합해 사용자에게 보고하세요.".to_string(),
+            image_b64: None,
+            tool_call_id: None,
+            tool_name: None,
+            tool_calls: Vec::new(),
+        });
+    }
 
     let initial_shared_cfg = crate::server::get_config();
     let mut turn_endpoint_override = if cfg.base_url != initial_shared_cfg.base_url
@@ -12295,6 +12388,7 @@ pub async fn run_agent_turn_with_attachments(
     let mut step = 0usize;
     let mut final_text = String::new();
     let mut was_interrupted = false;
+    let mut crew_parked_for_wait = false;
     let mut sent_envelope_to_parent_in_turn = false;
     let mut used_crew_tools = false;
     let mut dispatched_crew_names: Vec<String> = Vec::new();
@@ -12421,13 +12515,34 @@ pub async fn run_agent_turn_with_attachments(
         }
         let req_history = compact_browser_tool_history(&history);
 
-        const MAX_LLM_ATTEMPTS: usize = 3;
+        if is_crew_worker || is_crew_director {
+            crate::crew::update_thread_crew_telemetry(
+                &thread_id,
+                Some("working"),
+                Some(step_num as u32),
+                "__thinking__",
+                "",
+            );
+        }
+
+        const MAX_LLM_ATTEMPTS: usize = 4;
         let mut llm_attempt = 0usize;
         let llm_call_outcome = loop {
             llm_attempt += 1;
             if llm_attempt > 1 {
                 reset_thread_stream_step(&thread_id, step_num);
-                let backoff_ms: u64 = if llm_attempt == 2 { 1200 } else { 2400 };
+                #[cfg(not(test))]
+                let backoff_ms: u64 = match llm_attempt {
+                    2 => 800,
+                    3 => 1800,
+                    _ => 3600,
+                };
+                #[cfg(test)]
+                let backoff_ms: u64 = match llm_attempt {
+                    2 => 40,
+                    3 => 80,
+                    _ => 120,
+                };
                 let mut waited = 0u64;
                 while waited < backoff_ms {
                     if is_interrupted() || is_thread_interrupted(&thread_id) {
@@ -12773,6 +12888,11 @@ pub async fn run_agent_turn_with_attachments(
                             } else {
                                 crate::artex::record_tool_pass(&tc.name);
                                 let norm_ok_name = normalize_tool_name(&tc.name);
+                                if norm_ok_name == "crew_wait"
+                                    && v.get("parked").and_then(|b| b.as_bool()) == Some(true)
+                                {
+                                    crew_parked_for_wait = true;
+                                }
                                 if matches!(norm_ok_name.as_str(), "crew_manage" | "crew_post" | "crew_read") {
                                     used_crew_tools = true;
                                     if let Some(arr) = v.get("added").and_then(|a| a.as_array()) {
@@ -12880,10 +13000,17 @@ pub async fn run_agent_turn_with_attachments(
                 tool_calls: Vec::new(),
             });
 
+            if crew_parked_for_wait {
+                break;
+            }
             if was_interrupted || is_interrupted() || is_thread_interrupted(&thread_id) {
                 was_interrupted = true;
                 break;
             }
+        }
+
+        if crew_parked_for_wait && !was_interrupted {
+            break;
         }
 
         if was_interrupted {
@@ -13036,6 +13163,8 @@ pub async fn run_agent_turn_with_attachments(
 
     if is_crew_worker && !mode.eq_ignore_ascii_case("crew_worker") {
         crate::crew::on_crew_turn_finished(&thread_id, &final_text, was_interrupted, "");
+    } else if !is_crew_worker && crate::crew::is_crew_mode_enabled(&thread_id) {
+        crate::crew::clear_thread_crew_telemetry(&thread_id);
     }
 
     emit_event(

@@ -51,6 +51,28 @@ pub struct CrewMemberRecord {
     pub last_active_at: u64,
     pub created_at: u64,
     pub updated_at: u64,
+    #[serde(default)]
+    pub current_tool: String,
+    #[serde(default)]
+    pub tool_summary: String,
+    #[serde(default)]
+    pub current_step: u32,
+    #[serde(default)]
+    pub working_started_at: u64,
+    #[serde(default)]
+    pub last_worked_ms: u64,
+    #[serde(default)]
+    pub last_post_preview: String,
+    #[serde(default)]
+    pub last_error: String,
+    #[serde(default)]
+    pub cancel_source: String,
+    #[serde(default)]
+    pub cancel_reason: String,
+    #[serde(default)]
+    pub waiting_since: u64,
+    #[serde(default)]
+    pub wait_mentions_only: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,6 +98,18 @@ pub struct CrewStateCounts {
     pub killed: usize,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CrewDirectorStatus {
+    pub name: String,
+    pub display_name: String,
+    pub model: String,
+    pub state: String,
+    pub current_tool: String,
+    pub tool_summary: String,
+    pub head_seq: u64,
+    pub working_started_at: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CrewSessionStatus {
     pub root_thread_id: String,
@@ -85,6 +119,7 @@ pub struct CrewSessionStatus {
     pub head_seq: u64,
     pub open_board_link: String,
     pub counts: CrewStateCounts,
+    pub director: CrewDirectorStatus,
     pub members: Vec<CrewMemberRecord>,
 }
 
@@ -107,6 +142,19 @@ struct CrewWaiterInfo {
 struct ActiveTurnTracker {
     start_seq: u64,
     posted_during_turn: bool,
+    parked_for_wait: bool,
+    started_ms: u64,
+}
+
+#[derive(Debug, Clone, Default)]
+struct LiveCrewTelemetry {
+    root_thread_id: String,
+    name: String,
+    state: String,
+    current_tool: String,
+    tool_summary: String,
+    current_step: u32,
+    working_started_at: u64,
 }
 
 struct CrewRoom {
@@ -117,6 +165,7 @@ struct CrewRoom {
     active_waiters: Mutex<HashMap<String, CrewWaiterInfo>>,
     active_turns: Mutex<HashMap<String, ActiveTurnTracker>>,
     wake_counts: Mutex<HashMap<String, (u64, usize)>>,
+    director_wake_counts: Mutex<(u64, usize)>,
     last_watchdog_seq: AtomicU64,
     override_endpoint: Mutex<Option<(String, String, String, String)>>,
 }
@@ -132,6 +181,7 @@ impl CrewRoom {
             active_waiters: Mutex::new(HashMap::new()),
             active_turns: Mutex::new(HashMap::new()),
             wake_counts: Mutex::new(HashMap::new()),
+            director_wake_counts: Mutex::new((0, 0)),
             last_watchdog_seq: AtomicU64::new(0),
             override_endpoint: Mutex::new(None),
         }
@@ -177,16 +227,31 @@ impl CrewRoom {
 static CREW_ROOMS: LazyLock<Mutex<HashMap<String, Arc<CrewRoom>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// Real-time telemetry keyed by worker or director `thread_id`.
+static ACTIVE_CREW_TELEMETRY: LazyLock<Mutex<HashMap<String, LiveCrewTelemetry>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
 /// Deferred `@director` callbacks when the root thread is actively mid-turn, flushed cleanly in
 /// `finish_thread_stream` so SQLite message ordering is never interleaved mid-tool-loop.
 static PENDING_DIRECTOR_CALLBACKS: LazyLock<Mutex<HashMap<String, Vec<Value>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Root threads queued for a reactive `@director` synthesis turn once mid-turn completes.
+static PENDING_DIRECTOR_WAKE_ROOTS: LazyLock<Mutex<HashSet<String>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
 
 #[cfg(not(test))]
 static WATCHDOG_STARTED: AtomicBool = AtomicBool::new(false);
 
 fn now_unix_secs() -> u64 {
     crate::db::now_unix_secs()
+}
+
+fn now_unix_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 pub fn state_label_ko(state: &str) -> &'static str {
@@ -436,10 +501,37 @@ pub fn init_crew_tables(conn: &Connection) -> Result<()> {
             ON crew_board_posts(root_thread_id, seq ASC);
         "#,
     )?;
+    for alter_sql in [
+        "ALTER TABLE crew_members ADD COLUMN current_tool TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE crew_members ADD COLUMN tool_summary TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE crew_members ADD COLUMN current_step INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE crew_members ADD COLUMN working_started_at INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE crew_members ADD COLUMN last_worked_ms INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE crew_members ADD COLUMN last_error TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE crew_members ADD COLUMN cancel_source TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE crew_members ADD COLUMN cancel_reason TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE crew_members ADD COLUMN waiting_since INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE crew_members ADD COLUMN wait_mentions_only INTEGER NOT NULL DEFAULT 1",
+    ] {
+        let _ = conn.execute(alter_sql, []);
+    }
+    let now = now_unix_secs() as i64;
     // Any crew member left as `working` on a cold DB boot is no longer running in Tokio.
     let _ = conn.execute(
-        "UPDATE crew_members SET state = 'stopped' WHERE state = 'working'",
-        [],
+        "UPDATE crew_members
+         SET state = 'stopped',
+             current_tool = '',
+             tool_summary = '',
+             cancel_source = CASE WHEN cancel_source = '' THEN 'cold_boot' ELSE cancel_source END,
+             cancel_reason = CASE WHEN cancel_reason = '' THEN 'app_restart_orphan_recovery' ELSE cancel_reason END,
+             updated_at = ?1
+         WHERE state = 'working'",
+        params![now],
+    );
+    let _ = conn.execute(
+        "UPDATE threads SET agent_status = 'interrupted', updated_at = ?1
+         WHERE agent_status IN ('running', 'waiting')",
+        params![now],
     );
     Ok(())
 }
@@ -512,6 +604,60 @@ fn ensure_room(root_thread_id: &str) -> Arc<CrewRoom> {
         .clone()
 }
 
+const CREW_MEMBER_SELECT_COLS: &str = "id, root_thread_id, name, display_name, role, thread_id, model, effort, state,
+    workspace_mode, workspace_path, browser_session_id, browser_tab_id, brief, added_by,
+    last_read_seq, last_post_seq, last_active_at, created_at, updated_at,
+    current_tool, tool_summary, current_step, working_started_at, last_worked_ms,
+    last_error, cancel_source, cancel_reason, waiting_since, wait_mentions_only";
+
+fn overlay_live_member_fields(conn: &Connection, m: &mut CrewMemberRecord) {
+    if let Ok(preview) = conn.query_row(
+        "SELECT content FROM crew_board_posts
+         WHERE root_thread_id = ?1 AND author_name = ?2
+         ORDER BY seq DESC LIMIT 1",
+        params![m.root_thread_id, m.name],
+        |r| r.get::<_, String>(0),
+    ) {
+        let one_line = preview
+            .lines()
+            .find(|l| !l.trim().is_empty())
+            .unwrap_or("")
+            .trim()
+            .chars()
+            .take(140)
+            .collect::<String>();
+        m.last_post_preview = one_line;
+    }
+    if let Some(tel) = ACTIVE_CREW_TELEMETRY
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get(&m.thread_id)
+        .cloned()
+    {
+        if !tel.current_tool.is_empty() {
+            m.current_tool = tel.current_tool;
+        }
+        if !tel.tool_summary.is_empty() {
+            m.tool_summary = tel.tool_summary;
+        }
+        if tel.current_step > 0 {
+            m.current_step = tel.current_step;
+        }
+        if tel.working_started_at > 0 {
+            m.working_started_at = tel.working_started_at;
+        }
+    }
+    if m.state == "working" && m.tool_summary.is_empty() {
+        m.tool_summary = "Thinking...".to_string();
+    } else if m.state == "waiting" && m.tool_summary.is_empty() {
+        m.tool_summary = if m.last_post_seq > 0 {
+            format!("Standing by (#{})", m.last_post_seq)
+        } else {
+            "Standing by".to_string()
+        };
+    }
+}
+
 fn row_to_crew_member(r: &rusqlite::Row<'_>) -> rusqlite::Result<CrewMemberRecord> {
     let raw_state: String = r.get(8)?;
     let state = normalize_crew_state(&raw_state).to_string();
@@ -538,6 +684,17 @@ fn row_to_crew_member(r: &rusqlite::Row<'_>) -> rusqlite::Result<CrewMemberRecor
         last_active_at: r.get::<_, i64>(17)?.max(0) as u64,
         created_at: r.get::<_, i64>(18)?.max(0) as u64,
         updated_at: r.get::<_, i64>(19)?.max(0) as u64,
+        current_tool: r.get::<_, String>(20).unwrap_or_default(),
+        tool_summary: r.get::<_, String>(21).unwrap_or_default(),
+        current_step: r.get::<_, i64>(22).unwrap_or(0).max(0) as u32,
+        working_started_at: r.get::<_, i64>(23).unwrap_or(0).max(0) as u64,
+        last_worked_ms: r.get::<_, i64>(24).unwrap_or(0).max(0) as u64,
+        last_post_preview: String::new(),
+        last_error: r.get::<_, String>(25).unwrap_or_default(),
+        cancel_source: r.get::<_, String>(26).unwrap_or_default(),
+        cancel_reason: r.get::<_, String>(27).unwrap_or_default(),
+        waiting_since: r.get::<_, i64>(28).unwrap_or(0).max(0) as u64,
+        wait_mentions_only: r.get::<_, i64>(29).unwrap_or(1) != 0,
     })
 }
 
@@ -569,15 +726,12 @@ fn ensure_session_row_conn(conn: &Connection, root_thread_id: &str) -> Result<()
 }
 
 fn get_member_by_thread_conn(conn: &Connection, thread_id: &str) -> Option<CrewMemberRecord> {
-    conn.query_row(
-        "SELECT id, root_thread_id, name, display_name, role, thread_id, model, effort, state,
-                workspace_mode, workspace_path, browser_session_id, browser_tab_id, brief, added_by,
-                last_read_seq, last_post_seq, last_active_at, created_at, updated_at
-         FROM crew_members WHERE thread_id = ?1 LIMIT 1",
-        params![thread_id.trim()],
-        row_to_crew_member,
-    )
-    .ok()
+    let sql = format!("SELECT {CREW_MEMBER_SELECT_COLS} FROM crew_members WHERE thread_id = ?1 LIMIT 1");
+    let mut m = conn
+        .query_row(&sql, params![thread_id.trim()], row_to_crew_member)
+        .ok()?;
+    overlay_live_member_fields(conn, &mut m);
+    Some(m)
 }
 
 fn get_member_by_name_conn(
@@ -589,48 +743,42 @@ fn get_member_by_name_conn(
     if norm.is_empty() {
         return None;
     }
-    if let Ok(m) = conn.query_row(
-        "SELECT id, root_thread_id, name, display_name, role, thread_id, model, effort, state,
-                workspace_mode, workspace_path, browser_session_id, browser_tab_id, brief, added_by,
-                last_read_seq, last_post_seq, last_active_at, created_at, updated_at
-         FROM crew_members WHERE root_thread_id = ?1 AND name = ?2 LIMIT 1",
-        params![root_thread_id, norm],
-        row_to_crew_member,
-    ) {
+    let sql_exact = format!(
+        "SELECT {CREW_MEMBER_SELECT_COLS} FROM crew_members WHERE root_thread_id = ?1 AND name = ?2 LIMIT 1"
+    );
+    if let Ok(mut m) = conn.query_row(&sql_exact, params![root_thread_id, norm], row_to_crew_member) {
+        overlay_live_member_fields(conn, &mut m);
         return Some(m);
     }
     if matches!(norm.as_str(), "검수크루" | "검수-크루" | "검수" | "verifier") {
-        return conn
-            .query_row(
-                "SELECT id, root_thread_id, name, display_name, role, thread_id, model, effort, state,
-                        workspace_mode, workspace_path, browser_session_id, browser_tab_id, brief, added_by,
-                        last_read_seq, last_post_seq, last_active_at, created_at, updated_at
-                 FROM crew_members
-                 WHERE root_thread_id = ?1 AND (role = 'verifier' OR name IN ('verifier', '검수크루'))
-                   AND state != 'killed'
-                 ORDER BY created_at DESC LIMIT 1",
-                params![root_thread_id],
-                row_to_crew_member,
-            )
-            .ok();
+        let sql_ver = format!(
+            "SELECT {CREW_MEMBER_SELECT_COLS} FROM crew_members
+             WHERE root_thread_id = ?1 AND (role = 'verifier' OR name IN ('verifier', '검수크루'))
+               AND state != 'killed'
+             ORDER BY created_at DESC LIMIT 1"
+        );
+        if let Ok(mut m) = conn.query_row(&sql_ver, params![root_thread_id], row_to_crew_member) {
+            overlay_live_member_fields(conn, &mut m);
+            return Some(m);
+        }
     }
     None
 }
 
 fn list_members_conn(conn: &Connection, root_thread_id: &str) -> Result<Vec<CrewMemberRecord>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, root_thread_id, name, display_name, role, thread_id, model, effort, state,
-                workspace_mode, workspace_path, browser_session_id, browser_tab_id, brief, added_by,
-                last_read_seq, last_post_seq, last_active_at, created_at, updated_at
-         FROM crew_members
+    let sql = format!(
+        "SELECT {CREW_MEMBER_SELECT_COLS} FROM crew_members
          WHERE root_thread_id = ?1
          ORDER BY CASE state WHEN 'working' THEN 0 WHEN 'waiting' THEN 1 WHEN 'stopped' THEN 2 ELSE 3 END,
-                  created_at ASC",
-    )?;
+                  created_at ASC"
+    );
+    let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params![root_thread_id], row_to_crew_member)?;
     let mut out = Vec::new();
     for r in rows {
-        out.push(r?);
+        let mut m = r?;
+        overlay_live_member_fields(conn, &mut m);
+        out.push(m);
     }
     Ok(out)
 }
@@ -644,14 +792,14 @@ fn get_session_status_conn(conn: &Connection, root_thread_id: &str) -> Result<Cr
         )
         .optional()?
         .unwrap_or_else(|| (String::new(), 0, 1));
-    let thread_mode: String = conn
+    let (thread_mode, thread_model, thread_agent_status): (String, String, String) = conn
         .query_row(
-            "SELECT mode FROM threads WHERE id = ?1 LIMIT 1",
+            "SELECT mode, model, agent_status FROM threads WHERE id = ?1 LIMIT 1",
             params![root_thread_id],
-            |r| r.get(0),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .optional()?
-        .unwrap_or_else(|| "auto".to_string());
+        .unwrap_or_else(|| ("auto".to_string(), String::new(), "idle".to_string()));
     let db_head: u64 = conn
         .query_row(
             "SELECT COALESCE(MAX(seq), 0) FROM crew_board_posts WHERE root_thread_id = ?1",
@@ -676,6 +824,41 @@ fn get_session_status_conn(conn: &Connection, root_thread_id: &str) -> Result<Cr
         }
     }
     let enabled = enabled_int != 0 || thread_mode.eq_ignore_ascii_case("crew");
+    let dir_tel = ACTIVE_CREW_TELEMETRY
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get(root_thread_id)
+        .cloned();
+    let director_working = crate::agent::get_active_thread_stream(root_thread_id).is_some()
+        || thread_agent_status == "running"
+        || dir_tel.as_ref().is_some_and(|t| t.state == "working");
+    let director = CrewDirectorStatus {
+        name: "director".to_string(),
+        display_name: "디렉터".to_string(),
+        model: thread_model,
+        state: if director_working {
+            "working".to_string()
+        } else {
+            "waiting".to_string()
+        },
+        current_tool: dir_tel
+            .as_ref()
+            .map(|t| t.current_tool.clone())
+            .unwrap_or_default(),
+        tool_summary: dir_tel
+            .as_ref()
+            .filter(|t| !t.tool_summary.is_empty())
+            .map(|t| t.tool_summary.clone())
+            .unwrap_or_else(|| {
+                if director_working {
+                    "Coordinating crew...".to_string()
+                } else {
+                    "Standing by".to_string()
+                }
+            }),
+        head_seq,
+        working_started_at: dir_tel.map(|t| t.working_started_at).unwrap_or(0),
+    };
     Ok(CrewSessionStatus {
         root_thread_id: root_thread_id.to_string(),
         title,
@@ -684,6 +867,7 @@ fn get_session_status_conn(conn: &Connection, root_thread_id: &str) -> Result<Cr
         head_seq,
         open_board_link: "allcrew://board".to_string(),
         counts,
+        director,
         members,
     })
 }
@@ -845,6 +1029,268 @@ pub fn touch_crew_activity(thread_id: &str) {
     );
 }
 
+fn short_path_label(raw: &str) -> String {
+    let clean = raw.trim().replace('\\', "/");
+    let clean = clean.trim_end_matches('/');
+    clean
+        .rsplit('/')
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(clean)
+        .chars()
+        .take(40)
+        .collect()
+}
+
+pub fn format_crew_tool_summary(tool_name: &str, tool_args: &str) -> String {
+    let clean_name = tool_name.trim();
+    if clean_name.is_empty() {
+        return String::new();
+    }
+    if clean_name == "__thinking__" {
+        return "Thinking...".to_string();
+    }
+    let parsed: Value = serde_json::from_str(tool_args).unwrap_or(Value::Null);
+    let path_str = parsed
+        .get("path")
+        .or_else(|| parsed.get("file"))
+        .or_else(|| parsed.get("file_path"))
+        .or_else(|| parsed.get("filePath"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    match clean_name {
+        "crew_read" => {
+            if parsed.get("status").and_then(|v| v.as_bool()) == Some(true) {
+                "Checking crew status".to_string()
+            } else {
+                "Reading the board".to_string()
+            }
+        }
+        "crew_post" => "Posting to the board".to_string(),
+        "crew_wait" => "Waiting for updates".to_string(),
+        "crew_manage" => {
+            let act = parsed.get("action").and_then(|v| v.as_str()).unwrap_or("status");
+            format!("crew_manage ({act})")
+        }
+        "fs_read_file" => {
+            let lbl = short_path_label(path_str);
+            if lbl.is_empty() { "Read file".to_string() } else { format!("Read {lbl}") }
+        }
+        "fs_edit_file" => {
+            let lbl = short_path_label(path_str);
+            if lbl.is_empty() { "Edit file".to_string() } else { format!("Edit {lbl}") }
+        }
+        "fs_write_file" => {
+            let lbl = short_path_label(path_str);
+            if lbl.is_empty() { "Write file".to_string() } else { format!("Write {lbl}") }
+        }
+        "fs_list_dir" => {
+            let lbl = short_path_label(path_str);
+            if lbl.is_empty() { "List directory".to_string() } else { format!("List {lbl}") }
+        }
+        "fs_search" => {
+            let q = parsed
+                .get("query")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim();
+            if !q.is_empty() {
+                format!("Search {}", q.chars().take(28).collect::<String>())
+            } else {
+                let lbl = short_path_label(path_str);
+                if lbl.is_empty() { "Search files".to_string() } else { format!("Search {lbl}") }
+            }
+        }
+        "shell_exec" => {
+            let cmd = parsed
+                .get("command")
+                .or_else(|| parsed.get("cmd"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim();
+            let first: String = cmd.lines().next().unwrap_or("").trim().chars().take(36).collect();
+            if first.is_empty() { "Run command".to_string() } else { format!("Run {first}") }
+        }
+        other if other.starts_with("browser_") => format!("Browser {}", other.trim_start_matches("browser_")),
+        other => other.to_string(),
+    }
+}
+
+pub fn update_thread_crew_telemetry(
+    thread_id: &str,
+    state_opt: Option<&str>,
+    step_opt: Option<u32>,
+    tool_name: &str,
+    tool_args: &str,
+) {
+    let clean_tid = thread_id.trim();
+    if clean_tid.is_empty() {
+        return;
+    }
+    let summary = format_crew_tool_summary(tool_name, tool_args);
+    let now = now_unix_secs();
+
+    let (root_id, name, state, working_started_at, current_step) = {
+        let conn = crate::db::lock_db();
+        if let Some(m) = get_member_by_thread_conn(&conn, clean_tid) {
+            let eff_state = state_opt
+                .map(normalize_crew_state)
+                .unwrap_or_else(|| m.state.as_str())
+                .to_string();
+            let started = if m.working_started_at > 0 {
+                m.working_started_at
+            } else if eff_state == "working" {
+                now
+            } else {
+                0
+            };
+            let step = step_opt.unwrap_or(m.current_step);
+            let _ = conn.execute(
+                "UPDATE crew_members
+                 SET current_tool = ?1,
+                     tool_summary = ?2,
+                     current_step = ?3,
+                     working_started_at = CASE WHEN working_started_at = 0 AND ?4 > 0 THEN ?4 ELSE working_started_at END,
+                     last_active_at = ?5,
+                     updated_at = ?5
+                 WHERE id = ?6 AND state != 'killed'",
+                params![tool_name, summary, step as i64, started as i64, now as i64, m.id],
+            );
+            (m.root_thread_id, m.name, eff_state, started, step)
+        } else {
+            let root = resolve_root_id_conn(&conn, clean_tid);
+            let enabled: bool = conn
+                .query_row(
+                    "SELECT enabled FROM crew_sessions WHERE root_thread_id = ?1 LIMIT 1",
+                    params![root],
+                    |r| r.get::<_, i64>(0),
+                )
+                .map(|v| v != 0)
+                .unwrap_or(false)
+                || conn
+                    .query_row(
+                        "SELECT mode FROM threads WHERE id = ?1 LIMIT 1",
+                        params![clean_tid],
+                        |r| r.get::<_, String>(0),
+                    )
+                    .map(|m| m.eq_ignore_ascii_case("crew"))
+                    .unwrap_or(false);
+            if !enabled || root != clean_tid {
+                return;
+            }
+            let eff_state = state_opt
+                .map(|s| if s == "working" || s == "running" { "working" } else { "waiting" })
+                .unwrap_or("working")
+                .to_string();
+            let started = {
+                let map = ACTIVE_CREW_TELEMETRY
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner());
+                map.get(clean_tid)
+                    .map(|t| t.working_started_at)
+                    .filter(|&w| w > 0)
+                    .unwrap_or_else(|| if eff_state == "working" { now } else { 0 })
+            };
+            let step = step_opt.unwrap_or(1);
+            (root, "director".to_string(), eff_state, started, step)
+        }
+    };
+
+    {
+        let mut map = ACTIVE_CREW_TELEMETRY
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        if state == "waiting" || state == "stopped" || state == "killed" {
+            map.remove(clean_tid);
+        } else {
+            map.insert(
+                clean_tid.to_string(),
+                LiveCrewTelemetry {
+                    root_thread_id: root_id.clone(),
+                    name: name.clone(),
+                    state: state.clone(),
+                    current_tool: tool_name.to_string(),
+                    tool_summary: summary.clone(),
+                    current_step,
+                    working_started_at,
+                },
+            );
+        }
+    }
+
+    crate::agent::emit_event(
+        "crew_member_telemetry",
+        json!({
+            "type": "crew_member_telemetry",
+            "root_thread_id": root_id,
+            "name": name,
+            "thread_id": clean_tid,
+            "state": state,
+            "current_step": current_step,
+            "current_tool": tool_name,
+            "tool_summary": summary,
+            "working_started_at": working_started_at,
+        }),
+    );
+}
+
+pub fn clear_thread_crew_telemetry(thread_id: &str) {
+    let clean = thread_id.trim();
+    if clean.is_empty() {
+        return;
+    }
+    let prev = ACTIVE_CREW_TELEMETRY
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .remove(clean);
+    if let Some(tel) = prev {
+        crate::agent::emit_event(
+            "crew_member_telemetry",
+            json!({
+                "type": "crew_member_telemetry",
+                "root_thread_id": tel.root_thread_id,
+                "name": tel.name,
+                "thread_id": clean,
+                "state": "waiting",
+                "current_step": tel.current_step,
+                "current_tool": "",
+                "tool_summary": "",
+                "working_started_at": 0,
+            }),
+        );
+    }
+}
+
+pub fn mark_thread_cancel_forensics(thread_id: &str, source: &str, reason: &str) {
+    let clean = thread_id.trim();
+    if clean.is_empty() {
+        return;
+    }
+    let now = now_unix_secs() as i64;
+    let conn = crate::db::lock_db();
+    let _ = conn.execute(
+        "UPDATE crew_members
+         SET cancel_source = ?1,
+             cancel_reason = ?2,
+             updated_at = ?3
+         WHERE thread_id = ?4 AND state != 'killed'",
+        params![source.trim(), reason.trim(), now, clean],
+    );
+}
+
+pub fn mark_all_active_cancel_forensics(source: &str, reason: &str) {
+    let now = now_unix_secs() as i64;
+    let conn = crate::db::lock_db();
+    let _ = conn.execute(
+        "UPDATE crew_members
+         SET cancel_source = ?1,
+             cancel_reason = ?2,
+             updated_at = ?3
+         WHERE state IN ('working', 'waiting')",
+        params![source.trim(), reason.trim(), now],
+    );
+}
+
 pub fn notify_thread_interrupted(thread_id: &str) {
     let clean = thread_id.trim();
     if clean.is_empty() {
@@ -949,7 +1395,120 @@ fn format_director_callback_message(post: &CrewBoardPostRecord) -> String {
     )
 }
 
-fn deliver_director_callback(post: &CrewBoardPostRecord) {
+fn has_llm_credentials(cfg: &crate::config::AppConfig) -> bool {
+    let m_low = cfg.model.trim().to_ascii_lowercase();
+    let p_low = cfg.provider_name.trim().to_ascii_lowercase();
+    if m_low.starts_with("openai-oauth/") || p_low == "openai_oauth" || p_low == "openai-oauth" {
+        return crate::oauth::is_provider_connected(crate::oauth::OAuthProvider::Openai);
+    }
+    if m_low.starts_with("claude-oauth/") || p_low == "claude_oauth" || p_low == "claude-oauth" {
+        return crate::oauth::is_provider_connected(crate::oauth::OAuthProvider::Claude);
+    }
+    !cfg.api_key.trim().is_empty() && !crate::config::is_masked_api_key(&cfg.api_key)
+}
+
+fn resolve_crew_worker_cfg(
+    member_model: &str,
+    member_effort: &str,
+    ws_path: &str,
+    room_override: &Option<(String, String, String, String)>,
+) -> crate::config::AppConfig {
+    let mut worker_cfg = crate::server::get_config();
+    let trim_model = member_model.trim();
+    let eff_model_str = if trim_model.is_empty() {
+        worker_cfg.model.clone()
+    } else {
+        trim_model.to_string()
+    };
+    let m_low = eff_model_str.to_ascii_lowercase();
+    if m_low.starts_with("openai-oauth/") {
+        worker_cfg.provider_name = "openai_oauth".to_string();
+        worker_cfg.api_style = "responses".to_string();
+        worker_cfg.base_url.clear();
+        worker_cfg.api_key.clear();
+        worker_cfg.model = eff_model_str;
+    } else if m_low.starts_with("claude-oauth/") {
+        worker_cfg.provider_name = "claude_oauth".to_string();
+        worker_cfg.api_style = "anthropic".to_string();
+        worker_cfg.base_url.clear();
+        worker_cfg.api_key.clear();
+        worker_cfg.model = eff_model_str;
+    } else {
+        if let Some((ov_url, ov_key, ov_style, ov_provider)) = room_override {
+            let ov_p_low = ov_provider.to_ascii_lowercase();
+            if !ov_p_low.contains("oauth") {
+                worker_cfg.base_url = ov_url.clone();
+                if !ov_key.trim().is_empty() && !crate::config::is_masked_api_key(ov_key) {
+                    worker_cfg.api_key = ov_key.clone();
+                }
+                if !ov_style.trim().is_empty() {
+                    worker_cfg.api_style = ov_style.clone();
+                }
+                if !ov_provider.trim().is_empty() {
+                    worker_cfg.provider_name = ov_provider.clone();
+                }
+            }
+        }
+        worker_cfg.model =
+            crate::config::normalize_model_id(&eff_model_str, &worker_cfg.provider_name)
+                .to_string();
+    }
+    if !member_effort.trim().is_empty() {
+        worker_cfg.effort =
+            crate::config::normalize_reasoning_effort(member_effort.trim()).to_string();
+    }
+    if !ws_path.trim().is_empty() {
+        worker_cfg.default_workspace = ws_path.trim().to_string();
+    }
+    worker_cfg
+}
+
+fn build_director_wake_cfg(root_thread_id: &str) -> crate::config::AppConfig {
+    let room = ensure_room(root_thread_id);
+    let (root_model, root_effort, root_ws): (String, String, String) = {
+        let conn = crate::db::lock_db();
+        conn.query_row(
+            "SELECT model, effort, workspace_path FROM threads WHERE id = ?1 LIMIT 1",
+            params![root_thread_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap_or_default()
+    };
+    let ov = room
+        .override_endpoint
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone();
+    resolve_crew_worker_cfg(&root_model, &root_effort, &root_ws, &ov)
+}
+
+fn spawn_director_wake_if_eligible(root_thread_id: &str) {
+    if crate::cua::is_interrupted() || crate::agent::is_thread_interrupted(root_thread_id) {
+        return;
+    }
+    let dir_cfg = build_director_wake_cfg(root_thread_id);
+    if !has_llm_credentials(&dir_cfg) {
+        return;
+    }
+    let room = ensure_room(root_thread_id);
+    {
+        let now = now_unix_secs();
+        let mut counts = room
+            .director_wake_counts
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        if now.saturating_sub(counts.0) >= 60 {
+            *counts = (now, 1);
+        } else if counts.1 >= 12 {
+            return;
+        } else {
+            counts.1 += 1;
+        }
+    }
+    crate::agent::spawn_crew_director_wake_turn(root_thread_id.to_string(), dir_cfg);
+}
+
+fn deliver_director_callback(post: &CrewBoardPostRecord, allow_auto_wake: bool) {
     let needs_decision = post.kind == "decision"
         || post.content.contains("결정")
         || post.content.contains("선택")
@@ -992,6 +1551,12 @@ fn deliver_director_callback(post: &CrewBoardPostRecord) {
                 "post": post,
                 "callback": callback_payload,
             }));
+        if allow_auto_wake {
+            PENDING_DIRECTOR_WAKE_ROOTS
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .insert(post.root_thread_id.clone());
+        }
         return;
     }
 
@@ -1018,6 +1583,9 @@ fn deliver_director_callback(post: &CrewBoardPostRecord) {
             json!({ "thread_id": post.root_thread_id }),
         );
     }
+    if allow_auto_wake {
+        spawn_director_wake_if_eligible(&post.root_thread_id);
+    }
 }
 
 /// Flushes any `@director` callbacks that arrived while `root_thread_id` was mid-turn.
@@ -1028,6 +1596,7 @@ pub fn flush_pending_director_callbacks(root_thread_id: &str) {
             .unwrap_or_else(|p| p.into_inner());
         pending.remove(root_thread_id.trim()).unwrap_or_default()
     };
+    let had_items = !items.is_empty();
     for item in items {
         let Ok(post) = serde_json::from_value::<CrewBoardPostRecord>(item["post"].clone()) else {
             continue;
@@ -1051,6 +1620,13 @@ pub fn flush_pending_director_callbacks(root_thread_id: &str) {
             }
             crate::agent::emit_event("assistant_message", ev_val);
         }
+    }
+    let should_wake = PENDING_DIRECTOR_WAKE_ROOTS
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .remove(root_thread_id.trim());
+    if had_items && should_wake {
+        spawn_director_wake_if_eligible(root_thread_id.trim());
     }
 }
 
@@ -1167,10 +1743,15 @@ pub fn post_board_message(
             if m.state == "killed" || m.name == author_name {
                 continue;
             }
-            if active_mentions
+            let explicit_match = active_mentions
                 .iter()
-                .any(|ment| mention_matches_member(ment, &m.name, &m.role))
-            {
+                .any(|ment| mention_matches_member(ment, &m.name, &m.role));
+            let broadcast_waiter_match = norm_kind != "brief"
+                && norm_kind != "watchdog"
+                && m.state == "waiting"
+                && !m.wait_mentions_only
+                && seq > m.waiting_since;
+            if explicit_match || broadcast_waiter_match {
                 wake_candidates.push(m);
             }
         }
@@ -1243,7 +1824,7 @@ pub fn post_board_message(
         && mentions_director(&post.mentions)
         && !matches!(post.author_name.as_str(), "director" | "user" | "system");
     if director_notified {
-        deliver_director_callback(&post);
+        deliver_director_callback(&post, wake_targets);
     }
 
     Ok(CrewPostOutcome {
@@ -1378,15 +1959,15 @@ impl Drop for CrewWaitGuard {
                      WHERE id = ?2 AND state != 'killed'",
                     params![now, mid],
                 );
-                conn.query_row(
-                    "SELECT id, root_thread_id, name, display_name, role, thread_id, model, effort, state,
-                            workspace_mode, workspace_path, browser_session_id, browser_tab_id, brief, added_by,
-                            last_read_seq, last_post_seq, last_active_at, created_at, updated_at
-                     FROM crew_members WHERE id = ?1 LIMIT 1",
-                    params![mid],
-                    row_to_crew_member,
-                )
-                .ok()
+                let sql = format!(
+                    "SELECT {CREW_MEMBER_SELECT_COLS} FROM crew_members WHERE id = ?1 LIMIT 1"
+                );
+                conn.query_row(&sql, params![mid], row_to_crew_member)
+                    .ok()
+                    .map(|mut m| {
+                        overlay_live_member_fields(&conn, &mut m);
+                        m
+                    })
             };
             if let Some(m) = updated_opt {
                 emit_crew_member_and_status_sse(&m.state, &m);
@@ -1496,15 +2077,15 @@ pub async fn wait_for_board(
                      WHERE id = ?2 AND state != 'killed'",
                     params![now, m.id],
                 );
-                conn.query_row(
-                    "SELECT id, root_thread_id, name, display_name, role, thread_id, model, effort, state,
-                            workspace_mode, workspace_path, browser_session_id, browser_tab_id, brief, added_by,
-                            last_read_seq, last_post_seq, last_active_at, created_at, updated_at
-                     FROM crew_members WHERE id = ?1 LIMIT 1",
-                    params![m.id],
-                    row_to_crew_member,
-                )
-                .ok()
+                let sql = format!(
+                    "SELECT {CREW_MEMBER_SELECT_COLS} FROM crew_members WHERE id = ?1 LIMIT 1"
+                );
+                conn.query_row(&sql, params![m.id], row_to_crew_member)
+                    .ok()
+                    .map(|mut rec| {
+                        overlay_live_member_fields(&conn, &mut rec);
+                        rec
+                    })
             };
             if let Some(updated) = updated_opt {
                 emit_crew_member_and_status_sse("waiting", &updated);
@@ -1609,6 +2190,139 @@ pub async fn wait_for_board(
     }))
 }
 
+/// Zero-token turn-ending `crew_wait`: checks for matching posts after `since`; if none exist yet,
+/// atomically parks the worker's turn (`state = 'waiting'`, `waiting_since`, `wait_mentions_only`)
+/// and signals `agent.rs` to finish the active LLM loop immediately with zero extra calls.
+/// Includes a post-commit double-check to prevent missed-wakeup races.
+pub fn park_for_board(
+    caller_thread_id: &str,
+    since_opt: Option<u64>,
+    mentions_only: bool,
+) -> Result<Value> {
+    let (root_id, member_opt, default_since) = {
+        let conn = crate::db::lock_db();
+        let root_id = resolve_root_id_conn(&conn, caller_thread_id);
+        let member_opt = get_member_by_thread_conn(&conn, caller_thread_id);
+        let fallback_since = member_opt.as_ref().map(|m| m.last_read_seq).unwrap_or(0);
+        (root_id, member_opt, fallback_since)
+    };
+    let Some(member) = member_opt else {
+        bail!("디렉터는 crew_wait로 대기할 수 없습니다. 크루 배정 현황만 안내하고 즉시 턴을 종료하세요.");
+    };
+    if member.state == "killed"
+        || crate::cua::is_interrupted()
+        || crate::agent::is_thread_interrupted(caller_thread_id)
+    {
+        return Ok(json!({
+            "ok": true,
+            "parked": false,
+            "cancelled": true,
+            "head_seq": ensure_room(&root_id).head_seq.load(Ordering::SeqCst),
+            "matched_posts": [],
+            "since_next": since_opt.unwrap_or(default_since),
+        }));
+    }
+
+    let since = since_opt.unwrap_or(default_since).max(default_since);
+    let find_matches = |cur_since: u64| -> Result<(u64, Vec<CrewBoardPostRecord>)> {
+        let (_, head, posts) = read_crew_board(&root_id, Some(cur_since), 100, None, None, None)?;
+        let matched: Vec<CrewBoardPostRecord> = posts
+            .into_iter()
+            .filter(|p| {
+                p.author_name != member.name
+                    && p.kind != "brief"
+                    && p.kind != "watchdog"
+                    && post_matches_waiter(p, &member.name, &member.role, mentions_only)
+            })
+            .collect();
+        Ok((head, matched))
+    };
+
+    let (head1, matches1) = find_matches(since)?;
+    if !matches1.is_empty() {
+        let next_seq = matches1.iter().map(|p| p.seq).max().unwrap_or(head1);
+        let conn = crate::db::lock_db();
+        let _ = conn.execute(
+            "UPDATE crew_members SET last_read_seq = MAX(last_read_seq, ?1), last_active_at = ?2 WHERE id = ?3",
+            params![next_seq as i64, now_unix_secs() as i64, member.id],
+        );
+        return Ok(json!({
+            "ok": true,
+            "parked": false,
+            "timed_out": false,
+            "cancelled": false,
+            "head_seq": head1,
+            "matched_posts": matches1,
+            "since_next": next_seq,
+        }));
+    }
+
+    let room = ensure_room(&root_id);
+    {
+        let mut turns = room.active_turns.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(tracker) = turns.get_mut(&member.name) {
+            tracker.parked_for_wait = true;
+        }
+    }
+    {
+        let conn = crate::db::lock_db();
+        let now = now_unix_secs() as i64;
+        let _ = conn.execute(
+            "UPDATE crew_members
+             SET waiting_since = ?1,
+                 wait_mentions_only = ?2,
+                 current_tool = 'crew_wait',
+                 tool_summary = 'Standing by for board updates',
+                 last_active_at = ?3,
+                 updated_at = ?3
+             WHERE id = ?4 AND state != 'killed'",
+            params![since as i64, if mentions_only { 1 } else { 0 }, now, member.id],
+        );
+    }
+
+    // Double-check after committing wait cursor so concurrent `post_board_message` cannot be missed.
+    let (head2, matches2) = find_matches(since)?;
+    if !matches2.is_empty() {
+        {
+            let mut turns = room.active_turns.lock().unwrap_or_else(|p| p.into_inner());
+            if let Some(tracker) = turns.get_mut(&member.name) {
+                tracker.parked_for_wait = false;
+            }
+        }
+        let next_seq = matches2.iter().map(|p| p.seq).max().unwrap_or(head2);
+        let conn = crate::db::lock_db();
+        let _ = conn.execute(
+            "UPDATE crew_members
+             SET last_read_seq = MAX(last_read_seq, ?1),
+                 waiting_since = 0,
+                 wait_mentions_only = 1,
+                 last_active_at = ?2
+             WHERE id = ?3",
+            params![next_seq as i64, now_unix_secs() as i64, member.id],
+        );
+        return Ok(json!({
+            "ok": true,
+            "parked": false,
+            "timed_out": false,
+            "cancelled": false,
+            "head_seq": head2,
+            "matched_posts": matches2,
+            "since_next": next_seq,
+        }));
+    }
+
+    Ok(json!({
+        "ok": true,
+        "parked": true,
+        "since": since,
+        "mentions_only": mentions_only,
+        "head_seq": head2,
+        "matched_posts": [],
+        "since_next": since,
+        "message": "Parked in zero-token waiting state; turn will automatically resume when a matching board post arrives.",
+    }))
+}
+
 fn crew_worktrees_root() -> PathBuf {
     #[cfg(test)]
     {
@@ -1684,7 +2398,12 @@ fn prepare_crew_workspace(
                 if let Ok(added) = add_out
                     && added.status.success()
                 {
-                    return ("worktree".to_string(), wt_dir.to_string_lossy().into_owned());
+                    let eff_mode = match norm_req.as_str() {
+                        "share" => "share",
+                        "branch" => "branch",
+                        _ => "worktree",
+                    };
+                    return (eff_mode.to_string(), wt_dir.to_string_lossy().into_owned());
                 }
             }
         }
@@ -1693,7 +2412,7 @@ fn prepare_crew_workspace(
 }
 
 fn cleanup_crew_worktree(workspace_mode: &str, workspace_path: &str) {
-    if workspace_mode != "worktree" || workspace_path.trim().is_empty() {
+    if !matches!(workspace_mode, "worktree" | "share" | "branch") || workspace_path.trim().is_empty() {
         return;
     }
     let path = PathBuf::from(workspace_path.trim());
@@ -1727,6 +2446,19 @@ fn cleanup_crew_worktree(workspace_mode: &str, workspace_path: &str) {
     }
 }
 
+fn normalize_crew_model_id(raw_model: &str, cfg: &crate::config::AppConfig) -> String {
+    let trimmed = raw_model.trim();
+    if trimmed.is_empty() {
+        return cfg.model.clone();
+    }
+    let low = trimmed.to_ascii_lowercase();
+    if low.starts_with("openai-oauth/") || low.starts_with("claude-oauth/") {
+        return trimmed.to_string();
+    }
+    crate::config::normalize_model_id(trimmed, &cfg.provider_name).to_string()
+}
+
+#[allow(clippy::too_many_arguments)]
 fn add_single_crew_member(
     root_id: &str,
     added_by: &str,
@@ -1738,6 +2470,7 @@ fn add_single_crew_member(
     workspace_mode_req: &str,
     browser_isolation: bool,
     fork_turns: usize,
+    fork_source: Option<&str>,
     cfg: &crate::config::AppConfig,
     spawn_turn: bool,
 ) -> Result<(CrewMemberRecord, CrewBoardPostRecord)> {
@@ -1756,18 +2489,14 @@ fn add_single_crew_member(
         bail!("Invalid or reserved crew name '{}'", raw_name);
     }
 
-    let eff_model = if model_override.trim().is_empty() {
-        cfg.model.clone()
-    } else {
-        crate::config::normalize_model_id(model_override.trim(), &cfg.provider_name).to_string()
-    };
+    let eff_model = normalize_crew_model_id(model_override, cfg);
     let eff_effort = if effort_override.trim().is_empty() {
         cfg.effort.clone()
     } else {
         crate::config::normalize_reasoning_effort(effort_override.trim()).to_string()
     };
 
-    let (root_workspace, existing_opt, active_count, caller_thread_id) = {
+    let (root_workspace, existing_opt, active_count, caller_thread_id, fork_source_thread_id) = {
         let conn = crate::db::lock_db();
         ensure_session_row_conn(&conn, root_id)?;
         let root_ws: String = conn
@@ -1793,8 +2522,28 @@ fn add_single_crew_member(
                 .map(|m| m.thread_id)
                 .unwrap_or_else(|| root_id.to_string())
         };
-        (root_ws, existing, active, caller_tid)
+        let fork_tid = if let Some(src) = fork_source.map(str::trim).filter(|s| !s.is_empty()) {
+            let norm_src = normalize_crew_name(src);
+            if matches!(norm_src.as_str(), "director" | "coordinator" | "디렉터" | "root") {
+                root_id.to_string()
+            } else {
+                get_member_by_name_conn(&conn, root_id, &norm_src)
+                    .map(|m| m.thread_id)
+                    .unwrap_or_else(|| caller_tid.clone())
+            }
+        } else {
+            caller_tid.clone()
+        };
+        (root_ws, existing, active, caller_tid, fork_tid)
     };
+    let eff_fork_turns = if fork_turns > 0 {
+        fork_turns
+    } else if fork_source.is_some_and(|s| !s.trim().is_empty()) {
+        6
+    } else {
+        0
+    };
+    let _ = &caller_thread_id;
 
     if existing_opt.as_ref().is_none_or(|m| m.state == "killed")
         && active_count >= MAX_CREW_MEMBERS_PER_SESSION
@@ -1870,14 +2619,14 @@ fn add_single_crew_member(
                     eff_ws_path
                 ],
             )?;
-            if fork_turns > 0 {
+            if eff_fork_turns > 0 {
                 let mut stmt = tx.prepare(
                     "SELECT role, content, thinking, tool_name, tool_args, image_b64, meta_json, created_at
                      FROM messages WHERE thread_id = ?1 AND compacted_by = '' AND role IN ('user', 'assistant')
                      ORDER BY created_at DESC, rowid DESC LIMIT ?2",
                 )?;
                 let mut forked: Vec<(String, String)> = stmt
-                    .query_map(params![caller_thread_id, (fork_turns * 2) as i64], |r| {
+                    .query_map(params![fork_source_thread_id, (eff_fork_turns * 2) as i64], |r| {
                         Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
                     })?
                     .filter_map(|r| r.ok())
@@ -1903,12 +2652,14 @@ fn add_single_crew_member(
         }
 
         let initial_state = if spawn_turn { "working" } else { "waiting" };
+        let init_started = if spawn_turn { now as i64 } else { 0 };
         tx.execute(
             "INSERT INTO crew_members (
                 id, root_thread_id, name, display_name, role, thread_id, model, effort, state,
                 workspace_mode, workspace_path, browser_session_id, browser_tab_id, brief, added_by,
-                last_read_seq, last_post_seq, last_active_at, created_at, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'tab-1', ?13, ?14, 0, 0, ?15, ?15, ?15)
+                last_read_seq, last_post_seq, last_active_at, created_at, updated_at,
+                working_started_at, last_error, cancel_source, cancel_reason, waiting_since, wait_mentions_only
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'tab-1', ?13, ?14, 0, 0, ?15, ?15, ?15, ?16, '', '', '', 0, 1)
              ON CONFLICT(root_thread_id, name) DO UPDATE SET
                 id = excluded.id,
                 display_name = excluded.display_name,
@@ -1922,6 +2673,15 @@ fn add_single_crew_member(
                 browser_session_id = excluded.browser_session_id,
                 brief = excluded.brief,
                 added_by = excluded.added_by,
+                current_tool = '',
+                tool_summary = '',
+                current_step = 0,
+                working_started_at = excluded.working_started_at,
+                last_error = '',
+                cancel_source = '',
+                cancel_reason = '',
+                waiting_since = 0,
+                wait_mentions_only = 1,
                 last_active_at = excluded.last_active_at,
                 updated_at = excluded.updated_at",
             params![
@@ -1939,7 +2699,8 @@ fn add_single_crew_member(
                 browser_session_id,
                 brief.trim(),
                 added_by,
-                now as i64
+                now as i64,
+                init_started
             ],
         )?;
         let m = get_member_by_name_conn(&tx, root_id, &norm_name)
@@ -2025,6 +2786,7 @@ fn spawn_crew_worker_turn_internal(
     }
 
     let head_seq = room.head_seq.load(Ordering::SeqCst);
+    let now_ms = now_unix_millis();
     {
         let mut turns = room.active_turns.lock().unwrap_or_else(|p| p.into_inner());
         if turns.contains_key(&norm_target) {
@@ -2035,6 +2797,8 @@ fn spawn_crew_worker_turn_internal(
             ActiveTurnTracker {
                 start_seq: head_seq,
                 posted_during_turn: false,
+                parked_for_wait: false,
+                started_ms: now_ms,
             },
         );
     }
@@ -2051,6 +2815,15 @@ fn spawn_crew_worker_turn_internal(
                 "UPDATE crew_members
                  SET state = 'working',
                      last_read_seq = MAX(last_read_seq, ?1),
+                     waiting_since = 0,
+                     wait_mentions_only = 1,
+                     current_tool = '',
+                     tool_summary = 'Thinking...',
+                     current_step = 0,
+                     working_started_at = ?2,
+                     last_error = '',
+                     cancel_source = '',
+                     cancel_reason = '',
                      last_active_at = ?2,
                      updated_at = ?2
                  WHERE id = ?3",
@@ -2093,32 +2866,17 @@ fn spawn_crew_worker_turn_internal(
     member.state_label = "작업 중".to_string();
     emit_crew_member_and_status_sse("working", &member);
 
-    let mut worker_cfg = crate::server::get_config();
-    if let Some((ref ov_url, ref ov_key, ref ov_style, ref ov_provider)) = *room
+    let room_ov = room
         .override_endpoint
         .lock()
         .unwrap_or_else(|p| p.into_inner())
-    {
-        worker_cfg.base_url = ov_url.clone();
-        if !ov_key.trim().is_empty() {
-            worker_cfg.api_key = ov_key.clone();
-        }
-        if !ov_style.trim().is_empty() {
-            worker_cfg.api_style = ov_style.clone();
-        }
-        if !ov_provider.trim().is_empty() {
-            worker_cfg.provider_name = ov_provider.clone();
-        }
-    }
-    if !member.model.trim().is_empty() {
-        worker_cfg.model = member.model.clone();
-    }
-    if !member.effort.trim().is_empty() {
-        worker_cfg.effort = member.effort.clone();
-    }
-    if !member.workspace_path.trim().is_empty() {
-        worker_cfg.default_workspace = member.workspace_path.clone();
-    }
+        .clone();
+    let worker_cfg = resolve_crew_worker_cfg(
+        &member.model,
+        &member.effort,
+        &member.workspace_path,
+        &room_ov,
+    );
 
     let tid = member.thread_id.clone();
     let name_cl = member.name.clone();
@@ -2172,6 +2930,7 @@ pub fn on_crew_turn_finished(
     was_interrupted: bool,
     err_msg: &str,
 ) {
+    clear_thread_crew_telemetry(thread_id);
     let member_opt = get_crew_member_by_thread(thread_id);
     let Some(member) = member_opt else {
         return;
@@ -2186,19 +2945,54 @@ pub fn on_crew_turn_finished(
         return;
     }
 
+    let now_ms = now_unix_millis();
+    let worked_ms = turn_tracker
+        .as_ref()
+        .map(|t| now_ms.saturating_sub(t.started_ms))
+        .unwrap_or(0);
     let next_state = if was_interrupted || !err_msg.trim().is_empty() {
         "stopped"
     } else {
         "waiting"
+    };
+    let err_trim = err_msg.trim();
+    let (eff_cancel_source, eff_cancel_reason) = if !err_trim.is_empty() {
+        ("llm_error", err_trim)
+    } else if was_interrupted {
+        if member.cancel_source.trim().is_empty() {
+            ("ui_stop", "turn_interrupted")
+        } else {
+            (member.cancel_source.as_str(), member.cancel_reason.as_str())
+        }
+    } else {
+        ("", "")
     };
 
     let updated_opt = {
         let conn = crate::db::lock_db();
         let now = now_unix_secs() as i64;
         let _ = conn.execute(
-            "UPDATE crew_members SET state = ?1, last_active_at = ?2, updated_at = ?2
-             WHERE id = ?3 AND state != 'killed'",
-            params![next_state, now, member.id],
+            "UPDATE crew_members
+             SET state = ?1,
+                 current_tool = '',
+                 tool_summary = CASE WHEN ?1 = 'stopped' THEN 'Stopped' ELSE 'Standing by' END,
+                 working_started_at = 0,
+                 last_worked_ms = CASE WHEN ?2 > 0 THEN ?2 ELSE last_worked_ms END,
+                 last_error = ?3,
+                 cancel_source = ?4,
+                 cancel_reason = ?5,
+                 last_active_at = ?6,
+                 updated_at = ?6
+             WHERE id = ?7 AND state != 'killed'",
+            params![
+                next_state,
+                worked_ms as i64,
+                err_trim,
+                eff_cancel_source,
+                eff_cancel_reason,
+                now,
+                member.id
+            ],
         );
         let thread_status = if next_state == "stopped" {
             if was_interrupted { "interrupted" } else { "error" }
@@ -2216,14 +3010,18 @@ pub fn on_crew_turn_finished(
         emit_crew_member_and_status_sse(next_state, updated);
     }
 
-    if !err_msg.trim().is_empty() {
+    if !err_trim.is_empty() {
+        let escalation = format!(
+            "@director [오류 중단 · @{}] 실행 중 오류가 발생해 대기 상태로 멈췄습니다.\n- 오류: {}\n- 조치: 보드/사이드카에서 `재시도(retry)`를 누르거나 `crew_manage(action=\"model\")`로 다른 모델로 전환해 재개하세요.",
+            member.name, err_trim
+        );
         let _ = post_board_message(
             &member.thread_id,
             Some(&member.name),
             "system",
-            &format!("[중단] 오류 발생: {}", err_msg.trim()),
+            &escalation,
             "",
-            false,
+            true,
         );
         return;
     }
@@ -2232,9 +3030,12 @@ pub fn on_crew_turn_finished(
         return;
     }
 
-    // If the worker completed a turn without posting to the board, leave a neutral summary post
-    // so peers/director can inspect its output without waking `@director` prematurely.
-    if let Some(ref tracker) = turn_tracker
+    let parked_for_wait = turn_tracker.as_ref().is_some_and(|t| t.parked_for_wait);
+
+    // ParkGuard: If the worker completed a turn normally without calling `crew_wait` and without
+    // posting to the board, leave a neutral summary post so peers/director can inspect its output.
+    if !parked_for_wait
+        && let Some(ref tracker) = turn_tracker
         && !tracker.posted_during_turn
         && !final_text.trim().is_empty()
     {
@@ -2248,19 +3049,40 @@ pub fn on_crew_turn_finished(
         );
     }
 
-    // Check if any @mention for this worker landed while it was actively running and hasn't been read yet.
+    // HeadHook (boardLagNudge): Check if any matching post landed while the worker was running
+    // or during the park-to-idle transition window, and wake reactively.
     if let Some(tracker) = turn_tracker {
         let current_read = updated_opt
             .as_ref()
             .map(|u| u.last_read_seq)
             .unwrap_or(member.last_read_seq);
-        let scan_since = current_read.max(tracker.start_seq);
+        let scan_since = if parked_for_wait {
+            updated_opt
+                .as_ref()
+                .map(|u| u.waiting_since)
+                .unwrap_or(member.waiting_since)
+                .max(current_read)
+        } else {
+            current_read.max(tracker.start_seq)
+        };
+        let mentions_only = if parked_for_wait {
+            updated_opt
+                .as_ref()
+                .map(|u| u.wait_mentions_only)
+                .unwrap_or(member.wait_mentions_only)
+        } else {
+            true
+        };
         if let Ok((_, _, posts)) =
             read_crew_board(&member.root_thread_id, Some(scan_since), 50, None, None, None)
         {
             let unread: Vec<CrewBoardPostRecord> = posts
                 .into_iter()
-                .filter(|p| post_matches_waiter(p, &member.name, &member.role, true))
+                .filter(|p| {
+                    p.author_name != member.name
+                        && p.kind != "watchdog"
+                        && post_matches_waiter(p, &member.name, &member.role, mentions_only)
+                })
                 .collect();
             if let Some(last) = unread.last() {
                 let combined = unread
@@ -2330,7 +3152,80 @@ pub async fn manage_crew(
                 "enabled": status.enabled,
                 "head_seq": status.head_seq,
                 "counts": status.counts,
+                "director": status.director,
                 "members": status.members,
+            }))
+        }
+
+        "models" => {
+            let mut cheapai_list = if cfg.models.is_empty() {
+                crate::config::default_cheapai_models()
+            } else {
+                cfg.models.clone()
+            };
+            cheapai_list.retain(|m| {
+                let low = m.id.to_ascii_lowercase();
+                !low.starts_with("openai-oauth/") && !low.starts_with("claude-oauth/")
+            });
+            let oauth_catalog = crate::oauth::list_connected_models_for_catalog();
+            let openai_connected =
+                crate::oauth::is_provider_connected(crate::oauth::OAuthProvider::Openai);
+            let claude_connected =
+                crate::oauth::is_provider_connected(crate::oauth::OAuthProvider::Claude);
+            let openai_models: Vec<Value> = if openai_connected {
+                let connected: Vec<Value> = oauth_catalog
+                    .iter()
+                    .filter(|m| m.id.to_ascii_lowercase().starts_with("openai-oauth/"))
+                    .map(|m| json!({ "id": m.id, "name": m.name, "provider": "openai_oauth", "reasoning": m.reasoning, "variants": m.variants }))
+                    .collect();
+                if connected.is_empty() {
+                    crate::oauth::OAuthProvider::Openai
+                        .default_models()
+                        .into_iter()
+                        .map(|id| json!({ "id": id, "name": id.trim_start_matches("openai-oauth/"), "provider": "openai_oauth", "reasoning": true, "variants": ["low", "medium", "high", "xhigh"] }))
+                        .collect()
+                } else {
+                    connected
+                }
+            } else {
+                Vec::new()
+            };
+            let claude_models: Vec<Value> = if claude_connected {
+                let connected: Vec<Value> = oauth_catalog
+                    .iter()
+                    .filter(|m| m.id.to_ascii_lowercase().starts_with("claude-oauth/"))
+                    .map(|m| json!({ "id": m.id, "name": m.name, "provider": "claude_oauth", "reasoning": m.reasoning, "variants": m.variants }))
+                    .collect();
+                if connected.is_empty() {
+                    crate::oauth::OAuthProvider::Claude
+                        .default_models()
+                        .into_iter()
+                        .map(|id| json!({ "id": id, "name": id.trim_start_matches("claude-oauth/"), "provider": "claude_oauth", "reasoning": true, "variants": ["low", "medium", "high", "xhigh"] }))
+                        .collect()
+                } else {
+                    connected
+                }
+            } else {
+                Vec::new()
+            };
+            let cheapai_vals: Vec<Value> = cheapai_list
+                .iter()
+                .map(|m| json!({ "id": m.id, "name": m.name, "provider": "cheapai", "reasoning": m.reasoning, "variants": m.variants }))
+                .collect();
+            let mut flat = Vec::new();
+            flat.extend(cheapai_vals.iter().cloned());
+            flat.extend(openai_models.iter().cloned());
+            flat.extend(claude_models.iter().cloned());
+            let groups = vec![
+                json!({ "provider": "cheapai", "label": "CheapAI API", "connected": true, "models": cheapai_vals }),
+                json!({ "provider": "openai_oauth", "label": "OpenAI OAuth", "connected": openai_connected, "models": openai_models }),
+                json!({ "provider": "claude_oauth", "label": "Claude OAuth", "connected": claude_connected, "models": claude_models }),
+            ];
+            Ok(json!({
+                "ok": true,
+                "action": "models",
+                "groups": groups,
+                "models": flat,
             }))
         }
 
@@ -2439,6 +3334,11 @@ pub async fn manage_crew(
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0)
                 .min(12) as usize;
+            let fork_source = args
+                .get("fork")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
             let tasks_arr: Option<Vec<String>> = args
                 .get("tasks")
                 .and_then(|v| v.as_array())
@@ -2501,6 +3401,7 @@ pub async fn manage_crew(
                     workspace_req,
                     browser_iso,
                     fork_turns,
+                    fork_source,
                     cfg,
                     spawn_workers,
                 )?;
@@ -2534,11 +3435,7 @@ pub async fn manage_crew(
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .trim();
-            let eff_model = if new_model_raw.is_empty() {
-                cfg.model.clone()
-            } else {
-                crate::config::normalize_model_id(new_model_raw, &cfg.provider_name).to_string()
-            };
+            let eff_model = normalize_crew_model_id(new_model_raw, cfg);
             let target_member = {
                 let conn = crate::db::lock_db();
                 get_member_by_name_conn(&conn, &root_id, &target_name)
@@ -2604,9 +3501,18 @@ pub async fn manage_crew(
             let updated = {
                 let conn = crate::db::lock_db();
                 let now = now_unix_secs() as i64;
+                let reason = format!("killed_by_{caller_name}");
                 conn.execute(
-                    "UPDATE crew_members SET state = 'killed', updated_at = ?1 WHERE id = ?2",
-                    params![now, target_member.id],
+                    "UPDATE crew_members
+                     SET state = 'killed',
+                         current_tool = '',
+                         tool_summary = 'Killed',
+                         working_started_at = 0,
+                         cancel_source = 'member_kill',
+                         cancel_reason = ?1,
+                         updated_at = ?2
+                     WHERE id = ?3",
+                    params![reason, now, target_member.id],
                 )?;
                 conn.execute(
                     "UPDATE threads SET agent_status = 'closed', updated_at = ?1 WHERE id = ?2",
@@ -2615,6 +3521,7 @@ pub async fn manage_crew(
                 get_member_by_name_conn(&conn, &root_id, &target_member.name)
                     .ok_or_else(|| anyhow!("Failed to reload killed member"))?
             };
+            clear_thread_crew_telemetry(&target_member.thread_id);
             if !target_member.browser_session_id.is_empty()
                 && target_member.browser_session_id != root_id
             {
@@ -2666,11 +3573,19 @@ pub async fn manage_crew(
                 let conn = crate::db::lock_db();
                 let now = now_unix_secs() as i64;
                 let _ = conn.execute(
-                    "UPDATE crew_members SET state = 'killed', updated_at = ?1
+                    "UPDATE crew_members
+                     SET state = 'killed',
+                         current_tool = '',
+                         tool_summary = 'Killed',
+                         working_started_at = 0,
+                         cancel_source = 'member_kill',
+                         cancel_reason = 'kill_all',
+                         updated_at = ?1
                      WHERE root_thread_id = ?2 AND state != 'killed'",
                     params![now, root_id],
                 );
                 for m in &targets {
+                    clear_thread_crew_telemetry(&m.thread_id);
                     let _ = conn.execute(
                         "UPDATE threads SET agent_status = 'closed', updated_at = ?1 WHERE id = ?2",
                         params![now, m.thread_id],
@@ -2699,7 +3614,13 @@ pub async fn manage_crew(
                 get_member_by_name_conn(&conn, &root_id, target_raw)
                     .ok_or_else(|| anyhow!("Crew member '{}' not found", target_raw))?
             };
+            mark_thread_cancel_forensics(
+                &target_member.thread_id,
+                "member_interrupt",
+                &format!("interrupted_by_{caller_name}"),
+            );
             crate::agent::interrupt_thread(&target_member.thread_id);
+            clear_thread_crew_telemetry(&target_member.thread_id);
             let room = ensure_room(&root_id);
             room.notify_cancel(&target_member.thread_id);
             room.notify_cancel(&target_member.name);
@@ -2707,7 +3628,13 @@ pub async fn manage_crew(
                 let conn = crate::db::lock_db();
                 let now = now_unix_secs() as i64;
                 let _ = conn.execute(
-                    "UPDATE crew_members SET state = 'stopped', updated_at = ?1 WHERE id = ?2 AND state != 'killed'",
+                    "UPDATE crew_members
+                     SET state = 'stopped',
+                         current_tool = '',
+                         tool_summary = 'Stopped',
+                         working_started_at = 0,
+                         updated_at = ?1
+                     WHERE id = ?2 AND state != 'killed'",
                     params![now, target_member.id],
                 );
                 get_member_by_name_conn(&conn, &root_id, &target_member.name)
@@ -2720,6 +3647,135 @@ pub async fn manage_crew(
                 "ok": true,
                 "action": "interrupt",
                 "member": updated,
+                "status": status,
+            }))
+        }
+
+        "nudge" | "retry" | "resume" | "wake" => {
+            let target_raw = args
+                .get("name")
+                .or_else(|| args.get("target"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim();
+            if target_raw.is_empty() {
+                bail!("crew_manage(action='{raw_action}') requires `name`");
+            }
+            let directive = args
+                .get("text")
+                .or_else(|| args.get("message"))
+                .or_else(|| args.get("prompt"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim();
+            let model_ov = args
+                .get("model")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim();
+            let effort_ov = args
+                .get("effort")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim();
+
+            let target_member = {
+                let conn = crate::db::lock_db();
+                get_member_by_name_conn(&conn, &root_id, target_raw)
+                    .ok_or_else(|| anyhow!("Crew member '{}' not found", target_raw))?
+            };
+            if target_member.state == "killed" {
+                bail!("Cannot {raw_action} killed crew member '{}'", target_member.name);
+            }
+            let updated_model = if model_ov.is_empty() {
+                target_member.model.clone()
+            } else {
+                normalize_crew_model_id(model_ov, cfg)
+            };
+            let updated_effort = if effort_ov.is_empty() {
+                target_member.effort.clone()
+            } else {
+                crate::config::normalize_reasoning_effort(effort_ov).to_string()
+            };
+            {
+                let conn = crate::db::lock_db();
+                let now = now_unix_secs() as i64;
+                conn.execute(
+                    "UPDATE crew_members
+                     SET model = ?1,
+                         effort = ?2,
+                         last_error = '',
+                         cancel_source = '',
+                         cancel_reason = '',
+                         updated_at = ?3
+                     WHERE id = ?4",
+                    params![updated_model, updated_effort, now, target_member.id],
+                )?;
+                conn.execute(
+                    "UPDATE threads SET model = ?1, effort = ?2, updated_at = ?3 WHERE id = ?4",
+                    params![updated_model, updated_effort, now, target_member.thread_id],
+                )?;
+            }
+
+            let mut posted = None;
+            if !directive.is_empty() {
+                let post_body = if directive.contains(&format!("@{}", target_member.name)) {
+                    directive.to_string()
+                } else {
+                    format!("@{} {}", target_member.name, directive)
+                };
+                if let Ok(outcome) = post_board_message(
+                    caller_thread_id,
+                    Some(&caller_name),
+                    "post",
+                    &post_body,
+                    "",
+                    false,
+                ) {
+                    posted = Some(outcome.post);
+                }
+            }
+
+            let wake_prompt = if !directive.is_empty() {
+                format!("[CREW DIRECTIVE ({raw_action}) from @{caller_name}]\n{directive}")
+            } else if raw_action == "retry" {
+                format!(
+                    "[CREW RETRY] 이전 중단/오류를 초기화하고 브리프를 이어서 완료하세요.\n브리프: {}",
+                    target_member.brief
+                )
+            } else {
+                format!(
+                    "[CREW NUDGE from @{caller_name}] 현재 진행 상태를 확인하고 맡은 작업을 계속 진행하세요."
+                )
+            };
+
+            let woken = if spawn_workers
+                && crate::agent::get_active_thread_stream(&target_member.thread_id).is_none()
+            {
+                spawn_crew_worker_turn_internal(
+                    &root_id,
+                    &target_member.name,
+                    wake_prompt,
+                    false,
+                    posted.as_ref().map(|p| p.seq),
+                )
+            } else {
+                false
+            };
+
+            let refreshed = {
+                let conn = crate::db::lock_db();
+                get_member_by_name_conn(&conn, &root_id, &target_member.name)
+                    .ok_or_else(|| anyhow!("Failed to reload member"))?
+            };
+            let status = get_crew_status(&root_id)?;
+            emit_crew_status_sse(&status);
+            Ok(json!({
+                "ok": true,
+                "action": raw_action,
+                "woken": woken,
+                "post": posted,
+                "member": refreshed,
                 "status": status,
             }))
         }
@@ -2809,13 +3865,14 @@ fn detect_and_report_stalls_with_grace(
         .iter()
         .filter(|m| {
             m.state == "waiting"
-                && waiters
+                && (waiters
                     .get(&m.name)
                     .is_some_and(|w| now.saturating_sub(w.started_at) >= deadlock_grace_secs)
+                    || (m.waiting_since > 0 && now.saturating_sub(m.last_active_at) >= deadlock_grace_secs))
         })
         .collect();
 
-    // 1. Deadlock: at least one member is actively blocked in `crew_wait`, while zero members are working.
+    // 1. Deadlock: at least one member is waiting in `crew_wait`, while zero members are working.
     if !active_waiting.is_empty() && working_members.is_empty() {
         let head = room.head_seq.load(Ordering::SeqCst);
         let prev = room.last_watchdog_seq.swap(head.max(1), Ordering::SeqCst);
@@ -2823,15 +3880,22 @@ fn detect_and_report_stalls_with_grace(
             let names: Vec<String> = active_waiting.iter().map(|m| m.name.clone()).collect();
             let details: Vec<Value> = active_waiting
                 .iter()
-                .filter_map(|m| {
-                    waiters.get(&m.name).map(|w| {
+                .map(|m| {
+                    if let Some(w) = waiters.get(&m.name) {
                         json!({
                             "name": m.name,
                             "since": w.since,
                             "mentions_only": w.mentions_only,
                             "waiting_secs": now.saturating_sub(w.started_at),
                         })
-                    })
+                    } else {
+                        json!({
+                            "name": m.name,
+                            "since": m.waiting_since,
+                            "mentions_only": m.wait_mentions_only,
+                            "waiting_secs": now.saturating_sub(m.last_active_at),
+                        })
+                    }
                 })
                 .collect();
             let msg = format!(
@@ -2927,6 +3991,169 @@ pub fn ensure_watchdog_running() {
     }
 }
 
+/// Returns structured turn-by-turn steps (thinking, tool calls, tool results, assistant text,
+/// and authored/mentioned board posts) for the Antigravity-style Worker Trajectory Inspector.
+pub fn get_crew_member_log(
+    thread_or_root_id: &str,
+    member_name: &str,
+    limit: usize,
+) -> Result<Value> {
+    let clean_name = member_name.trim();
+    if clean_name.is_empty() {
+        bail!("member_log requires `name`");
+    }
+    let (root_id, member) = {
+        let conn = crate::db::lock_db();
+        let root = resolve_root_id_conn(&conn, thread_or_root_id);
+        let m = get_member_by_name_conn(&conn, &root, clean_name)
+            .or_else(|| get_member_by_thread_conn(&conn, clean_name))
+            .ok_or_else(|| anyhow!("Crew member '{}' not found", clean_name))?;
+        (root, m)
+    };
+
+    let eff_limit = limit.clamp(1, 500);
+    let raw_msgs = crate::db::list_messages(&member.thread_id).unwrap_or_default();
+    let total = raw_msgs.len();
+    let msgs: Vec<crate::db::ChatMessage> = if total > eff_limit {
+        raw_msgs.into_iter().skip(total - eff_limit).collect()
+    } else {
+        raw_msgs
+    };
+
+    let (_, _, all_posts) = read_crew_board(&root_id, None, 200, None, None, None)?;
+    let member_posts: Vec<CrewBoardPostRecord> = all_posts
+        .into_iter()
+        .filter(|p| {
+            p.author_name == member.name
+                || post_matches_waiter(p, &member.name, &member.role, true)
+        })
+        .collect();
+
+    let mut turns: Vec<Value> = Vec::new();
+    let mut cur_prompt = String::new();
+    let mut cur_started_at: u64 = 0;
+    let mut cur_ended_at: u64 = 0;
+    let mut cur_steps: Vec<Value> = Vec::new();
+    let mut turn_idx: usize = 0;
+
+    let flush_turn = |turns: &mut Vec<Value>,
+                      turn_idx: &mut usize,
+                      prompt: &str,
+                      started_at: u64,
+                      ended_at: u64,
+                      steps: &mut Vec<Value>,
+                      posts: &[CrewBoardPostRecord]| {
+        if prompt.is_empty() && steps.is_empty() {
+            return;
+        }
+        *turn_idx += 1;
+        let worked_secs = ended_at.saturating_sub(started_at);
+        let worked_ms = if worked_secs > 0 { worked_secs * 1000 } else { 0 };
+        let turn_posts: Vec<&CrewBoardPostRecord> = posts
+            .iter()
+            .filter(|p| p.created_at >= started_at && p.created_at <= ended_at.saturating_add(2))
+            .collect();
+        turns.push(json!({
+            "turn_index": *turn_idx,
+            "worked_ms": worked_ms,
+            "started_at": started_at,
+            "ended_at": ended_at,
+            "trigger_prompt": prompt,
+            "steps": std::mem::take(steps),
+            "board_posts": turn_posts,
+        }));
+    };
+
+    for m in &msgs {
+        let ts = m.created_at;
+        if m.role == "user" {
+            if m.tool_name == "crew_fork_context" {
+                continue;
+            }
+            flush_turn(
+                &mut turns,
+                &mut turn_idx,
+                &cur_prompt,
+                cur_started_at,
+                cur_ended_at,
+                &mut cur_steps,
+                &member_posts,
+            );
+            cur_prompt = m.content.clone();
+            cur_started_at = ts;
+            cur_ended_at = ts;
+        } else if m.role == "assistant" {
+            if cur_started_at == 0 {
+                cur_started_at = ts;
+            }
+            cur_ended_at = cur_ended_at.max(ts);
+            if !m.thinking.trim().is_empty() {
+                cur_steps.push(json!({
+                    "kind": "thinking",
+                    "tool_name": "",
+                    "tool_summary": "Thinking...",
+                    "tool_args": "",
+                    "content": m.thinking,
+                    "result_preview": "",
+                    "created_at": ts,
+                }));
+            }
+            if !m.content.trim().is_empty() {
+                cur_steps.push(json!({
+                    "kind": "assistant",
+                    "tool_name": m.tool_name,
+                    "tool_summary": if m.tool_name == "llm_error" { "LLM Error" } else { "Assistant response" },
+                    "tool_args": "",
+                    "content": m.content,
+                    "result_preview": "",
+                    "created_at": ts,
+                }));
+            }
+        } else if m.role == "tool" {
+            if cur_started_at == 0 {
+                cur_started_at = ts;
+            }
+            cur_ended_at = cur_ended_at.max(ts);
+            let preview: String = m.content.chars().take(600).collect();
+            let summary = format_crew_tool_summary(&m.tool_name, &m.tool_args);
+            cur_steps.push(json!({
+                "kind": "tool",
+                "tool_name": m.tool_name,
+                "tool_summary": summary,
+                "tool_args": m.tool_args,
+                "content": "",
+                "result_preview": preview,
+                "created_at": ts,
+            }));
+        }
+    }
+    flush_turn(
+        &mut turns,
+        &mut turn_idx,
+        &cur_prompt,
+        cur_started_at,
+        cur_ended_at,
+        &mut cur_steps,
+        &member_posts,
+    );
+
+    if member.last_worked_ms > 0
+        && let Some(last) = turns.last_mut()
+        && last.get("worked_ms").and_then(|v| v.as_u64()).unwrap_or(0) == 0
+    {
+        last["worked_ms"] = json!(member.last_worked_ms);
+    }
+
+    Ok(json!({
+        "ok": true,
+        "root_thread_id": root_id,
+        "member": member,
+        "turns": turns,
+        "messages": msgs,
+        "board_posts": member_posts,
+    }))
+}
+
 /// Renders dedicated prompt instructions for AllCrew (`디렉터` or `크루` worker).
 pub fn render_crew_prompt_context(thread_id: &str) -> String {
     let conn = crate::db::lock_db();
@@ -2944,8 +4171,8 @@ pub fn render_crew_prompt_context(thread_id: &str) -> String {
   1. 자신의 브리프(`brief`)에 배정된 범위만 책임지고 수행하세요. 다른 크루가 담당한 파일이나 작업은 건드리지 마세요.
   2. 진행/협업/검수 요청은 `crew_post`로 보드에 남기고, 상대방이 응답해야 할 때만 `@크루이름` 멘션을 붙이세요.
   3. 작업 완료 후에는 `@검수크루` (또는 `@verifier`)에게 검증을 요청하거나, 이미 검증 크루 역할(`verifier`)이라면 독립적으로 빌드·테스트·파일을 직접 검증한 뒤 `@director`에게 최종 요약 보고(`kind: "verify"` 또는 `"deliverable"`)를 남기세요.
-  4. 중간 상태 보고나 단순 진행 공유로 `@director`를 호출하지 마세요. `@director` 호출은 오직 **검증 완료된 최종 산출물 전달** 또는 **사용자 의사결정이 필요한 블로커 발생** 시에만 사용하세요.
-  5. 동료 응답이 필요할 때는 `crew_wait`로 대기하세요 (폴링 루프 금지, 반응형 깨어남).
+  4. 중간 상태 보고나 단순 진행 공유로 `@director`를 호출하지 마세요. `@director` 호출은 오직 **검증 완료된 최종 산출물 전달** 또는 **복구 불가 오류·사용자 의사결정이 필요한 블로커 발생** 시에만 사용하세요.
+  5. 동료 응답이 필요할 때는 `crew_wait`로 대기하세요. 대기 중에는 턴을 즉시 깔끔하게 종료해 토큰 소모 0으로 대기하며, 매칭 포스트 도착 시 자동 기상됩니다 (폴링 루프 금지).
 "#,
             m.name,
             m.display_name,
@@ -2961,14 +4188,14 @@ pub fn render_crew_prompt_context(thread_id: &str) -> String {
     } else {
         out.push_str(
             r#"[AllCrew (`크루`) 디렉터 (`director`) 전용 지침 — 비차단 병렬 오케스트레이션 (최우선)]
-당신은 현재 **크루 모드**의 메인 **디렉터 (`director`)**입니다.
+당신은 현재 **크루 모드**의 메인 **디렉터 (`director`)**입니다. 일회성 서브에이전트와 달리, 내 세션 맥락을 공유하는 전담 AI 팀원(`크루`)들에게 상황에 맞게 업무를 분배하고 보드를 통해 서로 보고·검수하며 협업하도록 지휘합니다.
 - **절대 비차단 지휘자 원칙 (Non-Blocking Dispatcher)**:
-  1. 당신은 직접 파일을 읽거나 수정하거나 명령어를 실행하거나 웹을 탐색하지 않습니다. 모든 실무 조사·구현·브라우저 작업·검증은 백그라운드 **크루 (`crew`)**에게 배정하세요.
-  2. 사용자 요청이 들어오면 즉시 `crew_manage(action="status")`로 현재 크루 현황을 확인(필요 시)한 뒤, 독립된 하위 작업으로 쪼개어 `crew_manage(action="add", name, role, brief, workspace)`로 **즉시 병렬 배정**하세요.
-     - 동일 저장소를 동시에 수정하는 병렬 크루가 있다면 `workspace: "worktree"`를 지정해 작업 충돌을 차단하세요.
+  1. 당신은 직접 파일을 수정하거나 명령어를 실행하거나 웹을 탐색하지 않습니다. 모든 실무 조사·구현·브라우저 작업·검증은 백그라운드 **크루 (`crew`)**에게 배정하세요.
+  2. 사용자 요청이 들어오면 즉시 `crew_manage(action="status")`로 현재 크루 현황을 확인(필요 시)한 뒤, 독립된 하위 작업으로 쪼개어 `crew_manage(action="add", name, role, brief, workspace, fork)`로 **즉시 병렬 배정**하세요.
+     - 동일 저장소를 동시에 수정하는 병렬 크루가 있다면 `workspace: "share"` / `"branch"` / `"worktree"`를 지정해 작업 충돌을 차단하세요. 기존 대화 맥락을 이어받게 하려면 `fork: "director"` (또는 `"<크루이름>"`)를 지정하세요.
      - 중요한 구현/조사 작업에는 전용 검수 역할(`name: "verifier"`, `role: "verifier"`)을 함께 배정하고, 작업 크루 브리프에 *"완료 시 `@verifier`에게 검수를 넘기고, `@verifier`가 검증 통과 시 `@director`에게 최종 보고하세요"*라고 명시하세요.
-  3. **즉시 턴 종료 (Immediate Return)**: 크루 배정이 끝나면 사용자에게 배정된 크루와 담당 목표만 **1~3줄로 짧게 안내하고 즉시 턴을 종료**하세요. 크루 완료를 기다리며 `crew_wait`나 대기 루프를 절대 실행하지 마세요! 사용자가 곧바로 추가 요청을 입력할 수 있어야 합니다.
-  4. 사용자가 크루 작업 중 추가 요청을 보내면, 기존 크루 완료를 기다리지 말고 즉시 새 크루를 추가하거나 유휴 크루에게 `crew_post`로 병렬 지시한 뒤 다시 즉시 응답을 마치세요.
+  3. **즉시 턴 종료 (Immediate Return)**: 크루 배정이 끝나면 사용자에게 배정된 크루와 담당 목표만 **1~3줄로 짧게 안내하고 즉시 턴을 종료**하세요. 크루 완료를 기다리며 대기 루프를 절대 실행하지 마세요! 크루가 `@director`에게 최종 보고하면 자동으로 깨어나 종합 보고합니다.
+  4. 사용자가 크루 작업 중 추가 요청을 보내면, 기존 크루 완료를 기다리지 말고 즉시 새 크루를 추가하거나 유휴 크루에게 `crew_post` / `crew_manage(action="nudge")`로 병렬 지시한 뒤 다시 즉시 응답을 마치세요.
   5. 크루를 배정한 응답 끝에는 `[크루 보드 열기](allcrew://board)` 링크를 자연스럽게 포함해 사용자가 바로 보드를 열 수 있게 하세요. 응답과 안내에서는 반드시 `AllCrew` / `크루` / `디렉터` / `크루 보드` 용어만 사용하세요.
 "#,
         );
@@ -3006,7 +4233,7 @@ pub fn crew_tool_definitions(include_wait: bool) -> Vec<Value> {
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["status", "add", "kill", "title", "model", "interrupt"],
+                            "enum": ["status", "models", "add", "kill", "title", "model", "interrupt", "nudge", "retry"],
                             "description": "Management action to perform"
                         },
                         "name": {
@@ -3025,16 +4252,16 @@ pub fn crew_tool_definitions(include_wait: bool) -> Vec<Value> {
                         },
                         "workspace": {
                             "type": "string",
-                            "enum": ["inherit", "worktree"],
+                            "enum": ["inherit", "share", "branch", "worktree"],
                             "default": "inherit",
-                            "description": "Use 'worktree' when parallel crews edit/build the same Git repo simultaneously; 'inherit' for readers/verifiers or non-repo tasks"
+                            "description": "Use 'share'/'branch'/'worktree' when parallel crews edit/build the same Git repo simultaneously; 'inherit' for readers/verifiers or non-repo tasks"
                         },
                         "browser_isolation": {
                             "type": "boolean",
                             "default": true,
                             "description": "Give this crew its own isolated embedded browser session so parallel browser crews do not collide"
                         },
-                        "model": { "type": "string", "description": "Optional LLM model override for `add` or `model`" },
+                        "model": { "type": "string", "description": "Optional LLM model override for `add`, `model`, or `nudge`/`retry`" },
                         "effort": { "type": "string", "enum": ["low", "medium", "high", "xhigh", "ultra"] },
                         "n": { "type": "integer", "description": "Optional number of sharded copies (<name>-1 .. <name>-n)" },
                         "tasks": {
@@ -3042,7 +4269,9 @@ pub fn crew_tool_definitions(include_wait: bool) -> Vec<Value> {
                             "items": { "type": "string" },
                             "description": "Optional per-worker slice targets (<name>-1 .. <name>-k)"
                         },
-                        "fork_turns": { "type": "integer", "default": 0, "description": "Optional recent parent turns to copy (0 = clean start)" },
+                        "fork": { "type": "string", "description": "Optional source member name (or 'director') whose conversation history is forked into the new worker" },
+                        "fork_turns": { "type": "integer", "default": 0, "description": "Optional recent source turns to copy (0 = clean start unless `fork` is set)" },
+                        "text": { "type": "string", "description": "Optional directive message for `nudge` or `retry`" },
                         "title": { "type": "string", "description": "Crew session title for `title`" }
                     },
                     "required": ["action"]
@@ -3092,13 +4321,12 @@ pub fn crew_tool_definitions(include_wait: bool) -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "crew_wait",
-                "description": "Reactively sleep with zero polling until another crew member posts a matching message after `since` (by `@mention` or `@all` when `mentions_only: true`, or any post when `false`).",
+                "description": "Park your turn with zero token cost until another crew member posts a matching message after `since` (by `@mention` or `@all` when `mentions_only: true`, or any post when `false`). If matching posts already exist, returns them immediately; otherwise cleanly ends this turn and reactively resumes your session when triggered.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "since": { "type": "integer", "description": "Wait for board posts with seq > since" },
-                        "mentions_only": { "type": "boolean", "default": true, "description": "True to wake only on @your-name / @all; false to wake on any post" },
-                        "timeout_ms": { "type": "integer", "default": 60000, "description": "Safety timeout in milliseconds (100..300000)" }
+                        "mentions_only": { "type": "boolean", "default": true, "description": "True to wake only on @your-name / @all; false to wake on any post" }
                     },
                     "required": ["since"]
                 }
@@ -3228,11 +4456,7 @@ pub async fn execute_crew_tool(
                 .get("mentions_only")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true);
-            let timeout_ms = args
-                .get("timeout_ms")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(60_000);
-            let res = wait_for_board(thread_id, since, mentions_only, timeout_ms).await?;
+            let res = park_for_board(thread_id, since, mentions_only)?;
             Ok(Some((res, None)))
         }
         _ => Ok(None),
@@ -3966,5 +5190,503 @@ mod tests {
 
         cleanup_crew_session_resources(&root_id);
         server_task.abort();
+    }
+
+    #[tokio::test]
+    async fn zero_token_park_for_board_and_director_auto_wake_synthesis() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let root_id = unique_root("park-wake");
+        crate::db::append_message(&root_id, "user", "총괄 작업 시작", "", "", "", "", "{}").unwrap();
+        set_crew_mode_enabled(&root_id, true).unwrap();
+
+        let saw_callback_as_user = Arc::new(AtomicBool::new(false));
+        let verifier_llm_calls = Arc::new(AtomicU64::new(0));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        let saw_cb_cl = saw_callback_as_user.clone();
+        let v_calls_cl = verifier_llm_calls.clone();
+        let server_task = tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    break;
+                };
+                let saw_cb_inner = saw_cb_cl.clone();
+                let v_calls_inner = v_calls_cl.clone();
+                tokio::spawn(async move {
+                    let mut buf = Vec::new();
+                    let mut tmp = [0u8; 4096];
+                    let header_end;
+                    loop {
+                        let n = socket.read(&mut tmp).await.unwrap_or(0);
+                        if n == 0 {
+                            return;
+                        }
+                        buf.extend_from_slice(&tmp[..n]);
+                        if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                            header_end = pos + 4;
+                            break;
+                        }
+                    }
+                    let hdrs = String::from_utf8_lossy(&buf[..header_end]);
+                    let content_len = hdrs
+                        .lines()
+                        .find_map(|l| {
+                            let (k, v) = l.split_once(':')?;
+                            k.trim().eq_ignore_ascii_case("content-length").then(|| v.trim().parse::<usize>().ok())?
+                        })
+                        .unwrap_or(0);
+                    while buf.len() < header_end + content_len {
+                        let n = socket.read(&mut tmp).await.unwrap_or(0);
+                        if n == 0 {
+                            break;
+                        }
+                        buf.extend_from_slice(&tmp[..n]);
+                    }
+                    let req_json: Value = serde_json::from_slice(&buf[header_end..header_end + content_len])
+                        .unwrap_or(Value::Null);
+                    let msgs = req_json.get("messages").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+                    let all_user_text = msgs
+                        .iter()
+                        .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+                        .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    let tool_msg_count = msgs
+                        .iter()
+                        .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("tool"))
+                        .count();
+
+                    let make_tc = |id: &str, name: &str, args: Value| -> Value {
+                        json!({
+                            "id": id,
+                            "type": "function",
+                            "function": { "name": name, "arguments": args.to_string() }
+                        })
+                    };
+
+                    let assistant_msg = if all_user_text.contains("[CREW BOARD CALLBACK]")
+                        || all_user_text.contains("[CREW_DIRECTOR_AUTO_WAKE]")
+                    {
+                        if msgs.iter().any(|m| {
+                            m.get("role").and_then(|r| r.as_str()) == Some("user")
+                                && m.get("content")
+                                    .and_then(|c| c.as_str())
+                                    .is_some_and(|s| s.contains("최종 검수 합격"))
+                        }) {
+                            saw_cb_inner.store(true, Ordering::SeqCst);
+                        }
+                        json!({
+                            "role": "assistant",
+                            "content": "디렉터 최종 종합 보고: 모든 크루 검증 통과를 확인했습니다."
+                        })
+                    } else if all_user_text.contains("코드 구현 후 @verifier 호출") {
+                        if tool_msg_count == 0 {
+                            json!({
+                                "role": "assistant",
+                                "content": "",
+                                "tool_calls": [make_tc("tc_c1", "crew_post", json!({
+                                    "kind": "handoff",
+                                    "text": "@verifier 구현 완료, 검수 부탁합니다."
+                                }))]
+                            })
+                        } else {
+                            json!({ "role": "assistant", "content": "구현 종료" })
+                        }
+                    } else if all_user_text.contains("대기 후 최종 검수 보고") {
+                        v_calls_inner.fetch_add(1, Ordering::SeqCst);
+                        if tool_msg_count == 0 {
+                            json!({
+                                "role": "assistant",
+                                "content": "",
+                                "tool_calls": [make_tc("tc_v_wait", "crew_wait", json!({
+                                    "since": 0,
+                                    "mentions_only": true
+                                }))]
+                            })
+                        } else if tool_msg_count == 1 {
+                            json!({
+                                "role": "assistant",
+                                "content": "",
+                                "tool_calls": [make_tc("tc_v_post", "crew_post", json!({
+                                    "kind": "verify",
+                                    "text": "@director 최종 검수 합격!"
+                                }))]
+                            })
+                        } else {
+                            json!({ "role": "assistant", "content": "검수 종료" })
+                        }
+                    } else {
+                        json!({ "role": "assistant", "content": "확인" })
+                    };
+
+                    let resp_body = json!({
+                        "id": "chatcmpl-park",
+                        "object": "chat.completion",
+                        "model": "gpt-6-astra",
+                        "choices": [{
+                            "index": 0,
+                            "message": assistant_msg,
+                            "finish_reason": if assistant_msg.get("tool_calls").is_some() { "tool_calls" } else { "stop" }
+                        }]
+                    })
+                    .to_string();
+                    let http_resp = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        resp_body.len(),
+                        resp_body
+                    );
+                    let _ = socket.write_all(http_resp.as_bytes()).await;
+                    let _ = socket.shutdown().await;
+                });
+            }
+        });
+
+        let mut cfg = AppConfig::default();
+        cfg.provider_name = "openai".to_string();
+        cfg.api_style = "chat_completions".to_string();
+        cfg.base_url = format!("http://127.0.0.1:{port}/v1");
+        cfg.api_key = "sk-test-zero-token-park".to_string();
+        cfg.model = "gpt-6-astra".to_string();
+        cfg.effort = "none".to_string();
+
+        let mut sse_rx = crate::agent::subscribe_events();
+
+        // Spawn verifier first -> parks in zero-token `waiting` after 1 LLM call
+        manage_crew(
+            &root_id,
+            &json!({
+                "action": "add",
+                "name": "verifier",
+                "role": "verifier",
+                "brief": "대기 후 최종 검수 보고"
+            }),
+            &cfg,
+            true,
+        )
+        .await
+        .unwrap();
+
+        tokio::time::timeout(Duration::from_secs(4), async {
+            loop {
+                let st = get_crew_status(&root_id).unwrap();
+                if st.members.iter().any(|m| {
+                    m.name == "verifier"
+                        && m.state == "waiting"
+                        && crate::agent::get_active_thread_stream(&m.thread_id).is_none()
+                }) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("verifier must cleanly park turn into zero-token waiting state");
+
+        assert_eq!(
+            verifier_llm_calls.load(Ordering::SeqCst),
+            1,
+            "Zero-token crew_wait must end turn immediately after 1 LLM step"
+        );
+
+        // Now spawn coder -> wakes verifier -> verifier reports @director -> director auto-wakes!
+        manage_crew(
+            &root_id,
+            &json!({
+                "action": "add",
+                "name": "coder",
+                "role": "coder",
+                "brief": "코드 구현 후 @verifier 호출"
+            }),
+            &cfg,
+            true,
+        )
+        .await
+        .unwrap();
+
+        tokio::time::timeout(Duration::from_secs(6), async {
+            loop {
+                let msgs = crate::db::list_messages(&root_id).unwrap_or_default();
+                let dir_replied = msgs.iter().any(|m| {
+                    m.role == "assistant"
+                        && m.tool_name != "crew_callback"
+                        && m.content.contains("디렉터 최종 종합 보고")
+                });
+                if dir_replied {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("Director must auto-wake cleanly after @director callback");
+
+        assert!(
+            saw_callback_as_user.load(Ordering::SeqCst),
+            "crew_callback must be mapped to user role in director LLM history"
+        );
+
+        let log = get_crew_member_log(&root_id, "verifier", 50).unwrap();
+        assert_eq!(log["ok"], true);
+        assert!(
+            log["turns"].as_array().unwrap().len() >= 2,
+            "Verifier should have park turn + woken synthesis turn in member_log"
+        );
+
+        let mut saw_tel_sse = false;
+        while let Ok(ev) = sse_rx.try_recv() {
+            if ev.get("root_thread_id").and_then(|v| v.as_str()) == Some(root_id.as_str())
+                && ev.get("type").and_then(|v| v.as_str()) == Some("crew_member_telemetry")
+            {
+                saw_tel_sse = true;
+                break;
+            }
+        }
+        assert!(saw_tel_sse, "Expected crew_member_telemetry SSE event");
+
+        cleanup_crew_session_resources(&root_id);
+        server_task.abort();
+    }
+
+    #[tokio::test]
+    async fn http_410_service_moved_retries_automatically_without_killing_worker() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let root_id = unique_root("retry410");
+        let attempt_num = Arc::new(AtomicU64::new(0));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let att_cl = attempt_num.clone();
+
+        let server_task = tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    break;
+                };
+                let att_inner = att_cl.clone();
+                tokio::spawn(async move {
+                    let mut buf = Vec::new();
+                    let mut tmp = [0u8; 4096];
+                    let header_end;
+                    loop {
+                        let n = socket.read(&mut tmp).await.unwrap_or(0);
+                        if n == 0 {
+                            return;
+                        }
+                        buf.extend_from_slice(&tmp[..n]);
+                        if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                            header_end = pos + 4;
+                            break;
+                        }
+                    }
+                    let hdrs = String::from_utf8_lossy(&buf[..header_end]);
+                    let content_len = hdrs
+                        .lines()
+                        .find_map(|l| {
+                            let (k, v) = l.split_once(':')?;
+                            k.trim().eq_ignore_ascii_case("content-length").then(|| v.trim().parse::<usize>().ok())?
+                        })
+                        .unwrap_or(0);
+                    while buf.len() < header_end + content_len {
+                        let n = socket.read(&mut tmp).await.unwrap_or(0);
+                        if n == 0 {
+                            break;
+                        }
+                        buf.extend_from_slice(&tmp[..n]);
+                    }
+                    let idx = att_inner.fetch_add(1, Ordering::SeqCst) + 1;
+                    let http_resp = if idx <= 2 {
+                        let err_body = r#"{"error":{"message":"We could not complete this request. Try again shortly. This request was not billed.","type":"api_error","code":"service_moved"}}"#;
+                        format!(
+                            "HTTP/1.1 410 Gone\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                            err_body.len(),
+                            err_body
+                        )
+                    } else {
+                        let ok_body = json!({
+                            "id": "chatcmpl-410-recovered",
+                            "object": "chat.completion",
+                            "model": "gpt-6-astra",
+                            "choices": [{
+                                "index": 0,
+                                "message": {
+                                    "role": "assistant",
+                                    "content": "410 일시 오류 자동 재시도 복구 완료"
+                                },
+                                "finish_reason": "stop"
+                            }]
+                        })
+                        .to_string();
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                            ok_body.len(),
+                            ok_body
+                        )
+                    };
+                    let _ = socket.write_all(http_resp.as_bytes()).await;
+                    let _ = socket.shutdown().await;
+                });
+            }
+        });
+
+        let mut cfg = AppConfig::default();
+        cfg.provider_name = "openai".to_string();
+        cfg.api_style = "chat_completions".to_string();
+        cfg.base_url = format!("http://127.0.0.1:{port}/v1");
+        cfg.api_key = "sk-test-410-retry".to_string();
+        cfg.model = "gpt-6-astra".to_string();
+        cfg.effort = "none".to_string();
+
+        manage_crew(
+            &root_id,
+            &json!({
+                "action": "add",
+                "name": "resilient-verifier",
+                "role": "verifier",
+                "brief": "410 복구 테스트"
+            }),
+            &cfg,
+            true,
+        )
+        .await
+        .unwrap();
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let st = get_crew_status(&root_id).unwrap();
+                if st.members.iter().any(|m| {
+                    m.name == "resilient-verifier"
+                        && m.state == "waiting"
+                        && m.last_post_preview.contains("자동 재시도 복구")
+                }) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("Worker must auto-retry transient HTTP 410 Gone and complete cleanly");
+
+        assert!(attempt_num.load(Ordering::SeqCst) >= 3);
+        cleanup_crew_session_resources(&root_id);
+        server_task.abort();
+    }
+
+    #[test]
+    fn oauth_worker_model_resolution_and_cold_boot_recovery() {
+        let ov = Some((
+            "https://api.cheapai.im/v1".to_string(),
+            "sk-cheapai".to_string(),
+            "responses".to_string(),
+            "cheapai".to_string(),
+        ));
+        let openai_cfg = resolve_crew_worker_cfg("openai-oauth/gpt-5.4", "high", "", &ov);
+        assert_eq!(openai_cfg.provider_name, "openai_oauth");
+        assert_eq!(openai_cfg.api_style, "responses");
+        assert_eq!(openai_cfg.model, "openai-oauth/gpt-5.4");
+        assert!(openai_cfg.base_url.is_empty());
+
+        let claude_cfg =
+            resolve_crew_worker_cfg("claude-oauth/claude-sonnet-4-6", "medium", "", &ov);
+        assert_eq!(claude_cfg.provider_name, "claude_oauth");
+        assert_eq!(claude_cfg.api_style, "anthropic");
+        assert_eq!(claude_cfg.model, "claude-oauth/claude-sonnet-4-6");
+        assert!(claude_cfg.base_url.is_empty());
+
+        let cheapai_cfg = resolve_crew_worker_cfg("gpt-6-astra", "xhigh", "", &ov);
+        assert_eq!(cheapai_cfg.provider_name, "cheapai");
+        assert_eq!(cheapai_cfg.base_url, "https://api.cheapai.im/v1");
+
+        // Verify cold boot orphan recovery marks working crew rows stopped with cold_boot forensics
+        let root_id = unique_root("coldboot");
+        {
+            let conn = crate::db::lock_db();
+            let now = now_unix_secs() as i64;
+            conn.execute(
+                "INSERT INTO threads (id, title, mode, model, effort, created_at, updated_at, parent_thread_id, root_thread_id, agent_path, agent_role, depth, agent_status)
+                 VALUES ('thread-orphan-1', 'orphan', 'crew_worker', 'gpt-6-astra', 'high', ?1, ?1, ?2, ?2, '/crew/orphan', 'coder', 1, 'running')",
+                params![now, root_id],
+            ).unwrap();
+            conn.execute(
+                "INSERT INTO crew_members (id, root_thread_id, name, display_name, role, thread_id, model, effort, state, last_active_at, created_at, updated_at)
+                 VALUES ('crew-orphan-1', ?1, 'orphan', 'orphan', 'coder', 'thread-orphan-1', 'gpt-6-astra', 'high', 'working', ?2, ?2, ?2)",
+                params![root_id, now],
+            ).unwrap();
+            init_crew_tables(&conn).unwrap();
+            let rec = get_member_by_name_conn(&conn, &root_id, "orphan").unwrap();
+            assert_eq!(rec.state, "stopped");
+            assert_eq!(rec.cancel_source, "cold_boot");
+            assert_eq!(rec.cancel_reason, "app_restart_orphan_recovery");
+            let th_status: String = conn
+                .query_row("SELECT agent_status FROM threads WHERE id = 'thread-orphan-1'", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(th_status, "interrupted");
+        }
+    }
+
+    #[tokio::test]
+    async fn fork_share_branch_and_nudge_retry_reset_forensics() {
+        let root_id = unique_root("fork-nudge");
+        crate::db::append_message(
+            &root_id,
+            "user",
+            "부모 대화 컨텍스트 핵심 요구사항",
+            "",
+            "",
+            "",
+            "",
+            "{}",
+        )
+        .unwrap();
+        let cfg = AppConfig::default();
+
+        let add = manage_crew(
+            &root_id,
+            &json!({
+                "action": "add",
+                "name": "forked-coder",
+                "role": "coder",
+                "brief": "포크된 맥락 이어 작업",
+                "fork": "director"
+            }),
+            &cfg,
+            false,
+        )
+        .await
+        .unwrap();
+        let w_tid = add["added"][0]["thread_id"].as_str().unwrap().to_string();
+        let w_msgs = crate::db::list_messages(&w_tid).unwrap();
+        assert!(
+            w_msgs
+                .iter()
+                .any(|m| m.tool_name == "crew_fork_context" && m.content.contains("핵심 요구사항")),
+            "fork: 'director' must copy parent conversation into worker thread"
+        );
+
+        let models_res = manage_crew(&root_id, &json!({ "action": "models" }), &cfg, false)
+            .await
+            .unwrap();
+        assert_eq!(models_res["ok"], true);
+        assert!(!models_res["groups"].as_array().unwrap().is_empty());
+
+        {
+            let conn = crate::db::lock_db();
+            conn.execute(
+                "UPDATE crew_members SET state = 'stopped', last_error = 'boom', cancel_source = 'llm_error', cancel_reason = 'boom' WHERE thread_id = ?1",
+                params![w_tid],
+            ).unwrap();
+        }
+        let retried = manage_crew(
+            &root_id,
+            &json!({ "action": "retry", "name": "forked-coder", "text": "재개하세요" }),
+            &cfg,
+            false,
+        )
+        .await
+        .unwrap();
+        assert_eq!(retried["ok"], true);
+        assert_eq!(retried["member"]["last_error"], "");
+        assert_eq!(retried["member"]["cancel_source"], "");
     }
 }

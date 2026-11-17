@@ -243,17 +243,20 @@ pub fn init_emergency_esc_hook() {
                                 let vk = kb.vkCode as WORD;
                                 if !is_injected && (vk == VK_ESCAPE || vk == VK_PAUSE) {
                                     let cua_active = CUA_ACTIVE.load(Ordering::SeqCst);
-                                    let turn_active =
-                                        AGENT_TURN_ACTIVE_COUNT.load(Ordering::SeqCst) > 0;
-                                    if cua_active || turn_active {
+                                    if cua_active {
                                         let was_interrupted =
                                             CUA_INTERRUPTED.swap(true, Ordering::SeqCst);
                                         if !was_interrupted {
                                             std::thread::spawn(|| {
+                                                crate::crew::mark_all_active_cancel_forensics(
+                                                    "cua_esc",
+                                                    "Physical ESC/Pause pressed during active CUA",
+                                                );
                                                 crate::agent::interrupt_all_active_threads();
                                                 crate::agent::emit_event(
                                                     "emergency_stop",
                                                     serde_json::json!({
+                                                        "source": "cua_esc",
                                                         "message": "Physical ESC interrupt triggered."
                                                     }),
                                                 );
