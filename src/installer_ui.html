@@ -1320,7 +1320,7 @@
       </div>
       <span class="tb-title" id="tb-product-title">CheapAI AllUse Setup</span>
       <div class="tb-badges">
-        <span class="pill-badge" id="tb-version-badge">v1.0.2</span>
+        <span class="pill-badge" id="tb-version-badge">v1.0.3</span>
         <span class="pill-badge" id="tb-platform-badge">win32 · arm64</span>
         <span class="pill-badge strong hidden" id="tb-dev-badge">DEV PREVIEW</span>
       </div>
@@ -2037,7 +2037,7 @@
     },
     apiState: {
       productName: 'CheapAI AllUse',
-      version: '1.0.2',
+      version: '1.0.3',
       os: 'windows',
       arch: 'arm64',
       nativeArch: 'arm64',
@@ -2486,7 +2486,7 @@
 
     $('btn-lang').textContent = state.lang === 'ko' ? 'EN' : 'KO';
     $('tb-product-title').textContent = (s.productName ? s.productName + ' Setup' : t('titlebarProduct'));
-    $('tb-version-badge').textContent = 'v' + (s.version || '1.0.2');
+    $('tb-version-badge').textContent = 'v' + (s.version || '1.0.3');
     $('tb-platform-badge').textContent = (s.os || 'windows') + ' · ' + (s.arch || 'arm64');
     $('tb-dev-badge').classList.toggle('hidden', s.payloadMode !== 'dev');
 
