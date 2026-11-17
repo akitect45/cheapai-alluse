@@ -505,7 +505,8 @@ pub async fn refresh_and_persist_models_from_endpoint(
         ov_key
     };
     let cat = crate::media::fetch_media_models_catalog_for(&cfg, ov_base, effective_key).await;
-    if matches_cfg_base && cat.get("endpointOk").and_then(Value::as_bool) == Some(true) {
+    let endpoint_ok = cat.get("endpointOk").and_then(Value::as_bool) == Some(true);
+    if matches_cfg_base {
         let mut updated = get_config();
         let mut changed = false;
         if let Some(cm_val) = cat.get("chatModels") {
@@ -513,10 +514,11 @@ pub async fn refresh_and_persist_models_from_endpoint(
                 serde_json::from_value::<Vec<crate::config::ModelInfo>>(cm_val.clone())
             {
                 if !parsed_cm.is_empty() {
-                    if updated.model.trim().is_empty()
-                        || !parsed_cm
-                            .iter()
-                            .any(|m| m.id.eq_ignore_ascii_case(&updated.model))
+                    if endpoint_ok
+                        && (updated.model.trim().is_empty()
+                            || !parsed_cm
+                                .iter()
+                                .any(|m| m.id.eq_ignore_ascii_case(&updated.model)))
                     {
                         updated.model = parsed_cm[0].id.clone();
                         changed = true;
@@ -530,16 +532,18 @@ pub async fn refresh_and_persist_models_from_endpoint(
                 }
             }
         }
-        if let Some(def_img) = cat.get("defaultImageModel").and_then(Value::as_str) {
-            if updated.default_image_model != def_img {
-                updated.default_image_model = def_img.to_string();
-                changed = true;
+        if endpoint_ok {
+            if let Some(def_img) = cat.get("defaultImageModel").and_then(Value::as_str) {
+                if updated.default_image_model != def_img {
+                    updated.default_image_model = def_img.to_string();
+                    changed = true;
+                }
             }
-        }
-        if let Some(def_vid) = cat.get("defaultVideoModel").and_then(Value::as_str) {
-            if updated.default_video_model != def_vid {
-                updated.default_video_model = def_vid.to_string();
-                changed = true;
+            if let Some(def_vid) = cat.get("defaultVideoModel").and_then(Value::as_str) {
+                if updated.default_video_model != def_vid {
+                    updated.default_video_model = def_vid.to_string();
+                    changed = true;
+                }
             }
         }
         if changed {
@@ -1200,7 +1204,15 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
 
         ("GET", "/api/config") => {
             let cfg = get_config();
-            Ok(public_config_value(&cfg))
+            let mut val = public_config_value(&cfg);
+            let oauth_models = crate::oauth::list_connected_models_for_catalog();
+            if !oauth_models.is_empty() {
+                val["models"] = json!(crate::config::merge_models_preserving_composite(
+                    cfg.models,
+                    oauth_models
+                ));
+            }
+            Ok(val)
         }
 
         ("POST", "/api/config") => {
@@ -1251,7 +1263,10 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
                 "screenshot_max_dim": updated.screenshot_max_dim,
                 "ai_self_heal_enabled": updated.ai_self_heal_enabled,
                 "artex_enabled": updated.artex_enabled,
-                "models": updated.models,
+                "models": crate::config::merge_models_preserving_composite(
+                    updated.models,
+                    crate::oauth::list_connected_models_for_catalog()
+                ),
             }))
         }
 
@@ -1294,7 +1309,10 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
                 "screenshot_max_dim": updated.screenshot_max_dim,
                 "ai_self_heal_enabled": updated.ai_self_heal_enabled,
                 "artex_enabled": updated.artex_enabled,
-                "models": updated.models,
+                "models": crate::config::merge_models_preserving_composite(
+                    updated.models,
+                    crate::oauth::list_connected_models_for_catalog()
+                ),
             }))
         }
 
@@ -1317,8 +1335,13 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
                 Ok(resp) => {
                     let status = resp.status().as_u16();
                     let val: Value = resp.json().await.unwrap_or_else(|_| json!({}));
-                    let (chat_models, img_models, vid_models) =
+                    let (parsed_chat, img_models, vid_models) =
                         crate::media::classify_and_parse_models_payload(&val, &cfg.provider_name);
+                    let oauth_models = crate::oauth::fetch_connected_catalog_models_with_remote().await;
+                    let chat_models = crate::config::merge_models_preserving_composite(
+                        parsed_chat,
+                        oauth_models,
+                    );
                     let count = val
                         .get("data")
                         .and_then(|d| d.as_array())

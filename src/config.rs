@@ -1398,9 +1398,10 @@ impl AppConfig {
 
                     let clean_m_id = normalize_model_id(m_id, prov_id).to_string();
                     if clean_m_id.is_empty()
-                        || discovered_models
-                            .iter()
-                            .any(|existing| existing.id.eq_ignore_ascii_case(&clean_m_id))
+                        || discovered_models.iter().any(|existing| {
+                            existing.provider.eq_ignore_ascii_case(prov_id)
+                                && existing.id.eq_ignore_ascii_case(&clean_m_id)
+                        })
                     {
                         continue;
                     }
@@ -1435,9 +1436,10 @@ impl AppConfig {
             for prev in &self.models {
                 let pid = prev.id.trim();
                 if !pid.is_empty()
-                    && !discovered_models
-                        .iter()
-                        .any(|m| m.id.eq_ignore_ascii_case(pid))
+                    && !discovered_models.iter().any(|m| {
+                        m.provider.eq_ignore_ascii_case(&prev.provider)
+                            && m.id.eq_ignore_ascii_case(pid)
+                    })
                 {
                     discovered_models.push(prev.clone());
                 }
@@ -1891,8 +1893,57 @@ pub fn normalize_reasoning_effort(raw: &str) -> &'static str {
     }
 }
 
+pub(crate) fn is_oauth_provider_name(provider: &str) -> bool {
+    let p = provider.trim();
+    p.eq_ignore_ascii_case("openai-oauth")
+        || p.eq_ignore_ascii_case("claude-oauth")
+        || p.eq_ignore_ascii_case("anthropic-oauth")
+}
+
+pub(crate) fn is_oauth_model_id(raw_model: &str) -> bool {
+    let cur = raw_model
+        .trim()
+        .trim_matches(|c: char| matches!(c, '"' | '\'' | '`'))
+        .trim();
+    if let Some((pfx, _)) = cur.split_once('/') {
+        let pfx_trim = pfx
+            .trim()
+            .trim_matches(|c: char| matches!(c, '"' | '\'' | '`'))
+            .trim();
+        return is_oauth_provider_name(pfx_trim);
+    }
+    false
+}
+
+pub(crate) fn model_composite_key(provider: &str, id: &str) -> (String, String) {
+    (
+        provider.trim().to_ascii_lowercase(),
+        id.trim().to_ascii_lowercase(),
+    )
+}
+
+pub(crate) fn merge_models_preserving_composite(
+    base: Vec<ModelInfo>,
+    extra: impl IntoIterator<Item = ModelInfo>,
+) -> Vec<ModelInfo> {
+    let mut out = Vec::with_capacity(base.len());
+    let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    for m in base.into_iter().chain(extra) {
+        let id = m.id.trim();
+        if id.is_empty() {
+            continue;
+        }
+        let key = model_composite_key(&m.provider, id);
+        if seen.insert(key) {
+            out.push(m);
+        }
+    }
+    out
+}
+
 /// Strips repeated or whitespace-padded leading provider prefixes (`"cheapai/gpt-6-astra"`,
-/// `"cheapai / gpt-6-astra"`, `"<provider>/<model>"`) and outer quotes while preserving nested vendor paths.
+/// `"cheapai / gpt-6-astra"`, `"<provider>/<model>"`) and outer quotes while preserving nested vendor paths
+/// and external OAuth prefixes (`openai-oauth/`, `claude-oauth/`, `anthropic-oauth/`).
 pub(crate) fn normalize_model_id<'a>(raw_model: &'a str, provider_name: &str) -> &'a str {
     let prov = provider_name
         .trim()
@@ -1907,6 +1958,9 @@ pub(crate) fn normalize_model_id<'a>(raw_model: &'a str, provider_name: &str) ->
             .trim()
             .trim_matches(|c: char| matches!(c, '"' | '\'' | '`'))
             .trim();
+        if is_oauth_provider_name(pfx_trim) {
+            break;
+        }
         if (!prov.is_empty() && pfx_trim.eq_ignore_ascii_case(prov))
             || pfx_trim.eq_ignore_ascii_case("cheapai")
         {
@@ -2691,5 +2745,78 @@ mod credential_security_tests {
             );
             assert_eq!(expand_tilde_path_with_home("/", home), "/");
         }
+    }
+
+    #[test]
+    fn preserves_oauth_prefixes_and_same_named_models_across_providers() {
+        assert_eq!(
+            super::normalize_model_id("openai-oauth/gpt-5.4", "openai-oauth"),
+            "openai-oauth/gpt-5.4"
+        );
+        assert_eq!(
+            super::normalize_model_id("claude-oauth/claude-sonnet-4-6", "claude-oauth"),
+            "claude-oauth/claude-sonnet-4-6"
+        );
+        assert_eq!(
+            super::normalize_model_id("anthropic-oauth/claude-opus-4-6", "anthropic-oauth"),
+            "anthropic-oauth/claude-opus-4-6"
+        );
+
+        let base = vec![
+            super::ModelInfo {
+                id: "gpt-5.4".to_string(),
+                name: "GPT-5.4 (CheapAI)".to_string(),
+                provider: "cheapai".to_string(),
+                reasoning: true,
+                variants: vec!["high".to_string()],
+                context_limit: 400_000,
+                output_limit: 128_000,
+            },
+            super::ModelInfo {
+                id: "claude-sonnet-4-6".to_string(),
+                name: "Claude Sonnet 4.6".to_string(),
+                provider: "cheapai".to_string(),
+                reasoning: true,
+                variants: vec!["high".to_string()],
+                context_limit: 200_000,
+                output_limit: 16_384,
+            },
+        ];
+        let extra = vec![
+            super::ModelInfo {
+                id: "gpt-5.4".to_string(),
+                name: "GPT-5.4 (OpenAI OAuth raw)".to_string(),
+                provider: "openai-oauth".to_string(),
+                reasoning: true,
+                variants: vec!["xhigh".to_string()],
+                context_limit: 272_000,
+                output_limit: 32_768,
+            },
+            super::ModelInfo {
+                id: "openai-oauth/gpt-5.4".to_string(),
+                name: "GPT-5.4 (OpenAI OAuth)".to_string(),
+                provider: "openai-oauth".to_string(),
+                reasoning: true,
+                variants: vec!["xhigh".to_string()],
+                context_limit: 272_000,
+                output_limit: 32_768,
+            },
+            super::ModelInfo {
+                id: "claude-oauth/claude-sonnet-4-6".to_string(),
+                name: "Claude Sonnet 4.6 (Claude OAuth)".to_string(),
+                provider: "claude-oauth".to_string(),
+                reasoning: true,
+                variants: vec!["xhigh".to_string()],
+                context_limit: 200_000,
+                output_limit: 16_384,
+            },
+        ];
+        let merged = super::merge_models_preserving_composite(base, extra);
+        assert_eq!(merged.len(), 5);
+        assert!(merged.iter().any(|m| m.provider == "cheapai" && m.id == "gpt-5.4"));
+        assert!(merged.iter().any(|m| m.provider == "openai-oauth" && m.id == "gpt-5.4"));
+        assert!(merged.iter().any(|m| m.provider == "openai-oauth" && m.id == "openai-oauth/gpt-5.4"));
+        assert!(merged.iter().any(|m| m.provider == "cheapai" && m.id == "claude-sonnet-4-6"));
+        assert!(merged.iter().any(|m| m.provider == "claude-oauth" && m.id == "claude-oauth/claude-sonnet-4-6"));
     }
 }

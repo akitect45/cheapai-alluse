@@ -747,13 +747,14 @@
     box-shadow: none !important;
   }
   .cs-pop-list {
+    position: relative;
     display: flex;
     flex-direction: column;
     gap: 1.5px;
     max-height: 268px;
     overflow-y: auto;
     overflow-x: hidden;
-    padding-right: 1px;
+    padding: 6px;
   }
   .cs-pop-group-label {
     font-size: 12px;
@@ -762,6 +763,10 @@
     color: var(--text-muted);
     padding: 6px 8px 2px;
     text-transform: uppercase;
+  }
+  .cs-pop-group-label:first-child {
+    margin-top: 0;
+    padding-top: 4px;
   }
   .cs-pop-option {
     display: flex;
@@ -11990,7 +11995,15 @@ async function refreshModelsFromConnectedBaseUrl(opts = {}) {
         showCustomToast(`모델 새로고침 완료: Chat ${chatCnt}개 · Image ${imgCnt}개 · Video ${vidCnt}개`, 'MODELS');
       }
     } else {
-      syncStudioModelsFromCatalog({ chatModels: [], imageModels: [], videoModels: [] });
+      const hasExistingChat = Array.isArray(lastCachedChatModelsList) && lastCachedChatModelsList.length > 0;
+      const hasOAuthConnected = typeof externalOAuthState !== 'undefined' && externalOAuthState.providers
+        && ((externalOAuthState.providers.openai && externalOAuthState.providers.openai.connected)
+          || (externalOAuthState.providers.claude && externalOAuthState.providers.claude.connected));
+      const fallbackPayload = { imageModels: [], videoModels: [] };
+      if (hasExistingChat || hasOAuthConnected) {
+        fallbackPayload.chatModels = Array.isArray(lastCachedChatModelsList) ? lastCachedChatModelsList : [];
+      }
+      syncStudioModelsFromCatalog(fallbackPayload);
       if (syncBadge) {
         syncBadge.textContent = '/models 조회 실패';
       }
@@ -25822,7 +25835,7 @@ function syncCustomSelectTrigger(sel) {
   const val = selectedOpt ? selectedOpt.value : (sel.value || '');
   const rawLabel = translateUiString(selectedOpt ? (selectedOpt.textContent || selectedOpt.label || val).trim() : String(val || '선택'), currentUiLang);
   const optMeta = (desc.options && desc.options[val]) || {};
-  const isChatModelSel = sel.id === 'model-select' || sel.id === 'cfg-model-id';
+  const isChatModelSel = sel.id === 'model-select' || sel.id === 'cfg-model-id' || sel.id === 'crew-add-model';
   const isStudioModelSel = sel.id === 'img-model-select' || sel.id === 'vid-model-select' || sel.id === 'cfg-image-model' || sel.id === 'cfg-video-model';
   const datasetShort = selectedOpt && selectedOpt.dataset ? selectedOpt.dataset.shortLabel : '';
   const cleanedRaw = isChatModelSel
@@ -26030,13 +26043,33 @@ function scrollCustomSelectOptionIntoView(listBox, btn) {
   if (!listBox || !btn) return;
   const boxH = listBox.clientHeight;
   if (boxH <= 0) return;
-  const boxTop = listBox.scrollTop;
-  const btnTop = btn.offsetTop;
-  const btnBottom = btnTop + btn.offsetHeight;
-  if (btnTop < boxTop) {
-    listBox.scrollTop = Math.max(0, btnTop - 4);
-  } else if (btnBottom > boxTop + boxH) {
-    listBox.scrollTop = Math.max(0, btnBottom - boxH + 4);
+
+  const optIdx = btn.getAttribute('data-opt-idx');
+  const prevEl = btn.previousElementSibling;
+  const isFirstGroupLabel = Boolean(
+    prevEl &&
+    prevEl.classList &&
+    prevEl.classList.contains('cs-pop-group-label') &&
+    prevEl === listBox.firstElementChild
+  );
+  if (optIdx === '0' || btn === listBox.firstElementChild || isFirstGroupLabel) {
+    listBox.scrollTop = 0;
+    return;
+  }
+
+  const listRect = listBox.getBoundingClientRect();
+  const btnRect = btn.getBoundingClientRect();
+  const prevGroup = (prevEl && prevEl.classList && prevEl.classList.contains('cs-pop-group-label')) ? prevEl : null;
+  const topAnchorRect = prevGroup ? prevGroup.getBoundingClientRect() : btnRect;
+
+  const relTop = topAnchorRect.top - listRect.top;
+  const relBottom = btnRect.bottom - listRect.top;
+  const pad = 6;
+
+  if (relTop < pad) {
+    listBox.scrollTop = Math.max(0, listBox.scrollTop + relTop - pad);
+  } else if (relBottom > boxH - pad) {
+    listBox.scrollTop = Math.max(0, listBox.scrollTop + (relBottom - boxH) + pad);
   }
 }
 
@@ -26157,6 +26190,7 @@ function renderCustomSelectPopoverOptions(sel, filterQuery = '') {
   }
 
   listBox.innerHTML = htmlParts.join('');
+  listBox.scrollTop = 0;
   customSelectFocusIdx = selectedVisibleIdx >= 0 ? selectedVisibleIdx : 0;
 
   const optButtons = Array.from(listBox.querySelectorAll('.cs-pop-option:not([disabled])'));
@@ -26909,33 +26943,41 @@ function formatStudioModelOptionParts(m, kind) {
 
 function syncStudioModelsFromCatalog(data) {
   if (!data || typeof data !== 'object') return;
-  if (Array.isArray(data.chatModels) && data.chatModels.length === 0) {
-    ['model-select', 'cfg-model-id'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.innerHTML = '<option value="">현재 서버에 채팅 모델 없음</option>';
-    });
-  }
-  if (Array.isArray(data.chatModels) && data.chatModels.length > 0) {
-    const msel = document.getElementById('model-select');
-    const cfgMid = document.getElementById('cfg-model-id');
-    const curChat = data.model || cfgMid?.value || msel?.value || '';
-    const targetChat = data.chatModels.some(m => String(m.id) === curChat)
-      ? curChat
-      : String(data.chatModels[0].id || '');
-    const chatHtml = renderGroupedChatModelOptionsHtml(data.chatModels, targetChat);
-    if (msel) {
-      msel.innerHTML = chatHtml;
-      if (targetChat) msel.value = targetChat;
-    }
-    if (cfgMid) {
-      if (cfgMid.tagName === 'SELECT') {
-        cfgMid.innerHTML = chatHtml;
-        if (targetChat) cfgMid.value = targetChat;
-      } else if (targetChat) {
-        cfgMid.value = targetChat;
+  if (Array.isArray(data.chatModels)) {
+    const mergedChatModels = typeof mergeConnectedOAuthChatModels === 'function'
+      ? mergeConnectedOAuthChatModels(data.chatModels)
+      : data.chatModels;
+    if (mergedChatModels.length === 0) {
+      ['model-select', 'cfg-model-id'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = '<option value="">현재 서버에 채팅 모델 없음</option>';
+      });
+      if (typeof syncAllCustomSelects === 'function') syncAllCustomSelects();
+    } else {
+      const msel = document.getElementById('model-select');
+      const cfgMid = document.getElementById('cfg-model-id');
+      const curChat = data.model || cfgMid?.value || msel?.value || '';
+      const targetChat = mergedChatModels.some(m => String(m.id) === curChat)
+        ? curChat
+        : String(mergedChatModels[0].id || '');
+      const chatHtml = renderGroupedChatModelOptionsHtml(mergedChatModels, targetChat);
+      if (msel) {
+        msel.innerHTML = chatHtml;
+        if (targetChat) msel.value = targetChat;
       }
+      if (cfgMid) {
+        if (cfgMid.tagName === 'SELECT') {
+          cfgMid.innerHTML = chatHtml;
+          if (targetChat) cfgMid.value = targetChat;
+        } else if (targetChat) {
+          cfgMid.value = targetChat;
+        }
+      }
+      if (typeof syncCrewAddDrawerSelectors === 'function' && document.getElementById('crew-add-drawer')?.classList.contains('open')) {
+        syncCrewAddDrawerSelectors();
+      }
+      if (typeof syncAllCustomSelects === 'function') syncAllCustomSelects();
     }
-    if (typeof syncAllCustomSelects === 'function') syncAllCustomSelects();
   }
   if (Array.isArray(data.imageModels)) {
     const imgSel = document.getElementById('img-model-select');
@@ -31638,11 +31680,17 @@ function syncCrewAddDrawerSelectors() {
   const st = ensureCrewThreadState(tid);
   const modelSel = document.getElementById('crew-add-model');
   if (modelSel && typeof renderGroupedChatModelOptionsHtml === 'function') {
-    const list = (typeof lastCachedChatModelsList !== 'undefined' && lastCachedChatModelsList.length > 0)
+    const hasCached = typeof lastCachedChatModelsList !== 'undefined' && lastCachedChatModelsList.length > 0;
+    const rawList = hasCached
       ? lastCachedChatModelsList
       : collectAvailableCrewModelIds('').map(id => ({ id, name: id }));
+    const prevModelVal = modelSel.value || '';
     const defaultOpt = `<option value="">${escapeHtml(currentUiLang === 'en' ? 'Default (Current Model)' : '기본 (현재 채팅 모델)')}</option>`;
-    modelSel.innerHTML = defaultOpt + renderGroupedChatModelOptionsHtml(list, '');
+    modelSel.innerHTML = defaultOpt + renderGroupedChatModelOptionsHtml(rawList, prevModelVal, { updateCache: hasCached });
+    if (prevModelVal && [...modelSel.options].some(o => o.value === prevModelVal)) {
+      modelSel.value = prevModelVal;
+    }
+    if (typeof syncCustomSelectTrigger === 'function') syncCustomSelectTrigger(modelSel);
   }
   const forkSel = document.getElementById('crew-add-fork');
   if (forkSel) {
@@ -32845,9 +32893,47 @@ function classifyChatModelOAuthGroup(m) {
   return 'cheapai';
 }
 
-function renderGroupedChatModelOptionsHtml(models, selectedId) {
-  const list = Array.isArray(models) ? models : [];
-  lastCachedChatModelsList = list;
+function mergeConnectedOAuthChatModels(models) {
+  const input = Array.isArray(models) ? models : [];
+  const out = [];
+  const seenGroupIds = new Set();
+  const pushItem = (rawItem, forcedProvider = '') => {
+    const id = String((rawItem && rawItem.id) || (typeof rawItem === 'string' ? rawItem : '') || '').trim();
+    if (!id) return;
+    const item = typeof rawItem === 'string'
+      ? { id, name: id, ...(forcedProvider ? { provider: forcedProvider } : {}) }
+      : { ...rawItem, id, ...(forcedProvider && !rawItem.provider ? { provider: forcedProvider } : {}) };
+    const group = classifyChatModelOAuthGroup(item);
+    const dedupKey = group + '::' + id;
+    if (seenGroupIds.has(dedupKey)) return;
+    seenGroupIds.add(dedupKey);
+    out.push(item);
+  };
+
+  input.forEach(m => pushItem(m));
+
+  if (typeof externalOAuthState !== 'undefined' && externalOAuthState.providers) {
+    const openaiSt = externalOAuthState.providers.openai;
+    if (openaiSt && openaiSt.connected) {
+      const defaults = ['openai-oauth/gpt-5.4', 'openai-oauth/gpt-5.3-codex', 'openai-oauth/gpt-5-mini', 'openai-oauth/o3'];
+      const list = Array.isArray(openaiSt.models) && openaiSt.models.length > 0 ? openaiSt.models : defaults;
+      list.forEach(m => pushItem(m, 'openai-oauth'));
+    }
+    const claudeSt = externalOAuthState.providers.claude;
+    if (claudeSt && claudeSt.connected) {
+      const defaults = ['claude-oauth/claude-opus-4-6', 'claude-oauth/claude-sonnet-4-6', 'claude-oauth/claude-haiku-4-5'];
+      const list = Array.isArray(claudeSt.models) && claudeSt.models.length > 0 ? claudeSt.models : defaults;
+      list.forEach(m => pushItem(m, 'claude-oauth'));
+    }
+  }
+  return out;
+}
+
+function renderGroupedChatModelOptionsHtml(models, selectedId, opts = {}) {
+  const list = mergeConnectedOAuthChatModels(models);
+  if (!opts || opts.updateCache !== false) {
+    lastCachedChatModelsList = list;
+  }
   const buildOpt = (m) => {
     const p = formatChatModelOptionParts(m);
     const selAttr = p.id === selectedId ? ' selected' : '';
@@ -32907,11 +32993,13 @@ function ingestExternalOAuthStatus(payload, eventType = '') {
   if (!payload || typeof payload !== 'object') return;
   const srcProviders = payload.providers || (payload.status && payload.status.providers) || null;
   let freshExhaustedProvider = '';
+  let connectionChanged = false;
   if (srcProviders && typeof srcProviders === 'object') {
     ['openai', 'claude'].forEach(p => {
       if (srcProviders[p] && typeof srcProviders[p] === 'object') {
         const prev = externalOAuthState.providers[p] || {};
         const next = { ...prev, ...srcProviders[p], provider: p };
+        if (Boolean(prev.connected) !== Boolean(next.connected)) connectionChanged = true;
         externalOAuthState.providers[p] = next;
         if (next.authUrl) externalOAuthState.pendingUrls[p] = next.authUrl;
         if (next.connected) {
@@ -32942,6 +33030,24 @@ function ingestExternalOAuthStatus(payload, eventType = '') {
     externalOAuthBridgeState.dismissedKeys.delete(freshExhaustedProvider + ':exhausted');
     externalOAuthBridgeState.dismissedKeys.delete(freshExhaustedProvider + ':warning');
     externalOAuthBridgeState.lastForcedProvider = freshExhaustedProvider;
+  }
+  if (connectionChanged && typeof renderGroupedChatModelOptionsHtml === 'function') {
+    const msel = document.getElementById('model-select');
+    const cfgMid = document.getElementById('cfg-model-id');
+    const curSel = msel?.value || (cfgMid?.tagName === 'SELECT' ? cfgMid.value : '') || '';
+    const htmlOpts = renderGroupedChatModelOptionsHtml(lastCachedChatModelsList, curSel);
+    if (msel) {
+      msel.innerHTML = htmlOpts;
+      if (curSel && [...msel.options].some(o => o.value === curSel)) msel.value = curSel;
+    }
+    if (cfgMid && cfgMid.tagName === 'SELECT') {
+      cfgMid.innerHTML = htmlOpts;
+      if (curSel && [...cfgMid.options].some(o => o.value === curSel)) cfgMid.value = curSel;
+    }
+    if (typeof syncCrewAddDrawerSelectors === 'function' && document.getElementById('crew-add-drawer')?.classList.contains('open')) {
+      syncCrewAddDrawerSelectors();
+    }
+    if (typeof syncAllCustomSelects === 'function') syncAllCustomSelects();
   }
   renderExternalOAuthCards();
   renderComposerOAuthUsageUi();

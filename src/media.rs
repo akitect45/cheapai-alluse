@@ -882,7 +882,18 @@ pub fn classify_and_parse_models_payload(
                     "vCreditsPerVideo": v_cost,
                 }));
             }
-        } else if !chat_models.iter().any(|m| m.id.eq_ignore_ascii_case(id)) {
+        } else {
+            let item_prov = item
+                .get("provider")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or(prov);
+            if chat_models.iter().any(|m| {
+                m.provider.eq_ignore_ascii_case(item_prov) && m.id.eq_ignore_ascii_case(id)
+            }) {
+                continue;
+            }
             let context_limit = item
                 .get("context_window")
                 .or_else(|| item.get("max_tokens"))
@@ -957,7 +968,7 @@ pub fn classify_and_parse_models_payload(
             chat_models.push(ModelInfo {
                 id: id.to_string(),
                 name: display_name,
-                provider: prov.to_string(),
+                provider: item_prov.to_string(),
                 reasoning: true,
                 variants,
                 context_limit,
@@ -1016,12 +1027,21 @@ pub async fn fetch_media_models_catalog_for(
         }
     }
 
-    let oauth_models = crate::oauth::fetch_connected_catalog_models_with_remote().await;
-    for om in oauth_models {
-        if !chat_models.iter().any(|m| m.id == om.id) {
-            chat_models.push(om);
-        }
+    if !endpoint_ok || chat_models.is_empty() {
+        let fallback_non_oauth: Vec<ModelInfo> = cfg
+            .models
+            .iter()
+            .filter(|m| {
+                !crate::config::is_oauth_provider_name(&m.provider)
+                    && !crate::config::is_oauth_model_id(&m.id)
+            })
+            .cloned()
+            .collect();
+        chat_models = crate::config::merge_models_preserving_composite(chat_models, fallback_non_oauth);
     }
+
+    let oauth_models = crate::oauth::fetch_connected_catalog_models_with_remote().await;
+    chat_models = crate::config::merge_models_preserving_composite(chat_models, oauth_models);
 
     let def_img = configured_media_default(cfg.default_image_model.trim(), &img_models, endpoint_ok);
     let def_vid = configured_media_default(cfg.default_video_model.trim(), &vid_models, endpoint_ok);
@@ -3923,6 +3943,15 @@ mod tests {
 
     #[test]
     fn procedural_png_and_media_model_catalog_include_configured_models() {
+        let tmp_vault = std::env::temp_dir().join(format!(
+            "alluse_media_isolated_{}.vault",
+            uuid::Uuid::new_v4().simple()
+        ));
+        unsafe {
+            std::env::set_var("ALLUSE_OAUTH_VAULT_PATH", &tmp_vault);
+        }
+        crate::oauth::clear_test_caches();
+
         let png = render_procedural_png(64, 64, "test prompt", 42).expect("png bytes");
         assert!(png.starts_with(&[0x89, b'P', b'N', b'G']));
 
@@ -4050,6 +4079,12 @@ mod tests {
             assert_eq!(updated_cfg.default_image_model, "cheapai-image-v2");
             assert_eq!(updated_cfg.default_video_model, "cheapai-cinema-v3");
         });
+
+        unsafe {
+            std::env::remove_var("ALLUSE_OAUTH_VAULT_PATH");
+        }
+        crate::oauth::clear_test_caches();
+        let _ = std::fs::remove_file(&tmp_vault);
     }
 
     #[test]
