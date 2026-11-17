@@ -451,6 +451,7 @@ async fn send_openai_backend_get(
     }
 
     let mut cur_rec = rec.clone();
+    let mut did_refresh = false;
     let initial_acct = Some(cur_rec.account_id.as_str()).filter(|s| !s.trim().is_empty());
     let mut resp = attempt(client, url, &cur_rec.access_token, initial_acct)
         .await
@@ -458,6 +459,7 @@ async fn send_openai_backend_get(
 
     if resp.status().as_u16() == 401 && allow_refresh {
         if let Ok(refreshed) = refresh_provider_token(OAuthProvider::Openai).await {
+            did_refresh = true;
             cur_rec = refreshed;
             let acct = Some(cur_rec.account_id.as_str()).filter(|s| !s.trim().is_empty());
             resp = attempt(client, url, &cur_rec.access_token, acct)
@@ -470,7 +472,15 @@ async fn send_openai_backend_get(
     if !cur_rec.account_id.trim().is_empty()
         && matches!(resp.status().as_u16(), 400 | 402 | 403 | 404)
     {
-        if let Ok(no_acct_resp) = attempt(client, url, &cur_rec.access_token, None).await {
+        if let Ok(mut no_acct_resp) = attempt(client, url, &cur_rec.access_token, None).await {
+            if no_acct_resp.status().as_u16() == 401 && allow_refresh && !did_refresh {
+                if let Ok(refreshed) = refresh_provider_token(OAuthProvider::Openai).await {
+                    cur_rec = refreshed;
+                    no_acct_resp = attempt(client, url, &cur_rec.access_token, None)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                }
+            }
             if no_acct_resp.status().is_success() || no_acct_resp.status().as_u16() != 403 {
                 return Ok(no_acct_resp);
             }
@@ -2701,6 +2711,132 @@ mod tests {
         *VAULT_CACHE.lock().unwrap() = None;
         USAGE_CACHE.lock().unwrap().clear();
         MODELS_CACHE.lock().unwrap().clear();
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[tokio::test]
+    async fn openai_account_id_fallback_403_then_401_triggers_refresh_and_retries() {
+        let tmp_dir = std::env::temp_dir().join(format!(
+            "alluse_oauth_403_401_{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&tmp_dir).unwrap();
+        let vault_file = tmp_dir.join("vault.dat");
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let mock_base = format!("http://127.0.0.1:{port}");
+        let refresh_calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let refresh_calls_srv = refresh_calls.clone();
+
+        let server_handle = tokio::spawn(async move {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else {
+                    break;
+                };
+                let rc = refresh_calls_srv.clone();
+                tokio::spawn(async move {
+                    let mut buf = vec![0u8; 8192];
+                    let n = stream.read(&mut buf).await.unwrap_or(0);
+                    let raw = String::from_utf8_lossy(&buf[..n]).to_string();
+                    let head = raw.split("\r\n\r\n").next().unwrap_or("");
+                    let head_low = head.to_ascii_lowercase();
+                    let req_line = head.lines().next().unwrap_or("");
+                    let path_only = req_line
+                        .split_whitespace()
+                        .nth(1)
+                        .unwrap_or("/")
+                        .split('?')
+                        .next()
+                        .unwrap_or("/");
+
+                    let (status_line, body_out) = if path_only == "/wham/usage" {
+                        if head_low.contains("chatgpt-account-id:") {
+                            ("HTTP/1.1 403 Forbidden", "{\"detail\":\"bad account id\"}".to_string())
+                        } else if head_low.contains("bearer expired_access") {
+                            ("HTTP/1.1 401 Unauthorized", "{\"detail\":\"token expired\"}".to_string())
+                        } else if head_low.contains("bearer fresh_access") {
+                            (
+                                "HTTP/1.1 200 OK",
+                                json!({
+                                    "plan_type": "plus",
+                                    "rate_limit": {
+                                        "primary_window": { "used_percent": 18.0, "reset_after_seconds": 1200 },
+                                        "secondary_window": { "used_percent": 7.0, "reset_after_seconds": 86400 }
+                                    }
+                                })
+                                .to_string(),
+                            )
+                        } else {
+                            ("HTTP/1.1 401 Unauthorized", "{}".to_string())
+                        }
+                    } else if path_only == "/openai/token" {
+                        rc.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        (
+                            "HTTP/1.1 200 OK",
+                            json!({
+                                "access_token": "fresh_access",
+                                "refresh_token": "fresh_refresh",
+                                "expires_in": 3600
+                            })
+                            .to_string(),
+                        )
+                    } else {
+                        ("HTTP/1.1 404 Not Found", "{}".to_string())
+                    };
+                    let http_resp = format!(
+                        "{status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        body_out.len(),
+                        body_out
+                    );
+                    let _ = stream.write_all(http_resp.as_bytes()).await;
+                    let _ = stream.shutdown().await;
+                });
+            }
+        });
+
+        unsafe {
+            std::env::set_var("ALLUSE_OAUTH_VAULT_PATH", &vault_file);
+            std::env::set_var("ALLUSE_OPENAI_OAUTH_TOKEN_URL", format!("{mock_base}/openai/token"));
+            std::env::set_var("ALLUSE_OPENAI_USAGE_URL", format!("{mock_base}/wham/usage"));
+        }
+        clear_test_caches();
+
+        set_stored_record(
+            OAuthProvider::Openai,
+            Some(OAuthTokenRecord {
+                provider: "openai".to_string(),
+                access_token: "expired_access".to_string(),
+                refresh_token: "old_refresh".to_string(),
+                id_token: String::new(),
+                email: "user@example.com".to_string(),
+                account_id: "org-stale-403".to_string(),
+                expires_at: now_unix_secs() + 3600,
+                updated_at: now_unix_secs(),
+            }),
+        )
+        .unwrap();
+
+        let snap = fetch_usage_for_provider(OAuthProvider::Openai, true).await;
+        assert_eq!(snap.last_error, "");
+        assert_eq!(snap.plan_type, "plus");
+        assert_eq!(snap.primary_window.as_ref().unwrap().used_percent, 18.0);
+        assert_eq!(snap.secondary_window.as_ref().unwrap().used_percent, 7.0);
+        assert_eq!(refresh_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(
+            get_stored_record(OAuthProvider::Openai).unwrap().access_token,
+            "fresh_access"
+        );
+
+        disconnect_provider(OAuthProvider::Openai).unwrap();
+        server_handle.abort();
+        unsafe {
+            std::env::remove_var("ALLUSE_OAUTH_VAULT_PATH");
+            std::env::remove_var("ALLUSE_OPENAI_OAUTH_TOKEN_URL");
+            std::env::remove_var("ALLUSE_OPENAI_USAGE_URL");
+        }
+        clear_test_caches();
         let _ = std::fs::remove_dir_all(&tmp_dir);
     }
 }
