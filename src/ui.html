@@ -30832,6 +30832,18 @@ function ingestCrewStatusPayload(tid, rawPayload, opts = {}) {
     } else {
       st.counts = recomputeCrewCountsFromMembers(st.members);
     }
+    if (st.counts.working > 0 && typeof clearDismissedCrewWatchdogForActivity === 'function') {
+      clearDismissedCrewWatchdogForActivity(rootTid);
+    }
+    if (src.watchdog_dismissed === true || src.watchdog_alert === null) {
+      st.watchdogAlert = null;
+    } else if (src.watchdog_alert && typeof src.watchdog_alert === 'object') {
+      if (typeof isCrewWatchdogAlertDismissed === 'function' && isCrewWatchdogAlertDismissed(rootTid, src.watchdog_alert)) {
+        st.watchdogAlert = null;
+      } else {
+        st.watchdogAlert = src.watchdog_alert;
+      }
+    }
   }
 
   if (rootTid === currentThreadId) {
@@ -31102,9 +31114,7 @@ function renderCrewMemberRowHtml(m, isDirectorRow = false) {
       : isKilled
         ? (currentUiLang === 'en' ? 'Killed' : '종료됨')
         : (currentUiLang === 'en' ? 'Standing by' : '대기 중');
-  const elapsed = isWorking
-    ? formatCrewElapsedCompact(m.working_started_at, 0)
-    : (m.last_worked_ms ? formatCrewElapsedCompact(0, m.last_worked_ms) : '');
+  const elapsed = isWorking ? formatCrewElapsedCompact(m.working_started_at, 0) : '';
   const seqNum = m.last_post_seq || m.head_seq || m.last_read_seq || 0;
   const briefClean = String(m.brief || m.last_post_preview || '').replace(/\s+/g, ' ').trim();
   const toolLine = m.tool_summary || m.current_tool || (isWorking ? (currentUiLang === 'en' ? 'Thinking...' : '생각 중...') : (m.last_post_preview || ''));
@@ -31129,7 +31139,7 @@ function renderCrewMemberRowHtml(m, isDirectorRow = false) {
         </div>
         ${briefClean ? `<div class="crew-row-brief" title="${escapeHtml(briefClean)}">${escapeHtml(briefClean)}</div>` : ''}
         ${toolLine ? `<div class="crew-row-tool-line${isWorking ? ' is-working' : ''}"><svg class="solar-icon sm" style="width:12px;height:12px;flex-shrink:0;"><use href="#${isWorking ? 'solar-pulse' : 'solar-chat'}"/></svg><span style="overflow:hidden;text-overflow:ellipsis;">${escapeHtml(toolLine)}</span></div>` : ''}
-        ${errLine && !isWorking ? `<div class="crew-row-err" title="${escapeHtml(errLine)}">${escapeHtml(errLine)}</div>` : ''}
+        ${errLine && isStopped ? `<div class="crew-row-err" title="${escapeHtml(errLine)}">${escapeHtml(errLine)}</div>` : ''}
         ${!isDirectorRow ? `
           <div class="crew-row-quick" onclick="event.stopPropagation()">
             <button type="button" class="crew-mini-btn" onclick="openCrewMemberInspector('${escapeJsAttr(name)}')">${currentUiLang === 'en' ? 'Inspect' : '로그'}</button>
@@ -31543,7 +31553,11 @@ function handleAllCrewRealtimeEvent(evt) {
   }
 
   if (evt.type === 'crew_watchdog_alert') {
-    st.watchdogAlert = evt;
+    if (evt.dismissed === true || (typeof isCrewWatchdogAlertDismissed === 'function' && isCrewWatchdogAlertDismissed(rootTid, evt))) {
+      st.watchdogAlert = null;
+    } else {
+      st.watchdogAlert = evt;
+    }
     if (rootTid === currentThreadId) {
       renderCrewBoardRosterAndHeader();
     }
@@ -31773,22 +31787,136 @@ async function sendCrewBoardPostUi() {
   }
 }
 
-function dismissCrewWatchdogUi() {
-  const st = ensureCrewThreadState(currentThreadId);
+const CREW_WATCHDOG_DISMISS_STORAGE_KEY = 'alluse_crew_watchdog_dismissed_v1';
+const crewWatchdogDismissedByThread = new Map();
+
+function loadCrewWatchdogDismissedStorage() {
+  try {
+    const raw = localStorage.getItem(CREW_WATCHDOG_DISMISS_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return (parsed && typeof parsed === 'object') ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function saveCrewWatchdogDismissedStorage(mapObj) {
+  try {
+    localStorage.setItem(CREW_WATCHDOG_DISMISS_STORAGE_KEY, JSON.stringify(mapObj || {}));
+  } catch (_) {}
+}
+
+function computeCrewWatchdogFingerprint(tid, alert) {
+  const rootTid = String(tid || currentThreadId || 'thread-main');
+  if (!alert || typeof alert !== 'object') return `${rootTid}:none`;
+  const explicit = String(alert.fingerprint || alert.idle_key || alert.alert_key || '').trim();
+  if (explicit) return explicit;
+  const st = ensureCrewThreadState(rootTid);
+  const nonWdSeq = Number(alert.last_non_watchdog_seq ?? alert.non_watchdog_seq ?? alert.base_seq ?? 0);
+  const membersKey = Array.isArray(alert.stalled_members)
+    ? alert.stalled_members.map(n => String(n || '').trim().toLowerCase()).filter(Boolean).sort().join(',')
+    : (Array.isArray(st.members) ? st.members.filter(m => m && m.state === 'waiting').map(m => String(m.name).toLowerCase()).sort().join(',') : '');
+  const seqOrMsg = nonWdSeq > 0 ? String(nonWdSeq) : String(alert.message || '').trim().slice(0, 80);
+  return `${rootTid}:${seqOrMsg}:${membersKey}`;
+}
+
+function isCrewWatchdogAlertDismissed(tid, alert) {
+  const rootTid = String(tid || currentThreadId || 'thread-main');
+  if (!alert || typeof alert !== 'object' || alert.dismissed === true) return true;
+  const fp = computeCrewWatchdogFingerprint(rootTid, alert);
+  const nonWdSeq = Number(alert.last_non_watchdog_seq ?? alert.non_watchdog_seq ?? alert.base_seq ?? 0);
+  let rec = crewWatchdogDismissedByThread.get(rootTid);
+  if (!rec) {
+    const store = loadCrewWatchdogDismissedStorage();
+    if (store[rootTid] && typeof store[rootTid] === 'object') {
+      rec = store[rootTid];
+      crewWatchdogDismissedByThread.set(rootTid, rec);
+    }
+  }
+  if (!rec) return false;
+  if (rec.fp && rec.fp === fp) return true;
+  if (nonWdSeq > 0 && Number(rec.nonWdSeq || 0) >= nonWdSeq && rec.membersKey && fp.endsWith(':' + rec.membersKey)) {
+    return true;
+  }
+  return false;
+}
+
+function rememberCrewWatchdogDismissal(tid, alert) {
+  const rootTid = String(tid || currentThreadId || 'thread-main');
+  const fp = computeCrewWatchdogFingerprint(rootTid, alert);
+  const nonWdSeq = Number((alert && (alert.last_non_watchdog_seq ?? alert.non_watchdog_seq ?? alert.base_seq)) || 0);
+  const membersKey = fp.split(':').slice(2).join(':');
+  const rec = { fp, nonWdSeq, membersKey, at: Date.now() };
+  crewWatchdogDismissedByThread.set(rootTid, rec);
+  const store = loadCrewWatchdogDismissedStorage();
+  store[rootTid] = rec;
+  const keys = Object.keys(store);
+  if (keys.length > 40) {
+    keys.sort((a, b) => Number(store[a]?.at || 0) - Number(store[b]?.at || 0));
+    keys.slice(0, keys.length - 40).forEach(k => { delete store[k]; });
+  }
+  saveCrewWatchdogDismissedStorage(store);
+  return { fp, nonWdSeq };
+}
+
+function clearDismissedCrewWatchdogForActivity(tid) {
+  const rootTid = String(tid || currentThreadId || 'thread-main');
+  if (!crewWatchdogDismissedByThread.has(rootTid)) {
+    const store = loadCrewWatchdogDismissedStorage();
+    if (!store[rootTid]) return;
+  }
+  crewWatchdogDismissedByThread.delete(rootTid);
+  const store = loadCrewWatchdogDismissedStorage();
+  if (store[rootTid]) {
+    delete store[rootTid];
+    saveCrewWatchdogDismissedStorage(store);
+  }
+}
+
+async function dismissCrewWatchdogUi() {
+  const tid = currentThreadId || 'thread-main';
+  const st = ensureCrewThreadState(tid);
+  const prevAlert = st.watchdogAlert;
+  const { fp, nonWdSeq } = rememberCrewWatchdogDismissal(tid, prevAlert);
   st.watchdogAlert = null;
   renderCrewBoardRosterAndHeader();
+  try {
+    const ackRes = await api('/api/crew/action', 'POST', {
+      thread_id: tid,
+      action: 'dismiss_watchdog',
+      fingerprint: fp,
+      alert_seq: Number((prevAlert && prevAlert.seq) || 0),
+      last_non_watchdog_seq: nonWdSeq
+    });
+    if (ackRes && ackRes.dismissed_fingerprint) {
+      rememberCrewWatchdogDismissal(tid, Object.assign({}, prevAlert || {}, { fingerprint: ackRes.dismissed_fingerprint }));
+    }
+    if (ackRes && ackRes.status) {
+      ingestCrewStatusPayload(tid, ackRes.status, { isRealtimeSse: true });
+    }
+  } catch (_) {}
 }
 
 async function nudgeStalledCrewsUi() {
   const tid = currentThreadId || 'thread-main';
   const st = ensureCrewThreadState(tid);
-  const stalled = (st.watchdogAlert && Array.isArray(st.watchdogAlert.stalled_members))
-    ? st.watchdogAlert.stalled_members
+  const prevAlert = st.watchdogAlert;
+  const stalled = (prevAlert && Array.isArray(prevAlert.stalled_members))
+    ? prevAlert.stalled_members
     : [];
   const mentionPrefix = stalled.length > 0 ? stalled.map(n => '@' + n).join(' ') : '@all';
+  const { fp, nonWdSeq } = rememberCrewWatchdogDismissal(tid, prevAlert);
   st.watchdogAlert = null;
   renderCrewBoardRosterAndHeader();
   const crewRevBefore = getCrewSseRev(tid);
+  void api('/api/crew/action', 'POST', {
+    thread_id: tid,
+    action: 'dismiss_watchdog',
+    fingerprint: fp,
+    alert_seq: Number((prevAlert && prevAlert.seq) || 0),
+    last_non_watchdog_seq: nonWdSeq
+  }).catch(() => {});
   const res = await api('/api/crew/post', 'POST', {
     thread_id: tid,
     text: `${mentionPrefix} 현재 진행 상황과 블로커 여부를 보드에 짧게 공유해 주세요.`,

@@ -4844,6 +4844,7 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
                 "counts": status.counts,
                 "director": status.director,
                 "members": status.members,
+                "watchdog_alert": status.watchdog_alert,
                 "status": status,
             }))
         }
@@ -6138,6 +6139,17 @@ mod http_security_tests {
         .expect("POST /api/crew/action models");
         assert_eq!(models_res["ok"], true);
         assert!(models_res["groups"].as_array().is_some());
+
+        let wd_dis = route_api(
+            "POST",
+            "/api/crew/action",
+            "",
+            json!({ "thread_id": tid, "action": "dismiss_watchdog", "fingerprint": "deadlock:1:1:coder" }),
+        )
+        .await
+        .expect("POST /api/crew/action dismiss_watchdog");
+        assert_eq!(wd_dis["ok"], true);
+        assert!(wd_dis["watchdog_alert"].is_null());
 
         let mlog = route_api(
             "GET",

@@ -121,6 +121,8 @@ pub struct CrewSessionStatus {
     pub counts: CrewStateCounts,
     pub director: CrewDirectorStatus,
     pub members: Vec<CrewMemberRecord>,
+    #[serde(default)]
+    pub watchdog_alert: Option<Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -512,6 +514,10 @@ pub fn init_crew_tables(conn: &Connection) -> Result<()> {
         "ALTER TABLE crew_members ADD COLUMN cancel_reason TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE crew_members ADD COLUMN waiting_since INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE crew_members ADD COLUMN wait_mentions_only INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE crew_sessions ADD COLUMN watchdog_epoch INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE crew_sessions ADD COLUMN last_watchdog_fingerprint TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE crew_sessions ADD COLUMN dismissed_watchdog_fingerprint TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE crew_sessions ADD COLUMN active_watchdog_json TEXT NOT NULL DEFAULT ''",
     ] {
         let _ = conn.execute(alter_sql, []);
     }
@@ -784,14 +790,21 @@ fn list_members_conn(conn: &Connection, root_thread_id: &str) -> Result<Vec<Crew
 }
 
 fn get_session_status_conn(conn: &Connection, root_thread_id: &str) -> Result<CrewSessionStatus> {
-    let (title, enabled_int, next_seq): (String, i64, i64) = conn
+    let (title, enabled_int, next_seq, dismissed_fp, active_wd_json): (
+        String,
+        i64,
+        i64,
+        String,
+        String,
+    ) = conn
         .query_row(
-            "SELECT title, enabled, next_seq FROM crew_sessions WHERE root_thread_id = ?1 LIMIT 1",
+            "SELECT title, enabled, next_seq, dismissed_watchdog_fingerprint, active_watchdog_json
+             FROM crew_sessions WHERE root_thread_id = ?1 LIMIT 1",
             params![root_thread_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
         )
         .optional()?
-        .unwrap_or_else(|| (String::new(), 0, 1));
+        .unwrap_or_else(|| (String::new(), 0, 1, String::new(), String::new()));
     let (thread_mode, thread_model, thread_agent_status): (String, String, String) = conn
         .query_row(
             "SELECT mode, model, agent_status FROM threads WHERE id = ?1 LIMIT 1",
@@ -859,6 +872,18 @@ fn get_session_status_conn(conn: &Connection, root_thread_id: &str) -> Result<Cr
         head_seq,
         working_started_at: dir_tel.map(|t| t.working_started_at).unwrap_or(0),
     };
+    let watchdog_alert = if active_wd_json.trim().is_empty()
+        || counts.stopped > 0
+        || crate::cua::is_interrupted()
+        || crate::agent::is_thread_interrupted(root_thread_id)
+    {
+        None
+    } else {
+        serde_json::from_str::<Value>(&active_wd_json).ok().filter(|v| {
+            let fp = v.get("fingerprint").and_then(|f| f.as_str()).unwrap_or("");
+            !fp.is_empty() && fp != dismissed_fp
+        })
+    };
     Ok(CrewSessionStatus {
         root_thread_id: root_thread_id.to_string(),
         title,
@@ -869,6 +894,7 @@ fn get_session_status_conn(conn: &Connection, root_thread_id: &str) -> Result<Cr
         counts,
         director,
         members,
+        watchdog_alert,
     })
 }
 
@@ -1268,6 +1294,7 @@ pub fn mark_thread_cancel_forensics(thread_id: &str, source: &str, reason: &str)
     }
     let now = now_unix_secs() as i64;
     let conn = crate::db::lock_db();
+    let root_id = resolve_root_id_conn(&conn, clean);
     let _ = conn.execute(
         "UPDATE crew_members
          SET cancel_source = ?1,
@@ -1275,6 +1302,10 @@ pub fn mark_thread_cancel_forensics(thread_id: &str, source: &str, reason: &str)
              updated_at = ?3
          WHERE thread_id = ?4 AND state != 'killed'",
         params![source.trim(), reason.trim(), now, clean],
+    );
+    let _ = conn.execute(
+        "UPDATE crew_sessions SET active_watchdog_json = '', updated_at = ?1 WHERE root_thread_id = ?2",
+        params![now, root_id],
     );
 }
 
@@ -1288,6 +1319,10 @@ pub fn mark_all_active_cancel_forensics(source: &str, reason: &str) {
              updated_at = ?3
          WHERE state IN ('working', 'waiting')",
         params![source.trim(), reason.trim(), now],
+    );
+    let _ = conn.execute(
+        "UPDATE crew_sessions SET active_watchdog_json = '', updated_at = ?1",
+        params![now],
     );
 }
 
@@ -1720,10 +1755,26 @@ pub fn post_board_message(
                 now as i64
             ],
         )?;
-        tx.execute(
-            "UPDATE crew_sessions SET next_seq = ?1, updated_at = ?2 WHERE root_thread_id = ?3",
-            params![(seq + 1) as i64, now as i64, root_id],
-        )?;
+        let is_real_crew_activity = norm_kind != "watchdog"
+            && author_name != "watchdog"
+            && !(author_name == "director" && norm_kind != "brief");
+        if is_real_crew_activity {
+            tx.execute(
+                "UPDATE crew_sessions
+                 SET next_seq = ?1,
+                     watchdog_epoch = watchdog_epoch + 1,
+                     active_watchdog_json = '',
+                     last_watchdog_fingerprint = '',
+                     updated_at = ?2
+                 WHERE root_thread_id = ?3",
+                params![(seq + 1) as i64, now as i64, root_id],
+            )?;
+        } else {
+            tx.execute(
+                "UPDATE crew_sessions SET next_seq = ?1, updated_at = ?2 WHERE root_thread_id = ?3",
+                params![(seq + 1) as i64, now as i64, root_id],
+            )?;
+        }
         if caller_member.is_some() {
             let _ = tx.execute(
                 "UPDATE crew_members SET last_post_seq = ?1, last_active_at = ?2, updated_at = ?2
@@ -2273,6 +2324,9 @@ pub fn park_for_board(
                  wait_mentions_only = ?2,
                  current_tool = 'crew_wait',
                  tool_summary = 'Standing by for board updates',
+                 last_error = '',
+                 cancel_source = '',
+                 cancel_reason = '',
                  last_active_at = ?3,
                  updated_at = ?3
              WHERE id = ?4 AND state != 'killed'",
@@ -2589,7 +2643,13 @@ fn add_single_crew_member(
         let tx = conn.transaction()?;
         ensure_session_row_conn(&tx, root_id)?;
         tx.execute(
-            "UPDATE crew_sessions SET enabled = 1, updated_at = ?1 WHERE root_thread_id = ?2",
+            "UPDATE crew_sessions
+             SET enabled = 1,
+                 watchdog_epoch = watchdog_epoch + 1,
+                 active_watchdog_json = '',
+                 last_watchdog_fingerprint = '',
+                 updated_at = ?1
+             WHERE root_thread_id = ?2",
             params![now as i64, root_id],
         )?;
         let agent_path = format!("/crew/{norm_name}");
@@ -3154,6 +3214,7 @@ pub async fn manage_crew(
                 "counts": status.counts,
                 "director": status.director,
                 "members": status.members,
+                "watchdog_alert": status.watchdog_alert,
             }))
         }
 
@@ -3584,6 +3645,10 @@ pub async fn manage_crew(
                      WHERE root_thread_id = ?2 AND state != 'killed'",
                     params![now, root_id],
                 );
+                let _ = conn.execute(
+                    "UPDATE crew_sessions SET active_watchdog_json = '', updated_at = ?1 WHERE root_thread_id = ?2",
+                    params![now, root_id],
+                );
                 for m in &targets {
                     clear_thread_crew_telemetry(&m.thread_id);
                     let _ = conn.execute(
@@ -3792,7 +3857,14 @@ pub async fn manage_crew(
                     params![root_id],
                 )?;
                 let _ = conn.execute(
-                    "UPDATE crew_sessions SET next_seq = 1, updated_at = ?1 WHERE root_thread_id = ?2",
+                    "UPDATE crew_sessions
+                     SET next_seq = 1,
+                         watchdog_epoch = watchdog_epoch + 1,
+                         last_watchdog_fingerprint = '',
+                         dismissed_watchdog_fingerprint = '',
+                         active_watchdog_json = '',
+                         updated_at = ?1
+                     WHERE root_thread_id = ?2",
                     params![now, root_id],
                 );
                 let _ = conn.execute(
@@ -3809,6 +3881,62 @@ pub async fn manage_crew(
             Ok(json!({
                 "ok": true,
                 "action": "clear_board",
+                "status": status,
+            }))
+        }
+
+        "dismiss_watchdog" | "watchdog_dismiss" => {
+            let req_fp = args
+                .get("fingerprint")
+                .or_else(|| args.get("idle_key"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            let dismissed_fp = {
+                let conn = crate::db::lock_db();
+                ensure_session_row_conn(&conn, &root_id)?;
+                let (last_fp, active_wd_json): (String, String) = conn
+                    .query_row(
+                        "SELECT last_watchdog_fingerprint, active_watchdog_json
+                         FROM crew_sessions WHERE root_thread_id = ?1 LIMIT 1",
+                        params![root_id],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    )
+                    .optional()?
+                    .unwrap_or_default();
+                let active_fp = serde_json::from_str::<Value>(&active_wd_json)
+                    .ok()
+                    .and_then(|v| v.get("fingerprint").and_then(|f| f.as_str()).map(|s| s.to_string()))
+                    .unwrap_or_default();
+                let eff_fp = if !req_fp.is_empty() {
+                    req_fp
+                } else if !active_fp.is_empty() {
+                    active_fp
+                } else if !last_fp.is_empty() {
+                    last_fp
+                } else {
+                    compute_current_idle_watchdog_fingerprint(&conn, &root_id)
+                };
+                let now = now_unix_secs() as i64;
+                let _ = conn.execute(
+                    "UPDATE crew_sessions
+                     SET dismissed_watchdog_fingerprint = ?1,
+                         last_watchdog_fingerprint = CASE WHEN ?1 != '' THEN ?1 ELSE last_watchdog_fingerprint END,
+                         active_watchdog_json = '',
+                         updated_at = ?2
+                     WHERE root_thread_id = ?3",
+                    params![eff_fp, now, root_id],
+                );
+                eff_fp
+            };
+            let status = get_crew_status(&root_id)?;
+            emit_crew_status_sse(&status);
+            Ok(json!({
+                "ok": true,
+                "action": "dismiss_watchdog",
+                "dismissed_fingerprint": dismissed_fp,
+                "watchdog_alert": Value::Null,
                 "status": status,
             }))
         }
@@ -3838,6 +3966,88 @@ pub fn detect_and_report_stalls(
     detect_and_report_stalls_with_grace(thread_or_root_id, stall_timeout_secs, 0)
 }
 
+fn query_watchdog_session_ctx(conn: &Connection, root_id: &str) -> (u64, u64, String, String, bool) {
+    let (epoch, last_fp, dismissed_fp): (i64, String, String) = conn
+        .query_row(
+            "SELECT watchdog_epoch, last_watchdog_fingerprint, dismissed_watchdog_fingerprint
+             FROM crew_sessions WHERE root_thread_id = ?1 LIMIT 1",
+            params![root_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap_or((1, String::new(), String::new()));
+    let last_non_wd_seq: u64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(seq), 0)
+             FROM crew_board_posts
+             WHERE root_thread_id = ?1
+               AND kind != 'watchdog'
+               AND author_name != 'watchdog'
+               AND author_name != 'director'",
+            params![root_id],
+            |r| r.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        .max(0) as u64;
+    let latest_brief_seq: u64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(seq), 0)
+             FROM crew_board_posts
+             WHERE root_thread_id = ?1 AND kind = 'brief'",
+            params![root_id],
+            |r| r.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        .max(0) as u64;
+    let has_director_completion: bool = conn
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM crew_board_posts
+                WHERE root_thread_id = ?1
+                  AND seq >= ?2
+                  AND kind != 'watchdog'
+                  AND author_name != 'watchdog'
+                  AND author_name != 'director'
+                  AND (
+                    kind IN ('verify', 'deliverable', 'decision')
+                    OR mentions_json LIKE '%\"director\"%'
+                  )
+            )",
+            params![root_id, latest_brief_seq as i64],
+            |r| r.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        != 0;
+    (
+        epoch.max(1) as u64,
+        last_non_wd_seq,
+        last_fp,
+        dismissed_fp,
+        has_director_completion,
+    )
+}
+
+fn compute_current_idle_watchdog_fingerprint(conn: &Connection, root_id: &str) -> String {
+    let (epoch, last_non_wd_seq, _, _, _) = query_watchdog_session_ctx(conn, root_id);
+    let mut waiting_names: Vec<String> = list_members_conn(conn, root_id)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|m| m.state == "waiting")
+        .map(|m| m.name)
+        .collect();
+    waiting_names.sort();
+    format!("deadlock:{epoch}:{last_non_wd_seq}:{}", waiting_names.join(","))
+}
+
+fn clear_active_watchdog_alert(root_id: &str) {
+    let conn = crate::db::lock_db();
+    let now = now_unix_secs() as i64;
+    let _ = conn.execute(
+        "UPDATE crew_sessions SET active_watchdog_json = '', updated_at = ?1
+         WHERE root_thread_id = ?2 AND active_watchdog_json != ''",
+        params![now, root_id],
+    );
+}
+
 fn detect_and_report_stalls_with_grace(
     thread_or_root_id: &str,
     stall_timeout_secs: u64,
@@ -3845,6 +4055,32 @@ fn detect_and_report_stalls_with_grace(
 ) -> Result<Option<Value>> {
     let status = get_crew_status(thread_or_root_id)?;
     let root_id = status.root_thread_id.clone();
+
+    // Guard A: Never report deadlock/stalls while user/system stop or any stopped/interrupted state is active.
+    if crate::cua::is_interrupted() || crate::agent::is_thread_interrupted(&root_id) {
+        clear_active_watchdog_alert(&root_id);
+        return Ok(None);
+    }
+    let root_thread_interrupted = {
+        let conn = crate::db::lock_db();
+        conn.query_row(
+            "SELECT agent_status FROM threads WHERE id = ?1 LIMIT 1",
+            params![root_id],
+            |r| r.get::<_, String>(0),
+        )
+        .map(|s| s == "interrupted")
+        .unwrap_or(false)
+    };
+    if root_thread_interrupted
+        || status
+            .members
+            .iter()
+            .any(|m| m.state == "stopped" || !m.cancel_source.trim().is_empty())
+    {
+        clear_active_watchdog_alert(&root_id);
+        return Ok(None);
+    }
+
     let room = ensure_room(&root_id);
     let now = now_unix_secs();
 
@@ -3860,6 +4096,24 @@ fn detect_and_report_stalls_with_grace(
         .iter()
         .filter(|m| m.state == "working")
         .collect();
+    let (epoch, last_non_wd_seq, last_fp, dismissed_fp, has_director_completion) = {
+        let conn = crate::db::lock_db();
+        query_watchdog_session_ctx(&conn, &root_id)
+    };
+    let board_posts_since_zero = read_crew_board(&root_id, Some(0), 200, None, None, None)
+        .map(|(_, _, p)| p)
+        .unwrap_or_default();
+    let has_unread_mention = |m: &CrewMemberRecord| -> bool {
+        board_posts_since_zero.iter().any(|p| {
+            p.seq > m.last_read_seq
+                && p.author_name != m.name
+                && p.author_name != "watchdog"
+                && p.kind != "brief"
+                && p.kind != "watchdog"
+                && post_matches_waiter(p, &m.name, &m.role, m.wait_mentions_only)
+        })
+    };
+
     let active_waiting: Vec<&CrewMemberRecord> = status
         .members
         .iter()
@@ -3868,79 +4122,121 @@ fn detect_and_report_stalls_with_grace(
                 && (waiters
                     .get(&m.name)
                     .is_some_and(|w| now.saturating_sub(w.started_at) >= deadlock_grace_secs)
-                    || (m.waiting_since > 0 && now.saturating_sub(m.last_active_at) >= deadlock_grace_secs))
+                    || (m.waiting_since > 0
+                        && now.saturating_sub(m.last_active_at) >= deadlock_grace_secs
+                        && has_unread_mention(m)))
         })
         .collect();
 
-    // 1. Deadlock: at least one member is waiting in `crew_wait`, while zero members are working.
+    // 1. Deadlock: either an active blocking waiter OR a stranded unread @mention while zero members work,
+    //    AND the current cycle has not already delivered a verify/deliverable/director report.
     if !active_waiting.is_empty() && working_members.is_empty() {
-        let head = room.head_seq.load(Ordering::SeqCst);
-        let prev = room.last_watchdog_seq.swap(head.max(1), Ordering::SeqCst);
-        if prev != head.max(1) {
-            let names: Vec<String> = active_waiting.iter().map(|m| m.name.clone()).collect();
-            let details: Vec<Value> = active_waiting
-                .iter()
-                .map(|m| {
-                    if let Some(w) = waiters.get(&m.name) {
-                        json!({
-                            "name": m.name,
-                            "since": w.since,
-                            "mentions_only": w.mentions_only,
-                            "waiting_secs": now.saturating_sub(w.started_at),
-                        })
-                    } else {
-                        json!({
-                            "name": m.name,
-                            "since": m.waiting_since,
-                            "mentions_only": m.wait_mentions_only,
-                            "waiting_secs": now.saturating_sub(m.last_active_at),
-                        })
-                    }
-                })
-                .collect();
-            let msg = format!(
-                "@director [크루 교착 감지] 현재 작업 중인 크루가 없는데 대기 중인 크루({})가 응답을 기다리고 있습니다.",
-                names.join(", ")
-            );
-            let _ = post_board_message(&root_id, Some("watchdog"), "watchdog", &msg, "", false);
-            let alert = json!({
-                "root_thread_id": root_id,
-                "kind": "deadlock",
-                "stalled_members": names,
-                "waiters": details,
-                "message": msg,
-            });
-            crate::agent::emit_event("crew_watchdog_alert", alert.clone());
-            return Ok(Some(alert));
+        if has_director_completion && waiters.is_empty() {
+            clear_active_watchdog_alert(&root_id);
+            return Ok(None);
         }
-        return Ok(None);
+        let mut names: Vec<String> = active_waiting.iter().map(|m| m.name.clone()).collect();
+        names.sort();
+        let fingerprint = format!("deadlock:{epoch}:{last_non_wd_seq}:{}", names.join(","));
+        if last_fp == fingerprint || dismissed_fp == fingerprint {
+            return Ok(None);
+        }
+        let details: Vec<Value> = active_waiting
+            .iter()
+            .map(|m| {
+                if let Some(w) = waiters.get(&m.name) {
+                    json!({
+                        "name": m.name,
+                        "since": w.since,
+                        "mentions_only": w.mentions_only,
+                        "waiting_secs": now.saturating_sub(w.started_at),
+                    })
+                } else {
+                    json!({
+                        "name": m.name,
+                        "since": m.waiting_since,
+                        "mentions_only": m.wait_mentions_only,
+                        "waiting_secs": now.saturating_sub(m.last_active_at),
+                    })
+                }
+            })
+            .collect();
+        let msg = format!(
+            "@director [크루 교착 감지] 현재 작업 중인 크루가 없는데 대기 중인 크루({})가 응답을 기다리고 있습니다.",
+            names.join(", ")
+        );
+        let post_outcome =
+            post_board_message(&root_id, Some("watchdog"), "watchdog", &msg, "", false).ok();
+        let alert_seq = post_outcome.as_ref().map(|o| o.post.seq).unwrap_or(0);
+        let alert = json!({
+            "root_thread_id": root_id,
+            "kind": "deadlock",
+            "fingerprint": fingerprint,
+            "last_non_watchdog_seq": last_non_wd_seq,
+            "seq": alert_seq,
+            "stalled_members": names,
+            "waiters": details,
+            "message": msg,
+            "created_at": now,
+        });
+        {
+            let conn = crate::db::lock_db();
+            let _ = conn.execute(
+                "UPDATE crew_sessions
+                 SET last_watchdog_fingerprint = ?1,
+                     active_watchdog_json = ?2,
+                     updated_at = ?3
+                 WHERE root_thread_id = ?4",
+                params![fingerprint, alert.to_string(), now as i64, root_id],
+            );
+        }
+        crate::agent::emit_event("crew_watchdog_alert", alert.clone());
+        return Ok(Some(alert));
     }
 
     // 2. Idle stall: working member has had zero activity past `stall_timeout_secs`.
-    let stalled: Vec<String> = working_members
+    let mut stalled: Vec<String> = working_members
         .iter()
         .filter(|m| now.saturating_sub(m.last_active_at) >= stall_timeout_secs)
         .map(|m| m.name.clone())
         .collect();
     if !stalled.is_empty() {
-        let head = room.head_seq.load(Ordering::SeqCst);
-        let prev = room.last_watchdog_seq.swap(head.max(1), Ordering::SeqCst);
-        if prev != head.max(1) {
-            let msg = format!(
-                "@director [크루 지연 감지] 다음 크루의 응답이 {}초 이상 멈춰 있습니다: {}",
-                stall_timeout_secs,
-                stalled.join(", ")
-            );
-            let _ = post_board_message(&root_id, Some("watchdog"), "watchdog", &msg, "", false);
-            let alert = json!({
-                "root_thread_id": root_id,
-                "kind": "idle_stall",
-                "stalled_members": stalled,
-                "message": msg,
-            });
-            crate::agent::emit_event("crew_watchdog_alert", alert.clone());
-            return Ok(Some(alert));
+        stalled.sort();
+        let fingerprint = format!("idle_stall:{epoch}:{last_non_wd_seq}:{}", stalled.join(","));
+        if last_fp == fingerprint || dismissed_fp == fingerprint {
+            return Ok(None);
         }
+        let msg = format!(
+            "@director [크루 지연 감지] 다음 크루의 응답이 {}초 이상 멈춰 있습니다: {}",
+            stall_timeout_secs,
+            stalled.join(", ")
+        );
+        let post_outcome =
+            post_board_message(&root_id, Some("watchdog"), "watchdog", &msg, "", false).ok();
+        let alert_seq = post_outcome.as_ref().map(|o| o.post.seq).unwrap_or(0);
+        let alert = json!({
+            "root_thread_id": root_id,
+            "kind": "idle_stall",
+            "fingerprint": fingerprint,
+            "last_non_watchdog_seq": last_non_wd_seq,
+            "seq": alert_seq,
+            "stalled_members": stalled,
+            "message": msg,
+            "created_at": now,
+        });
+        {
+            let conn = crate::db::lock_db();
+            let _ = conn.execute(
+                "UPDATE crew_sessions
+                 SET last_watchdog_fingerprint = ?1,
+                     active_watchdog_json = ?2,
+                     updated_at = ?3
+                 WHERE root_thread_id = ?4",
+                params![fingerprint, alert.to_string(), now as i64, root_id],
+            );
+        }
+        crate::agent::emit_event("crew_watchdog_alert", alert.clone());
+        return Ok(Some(alert));
     }
     Ok(None)
 }
@@ -5688,5 +5984,188 @@ mod tests {
         assert_eq!(retried["ok"], true);
         assert_eq!(retried["member"]["last_error"], "");
         assert_eq!(retried["member"]["cancel_source"], "");
+    }
+
+    #[tokio::test]
+    async fn watchdog_skips_stopped_standby_and_director_completed_sessions() {
+        let cfg = AppConfig::default();
+
+        // Case 1: User stopped / interrupted crew -> NEVER trigger deadlock alert.
+        let root_stopped = unique_root("wd-stopped");
+        let add_s = manage_crew(
+            &root_stopped,
+            &json!({
+                "action": "add",
+                "name": "standby-peer",
+                "role": "coder",
+                "brief": "Initial brief"
+            }),
+            &cfg,
+            false,
+        )
+        .await
+        .unwrap();
+        let tid_s = add_s["added"][0]["thread_id"].as_str().unwrap().to_string();
+        let _w = tokio::spawn({
+            let tid_c = tid_s.clone();
+            async move { wait_for_board(&tid_c, Some(1), true, 1200).await }
+        });
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        mark_thread_cancel_forensics(&tid_s, "ui_stop", "User clicked global stop button");
+        {
+            let conn = crate::db::lock_db();
+            conn.execute(
+                "UPDATE crew_members SET state = 'stopped' WHERE thread_id = ?1",
+                params![tid_s],
+            )
+            .unwrap();
+        }
+        let alert_stopped = detect_and_report_stalls(&root_stopped, 60).unwrap();
+        assert!(alert_stopped.is_none(), "Stopped session must never fire deadlock");
+        let _ = manage_crew(&root_stopped, &json!({ "action": "kill_all" }), &cfg, false).await;
+
+        // Case 2: Intentional standby in zero-token `crew_wait` (no unread @mention, plus @director verify done).
+        let root_standby = unique_root("wd-standby");
+        let add_b = manage_crew(
+            &root_standby,
+            &json!({
+                "action": "add",
+                "name": "verifier",
+                "role": "verifier",
+                "brief": "Inspect and stand by"
+            }),
+            &cfg,
+            false,
+        )
+        .await
+        .unwrap();
+        let tid_b = add_b["added"][0]["thread_id"].as_str().unwrap().to_string();
+        park_for_board(&tid_b, Some(1), true).unwrap();
+        post_board_message(
+            &tid_b,
+            Some("verifier"),
+            "verify",
+            "@director 검수 완료, 대기합니다.",
+            "",
+            false,
+        )
+        .unwrap();
+        let alert_standby = detect_and_report_stalls(&root_standby, 60).unwrap();
+        assert!(
+            alert_standby.is_none(),
+            "Intentional crew_wait standby without unread handoff must never fire deadlock"
+        );
+    }
+
+    #[tokio::test]
+    async fn watchdog_dedup_prevents_self_loop_after_alert_and_director_reply() {
+        let root_id = unique_root("wd-dedup");
+        let cfg = AppConfig::default();
+
+        let add = manage_crew(
+            &root_id,
+            &json!({
+                "action": "add",
+                "name": "waiter-a",
+                "role": "crew",
+                "brief": "Wait on missing peer"
+            }),
+            &cfg,
+            false,
+        )
+        .await
+        .unwrap();
+        let tid = add["added"][0]["thread_id"].as_str().unwrap().to_string();
+
+        let waiter = tokio::spawn({
+            let tid_c = tid.clone();
+            async move { wait_for_board(&tid_c, Some(1), true, 1500).await.unwrap() }
+        });
+        tokio::time::sleep(Duration::from_millis(30)).await;
+
+        let first = detect_and_report_stalls(&root_id, 60).unwrap();
+        assert!(first.is_some(), "First real deadlock check should emit once");
+        let first_val = first.unwrap();
+        assert!(!first_val["fingerprint"].as_str().unwrap_or("").is_empty());
+
+        // Second check in same idle epoch -> deduplicated (None) even though @watchdog posted!
+        let second = detect_and_report_stalls(&root_id, 60).unwrap();
+        assert!(second.is_none(), "Watchdog must not re-fire due to its own post");
+
+        // Even if @director acknowledges without spawning new work, watchdog must stay silent.
+        post_board_message(
+            &root_id,
+            Some("director"),
+            "post",
+            "알림 확인, 현재 대기는 의도된 상태입니다.",
+            "",
+            false,
+        )
+        .unwrap();
+        let third = detect_and_report_stalls(&root_id, 60).unwrap();
+        assert!(third.is_none(), "Director reply without new work must not re-trigger watchdog");
+
+        let (_, _, posts) = read_crew_board(&root_id, None, 50, None, None, None).unwrap();
+        let wd_count = posts.iter().filter(|p| p.kind == "watchdog").count();
+        assert_eq!(wd_count, 1, "Expected exactly 1 watchdog board post, not spam");
+
+        let _ = manage_crew(&root_id, &json!({ "action": "kill_all" }), &cfg, false).await;
+        let _ = waiter.await;
+    }
+
+    #[tokio::test]
+    async fn watchdog_dismiss_persists_in_status_and_blocks_resurface_until_new_work() {
+        let root_id = unique_root("wd-dismiss");
+        let cfg = AppConfig::default();
+
+        let add = manage_crew(
+            &root_id,
+            &json!({
+                "action": "add",
+                "name": "waiter-b",
+                "role": "crew",
+                "brief": "Wait for dismiss test"
+            }),
+            &cfg,
+            false,
+        )
+        .await
+        .unwrap();
+        let tid = add["added"][0]["thread_id"].as_str().unwrap().to_string();
+
+        let waiter = tokio::spawn({
+            let tid_c = tid.clone();
+            async move { wait_for_board(&tid_c, Some(1), true, 1500).await.unwrap() }
+        });
+        tokio::time::sleep(Duration::from_millis(30)).await;
+
+        let alert = detect_and_report_stalls(&root_id, 60).unwrap().unwrap();
+        let fp = alert["fingerprint"].as_str().unwrap().to_string();
+        let st_before = get_crew_status(&root_id).unwrap();
+        assert!(st_before.watchdog_alert.is_some());
+
+        let dis = manage_crew(
+            &root_id,
+            &json!({ "action": "dismiss_watchdog", "fingerprint": fp }),
+            &cfg,
+            false,
+        )
+        .await
+        .unwrap();
+        assert_eq!(dis["ok"], true);
+        assert!(dis["watchdog_alert"].is_null());
+
+        let st_after = get_crew_status(&root_id).unwrap();
+        assert!(
+            st_after.watchdog_alert.is_none(),
+            "Dismissed watchdog alert must remain null on status polling"
+        );
+        assert!(
+            detect_and_report_stalls(&root_id, 60).unwrap().is_none(),
+            "Dismissed idle epoch must not re-fire"
+        );
+
+        let _ = manage_crew(&root_id, &json!({ "action": "kill_all" }), &cfg, false).await;
+        let _ = waiter.await;
     }
 }
