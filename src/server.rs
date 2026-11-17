@@ -1189,6 +1189,7 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
                     "model": cfg.model,
                     "effort": cfg.effort,
                     "skin": cfg.skin,
+                    "language": cfg.language,
                     "split_browser_open": cfg.split_browser_open,
                     "browser_width_ratio": cfg.browser_width_ratio,
                     "default_display": cfg.default_display,
@@ -1199,6 +1200,8 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
                     "default_video_model": cfg.default_video_model,
                     "ai_self_heal_enabled": cfg.ai_self_heal_enabled,
                     "artex_enabled": cfg.artex_enabled,
+                    "auto_load_user_rules": cfg.auto_load_user_rules,
+                    "github_auto_refresh": cfg.github_auto_refresh,
                     "models": cfg.models,
                 }
             }))
@@ -6430,21 +6433,50 @@ mod http_security_tests {
             .expect("GET /api/config");
         assert_eq!(cfg_before["github_auto_refresh"], false);
 
+        let st_before = route_api("GET", "/api/status", "", json!({}))
+            .await
+            .expect("GET /api/status before");
+        assert_eq!(st_before["config"]["github_auto_refresh"], false);
+        assert_eq!(st_before["config"]["auto_load_user_rules"], true);
+        assert!(st_before["config"]["language"]
+            .as_str()
+            .is_some_and(|s| s == "ko" || s == "en"));
+
         let enabled = route_api(
             "POST",
             "/api/config",
             "",
-            json!({ "github_auto_refresh": true }),
+            json!({ "github_auto_refresh": true, "auto_load_user_rules": false }),
         )
         .await
         .expect("enable github_auto_refresh");
         assert_eq!(enabled["ok"], true);
         assert_eq!(enabled["github_auto_refresh"], true);
+        assert_eq!(enabled["auto_load_user_rules"], false);
 
         let cfg_after_on = route_api("GET", "/api/config", "", json!({}))
             .await
             .expect("GET /api/config after on");
         assert_eq!(cfg_after_on["github_auto_refresh"], true);
+        assert_eq!(cfg_after_on["auto_load_user_rules"], false);
+
+        let st_after_on = route_api("GET", "/api/status", "", json!({}))
+            .await
+            .expect("GET /api/status after on");
+        assert_eq!(st_after_on["config"]["github_auto_refresh"], true);
+        assert_eq!(st_after_on["config"]["auto_load_user_rules"], false);
+        assert!(st_after_on["config"]["language"]
+            .as_str()
+            .is_some_and(|s| s == "ko" || s == "en"));
+
+        let _ = route_api(
+            "POST",
+            "/api/config",
+            "",
+            json!({ "auto_load_user_rules": true }),
+        )
+        .await
+        .expect("restore auto_load_user_rules");
 
         let reset = route_api("POST", "/api/config/reset-default", "", json!({}))
             .await
