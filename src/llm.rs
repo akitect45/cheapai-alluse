@@ -790,7 +790,13 @@ pub fn is_retryable_llm_error(err_msg: &str) -> bool {
         || low.contains("connect error")
         || low.contains("temporarily unavailable")
         || low.contains("overloaded")
+        || low.contains("service_moved")
+        || low.contains("try again shortly")
+        || low.contains("we could not complete this request")
+        || low.contains("bad gateway")
+        || low.contains("gateway timeout")
         || low.contains("llm http 408")
+        || low.contains("llm http 410")
         || low.contains("llm http 429")
         || low.contains("llm http 500")
         || low.contains("llm http 502")
@@ -4529,6 +4535,9 @@ mod error_redaction_tests {
         ));
         assert!(is_retryable_llm_error(
             "LLM HTTP 524: Cloudflare timeout occurred"
+        ));
+        assert!(is_retryable_llm_error(
+            r#"LLM HTTP 410 Gone: {"error":{"message":"We could not complete this request. Try again shortly. This request was not billed.","type":"api_error","code":"service_moved"}}"#
         ));
         assert!(is_retryable_llm_error(
             "LLM SSE stream timed out waiting for chunk (idle > 60s)"
