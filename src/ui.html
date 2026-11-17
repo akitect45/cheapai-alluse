@@ -768,6 +768,11 @@
     margin-top: 0;
     padding-top: 4px;
   }
+  .cs-pop-group-label:not(:first-child) {
+    margin-top: 5px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+  }
   .cs-pop-option {
     display: flex;
     align-items: center;
@@ -4963,6 +4968,79 @@
   .gh-account-option.selected {
     border-color: var(--accent);
     background: var(--bg-elevated);
+  }
+  .gh-auto-refresh-toggle {
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 7px;
+    font-family: inherit;
+    font-size: 12.5px;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-input);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+    flex-shrink: 0;
+  }
+  .gh-auto-refresh-toggle:hover {
+    background: var(--bg-hover);
+    color: var(--text);
+    border-color: var(--border-strong);
+  }
+  .gh-auto-refresh-toggle.is-active {
+    background: #f4f4f5;
+    color: #09090b;
+    border-color: #f4f4f5;
+    font-weight: 600;
+  }
+  .gh-auto-refresh-toggle.is-active:hover {
+    background: #e4e4e7;
+    color: #09090b;
+    border-color: #e4e4e7;
+  }
+  [data-skin="light"] .gh-auto-refresh-toggle.is-active,
+  [data-skin="lagoon"] .gh-auto-refresh-toggle.is-active {
+    background: #18181b;
+    color: #ffffff;
+    border-color: #18181b;
+  }
+  [data-skin="light"] .gh-auto-refresh-toggle.is-active:hover,
+  [data-skin="lagoon"] .gh-auto-refresh-toggle.is-active:hover {
+    background: #27272a;
+    color: #ffffff;
+    border-color: #27272a;
+  }
+  .gh-auto-refresh-tooltip {
+    position: fixed;
+    left: 0;
+    top: 0;
+    z-index: 12500;
+    pointer-events: none;
+    max-width: 280px;
+    padding: 8px 11px;
+    border-radius: 8px;
+    background: var(--bg-elevated);
+    color: var(--text);
+    border: 1px solid var(--border-strong);
+    box-shadow: var(--shadow-md);
+    font-size: 12px;
+    line-height: 1.45;
+    opacity: 0;
+    transform: translateY(2px);
+    transition: opacity 0.12s ease, transform 0.12s ease;
+  }
+  .gh-auto-refresh-tooltip[hidden] {
+    display: none !important;
+  }
+  .gh-auto-refresh-tooltip.is-visible {
+    opacity: 1;
+    transform: translateY(0);
   }
   #github-loading-modal {
     z-index: 10060;
@@ -10242,15 +10320,6 @@
 
     <!-- 9. GitHub Control Center Panel (Account · Repos · Topological Commit Graph · Branches · PRs & Auto-Fix · CI Actions · Issues) -->
     <div class="view-panel" id="panel-github">
-      <div class="sector-bar">
-        <button class="sector-pill active" onclick="filterSector('panel-github', 'all', this)">전체 GitHub 섹터</button>
-        <button class="sector-pill" onclick="filterSector('panel-github', 'repos', this)">계정 & 레포지토리</button>
-        <button class="sector-pill" onclick="filterSector('panel-github', 'commits', this)">커밋 그래프 & Diff</button>
-        <button class="sector-pill" onclick="filterSector('panel-github', 'branches', this)">브랜치 & 로컬 동기화</button>
-        <button class="sector-pill" onclick="filterSector('panel-github', 'prs', this)">PR & 자동화 워처</button>
-        <button class="sector-pill" onclick="filterSector('panel-github', 'ci', this)">CI / Actions</button>
-        <button class="sector-pill" onclick="filterSector('panel-github', 'issues', this)">이슈 관리</button>
-      </div>
       <div class="panel-scroll">
 
         <!-- A. GitHub Account Status & Repository Selector -->
@@ -10261,11 +10330,11 @@
               <span>GitHub 계정 & 레포지토리 탐색기</span>
             </div>
             <div style="display:flex; gap:6px; align-items:center; flex-wrap:nowrap;">
-              <span class="mono-badge inverted" id="gh-connected-badge">감지 중...</span>
-              <select id="gh-account-select" onchange="switchGithubAccountUi(this.value)" style="min-width:130px;"></select>
-              <button class="btn" onclick="openGithubConnectModalUi()">계정 연결 모달</button>
-              <button class="btn" onclick="disconnectGithubUi()">연결 해제</button>
-              <button class="btn primary" onclick="loadGithubPanel(true)">
+              <select id="gh-account-select" onchange="void handleGithubAccountSelectChange(this)" style="min-width:156px;"></select>
+              <button type="button" class="gh-auto-refresh-toggle" id="btn-gh-auto-refresh" aria-pressed="false" onclick="void toggleGithubAutoRefreshUi()" onmouseenter="showGhAutoRefreshTooltip(event)" onmousemove="moveGhAutoRefreshTooltip(event)" onmouseleave="hideGhAutoRefreshTooltip()" onblur="hideGhAutoRefreshTooltip()">
+                <span id="btn-gh-auto-refresh-label">자동 새로고침</span>
+              </button>
+              <button type="button" class="btn primary" id="btn-gh-refresh" onclick="loadGithubPanel(true)">
                 <svg class="solar-icon sm"><use href="#solar-refresh"/></svg>
                 <span>새로고침</span>
               </button>
@@ -12292,6 +12361,9 @@ async function resetDefaultApiConfig() {
       applyAutoLoadRulesToggle(res.auto_load_user_rules !== false);
       void refreshRulesStatusUi(false);
     }
+    if (typeof applyGithubAutoRefreshState === 'function') {
+      applyGithubAutoRefreshState(res.github_auto_refresh === true);
+    }
     const aiEnabled = res.ai_self_heal_enabled !== false;
     const cfgAiChk = document.getElementById('cfg-ai-self-heal');
     if (cfgAiChk) cfgAiChk.checked = aiEnabled;
@@ -12424,7 +12496,7 @@ function inferPanelForSectorKey(rawSector) {
 function filterSector(panelId, sectorKey, btnEl) {
   const panel = document.getElementById(panelId);
   if (!panel) return;
-  let normSector = normalizeSectorKey(panelId, sectorKey);
+  let normSector = panelId === 'panel-github' ? 'all' : normalizeSectorKey(panelId, sectorKey);
   if (normSector !== 'all' && !panel.querySelector(`.card[data-sector="${normSector}"]`)) {
     normSector = 'all';
   }
@@ -13336,7 +13408,14 @@ const UI_KO_TO_EN_EXACT = {
   '디렉터 맥락 분기': 'Fork director context',
   '사용량 관리': 'Manage Usage',
   '자동 룰스 로드 (AGENTS.md · CLAUDE.md · GEMINI.md)': 'Auto-Loaded Rules (AGENTS.md · CLAUDE.md · GEMINI.md)',
-  '자동 주입': 'Auto Inject'
+  '자동 주입': 'Auto Inject',
+  '자동 새로고침': 'Auto Refresh',
+  'GitHub 계정': 'GitHub Accounts',
+  '계정 관리': 'Account Actions',
+  '계정 다시 불러오기': 'Reload Accounts',
+  '연결 안 됨': 'Not Connected',
+  '연결할 계정 선택...': 'Select account...',
+  '우측 상단 [새로고침] 버튼을 눌러 GitHub 계정 및 레포지토리 상태를 불러오세요.': 'Click Refresh at the top right to load GitHub account status and repositories.'
 };
 
 const UI_EN_TO_KO_EXACT = (() => {
@@ -13674,6 +13753,15 @@ function applyUiLanguage(lang) {
     if (typeof renderRulesStatusUi === 'function' && lastRulesStatusPayload) {
       renderRulesStatusUi(lastRulesStatusPayload);
     }
+    if (typeof updateGithubAccountBar === 'function') {
+      updateGithubAccountBar(typeof ghAuthState !== 'undefined' ? ghAuthState : null);
+    }
+    if (typeof renderGithubReposGrid === 'function') {
+      renderGithubReposGrid();
+    }
+    if (typeof hideGhAutoRefreshTooltip === 'function') {
+      hideGhAutoRefreshTooltip();
+    }
     const openCrewPop = document.getElementById('crew-help-popover');
     if (openCrewPop && openCrewPop.classList.contains('open') && typeof crewHelpPinnedTrigger !== 'undefined' && crewHelpPinnedTrigger && typeof positionCrewHelpPopover === 'function') {
       positionCrewHelpPopover(crewHelpPinnedTrigger);
@@ -13758,6 +13846,12 @@ async function initApp() {
       applyAutoLoadRulesToggle(st.config.auto_load_user_rules !== false);
       void refreshRulesStatusUi(false);
     }
+    if (typeof applyGithubAutoRefreshState === 'function') {
+      applyGithubAutoRefreshState(st.config.github_auto_refresh === true);
+    }
+    if (typeof hydrateGithubCachedSnapshot === 'function') {
+      hydrateGithubCachedSnapshot();
+    }
     const aiEnabled = st.config.ai_self_heal_enabled !== false;
     const cfgAiChk = document.getElementById('cfg-ai-self-heal');
     if (cfgAiChk) cfgAiChk.checked = aiEnabled;
@@ -13788,7 +13882,9 @@ async function initApp() {
   await switchBrowserSessionUi(currentThreadId);
   await loadMessages(currentThreadId);
   connectSse();
-  checkGithubInitialConnectPrompt();
+  if (typeof ghAutoRefreshEnabled !== 'undefined' && ghAutoRefreshEnabled) {
+    checkGithubInitialConnectPrompt();
+  }
   bindUsageRingTip();
   if (typeof bindCrewHelpPopovers === 'function') bindCrewHelpPopovers();
   refreshVCreditBalanceUi({ syncModels: true });
@@ -15073,7 +15169,7 @@ function handleRealtimeEvent(evt) {
     }
     refreshBrowserBarState();
   } else if (evt.type === 'github_update' || evt.type === 'github_updated') {
-    if (typeof loadGithubPanel === 'function' && typeof isPanelMountedInStage === 'function' && isPanelMountedInStage('github') && (typeof ghLoadingLockCount === 'undefined' || ghLoadingLockCount === 0)) {
+    if (typeof ghAutoRefreshEnabled !== 'undefined' && ghAutoRefreshEnabled && typeof loadGithubPanel === 'function' && typeof isPanelMountedInStage === 'function' && isPanelMountedInStage('github') && (typeof ghLoadingLockCount === 'undefined' || ghLoadingLockCount === 0)) {
       loadGithubPanel(false);
     }
   } else if (evt.type === 'vault_update') {
@@ -15120,7 +15216,9 @@ function handleRealtimeEvent(evt) {
         if (isPanelMountedInStage('github')) {
           if (nextRepo && (previousRepo !== nextRepo || ghLoadedRepoKey !== nextRepo)) {
             renderGithubReposGrid();
-            void loadGithubRepoOverview(nextRepo);
+            if (typeof ghAutoRefreshEnabled !== 'undefined' && ghAutoRefreshEnabled) {
+              void loadGithubRepoOverview(nextRepo);
+            }
           } else if (!nextRepo && (previousRepo || ghLoadedRepoKey)) {
             ghLoadedRepoKey = '';
             renderGithubReposGrid();
@@ -15147,7 +15245,7 @@ function handleRealtimeEvent(evt) {
   } else if (evt.type === 'routine_update' || evt.type === 'routine_completed' || evt.type === 'pr_watcher_update') {
     refreshBrowserBarState();
     loadRoutines();
-    if (typeof loadGithubPanel === 'function' && typeof isPanelMountedInStage === 'function' && isPanelMountedInStage('github') && (typeof ghLoadingLockCount === 'undefined' || ghLoadingLockCount === 0)) {
+    if (typeof ghAutoRefreshEnabled !== 'undefined' && ghAutoRefreshEnabled && typeof loadGithubPanel === 'function' && typeof isPanelMountedInStage === 'function' && isPanelMountedInStage('github') && (typeof ghLoadingLockCount === 'undefined' || ghLoadingLockCount === 0)) {
       if (typeof ghSelectedRepoKey === 'string' && ghSelectedRepoKey) {
         loadGithubRepoOverview(ghSelectedRepoKey);
       }
@@ -20714,7 +20812,7 @@ async function restoreSnapshotUi(id, restoreDb = false) {
     if (isPanelMountedInStage('allscript')) loadAllScripts();
     if (isPanelMountedInStage('artex')) loadArtexPanel();
     if (isPanelMountedInStage('crew') && typeof loadCrewPanel === 'function') loadCrewPanel(false);
-    if (isPanelMountedInStage('github')) loadGithubPanel(true);
+    if (isPanelMountedInStage('github') && typeof ghAutoRefreshEnabled !== 'undefined' && ghAutoRefreshEnabled) loadGithubPanel(true);
   }
 }
 
@@ -21685,7 +21783,9 @@ function switchWorkspaceTab(tabId) {
   }
   if (isPanelMountedInStage('github') && nextRepo && (prevRepo !== nextRepo || ghLoadedRepoKey !== nextRepo)) {
     renderGithubReposGrid();
-    void loadGithubRepoOverview(nextRepo);
+    if (typeof ghAutoRefreshEnabled !== 'undefined' && ghAutoRefreshEnabled) {
+      void loadGithubRepoOverview(nextRepo);
+    }
   } else if (!nextRepo && (prevRepo !== nextRepo || ghLoadedRepoKey) && isPanelMountedInStage('github')) {
     ghLoadedRepoKey = '';
     renderGithubReposGrid();
@@ -21788,7 +21888,9 @@ function closeWorkspaceTabUi(tabId) {
     }
     if (isPanelMountedInStage('github') && nextRepo && (prevRepo !== nextRepo || ghLoadedRepoKey !== nextRepo)) {
       renderGithubReposGrid();
-      void loadGithubRepoOverview(nextRepo);
+      if (typeof ghAutoRefreshEnabled !== 'undefined' && ghAutoRefreshEnabled) {
+        void loadGithubRepoOverview(nextRepo);
+      }
     } else if (!nextRepo && (prevRepo !== nextRepo || ghLoadedRepoKey) && isPanelMountedInStage('github')) {
       ghLoadedRepoKey = '';
       renderGithubReposGrid();
@@ -21949,6 +22051,8 @@ function applyCurrentWorkspaceTabLayout(skipDataLoad = false) {
             }
           });
           requestAnimationFrame(() => syncSectorLiquid(sBar, false));
+        } else if (panelId === 'github') {
+          panelEl.querySelectorAll('.card[data-sector]').forEach(card => card.classList.remove('sector-hidden'));
         }
         // Restore saved scroll position (except #panel-chat whose scroll is managed per-thread by loadMessages)
         const savedScroll = tab.scroll_map && typeof tab.scroll_map[panelId] === 'number' ? tab.scroll_map[panelId] : null;
@@ -22336,12 +22440,147 @@ function initInternalSplitResizers() {
  * GITHUB CONTROL CENTER: REF-COUNTED BLOCKING LOADING MODAL, ON-DEMAND REPO
  * CLICK LOADING, SVG COMMIT DAG, BRANCHES, PR AUTO-FIX, CI ACTIONS & ISSUES
  * ═══════════════════════════════════════════════════════════════════════════ */
+const GH_SNAPSHOT_STORAGE_KEY = 'alluse_gh_cached_snapshot_v1';
+let ghAutoRefreshEnabled = false;
 let ghAuthState = null;
 let ghSelectedModalAccount = null;
 let ghCachedRepos = [];
 let ghSelectedRepoKey = '';
 let ghLoadedRepoKey = '';
 let ghSelectedCommitHash = null;
+let ghLastAccountSelectValue = '';
+
+function saveGithubCachedSnapshot() {
+  try {
+    const payload = {
+      authState: ghAuthState || null,
+      repos: Array.isArray(ghCachedRepos) ? ghCachedRepos.slice(0, 120) : [],
+      savedAt: Date.now()
+    };
+    localStorage.setItem(GH_SNAPSHOT_STORAGE_KEY, JSON.stringify(payload));
+  } catch (_) {}
+}
+
+function hydrateGithubCachedSnapshot() {
+  try {
+    const raw = localStorage.getItem(GH_SNAPSHOT_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        if (!ghAuthState && parsed.authState) {
+          ghAuthState = parsed.authState;
+          syncWorkspaceGithubStateFromAuth(ghAuthState, null);
+        }
+        if (ghCachedRepos.length === 0 && Array.isArray(parsed.repos)) {
+          ghCachedRepos = parsed.repos;
+        }
+      }
+    }
+  } catch (_) {}
+  updateGithubAccountBar(ghAuthState);
+  renderGithubReposGrid();
+}
+
+function applyGithubAutoRefreshState(enabled) {
+  ghAutoRefreshEnabled = enabled === true;
+  const btn = document.getElementById('btn-gh-auto-refresh');
+  if (btn) {
+    btn.classList.toggle('is-active', ghAutoRefreshEnabled);
+    btn.setAttribute('aria-pressed', ghAutoRefreshEnabled ? 'true' : 'false');
+    const lbl = document.getElementById('btn-gh-auto-refresh-label');
+    if (lbl && typeof translateUiString === 'function') {
+      lbl.textContent = translateUiString('자동 새로고침', currentUiLang);
+    }
+  }
+}
+
+async function toggleGithubAutoRefreshUi() {
+  const next = !ghAutoRefreshEnabled;
+  const btn = document.getElementById('btn-gh-auto-refresh');
+  if (btn) btn.disabled = true;
+  applyGithubAutoRefreshState(next);
+  try {
+    const res = await api('/api/config', 'POST', { github_auto_refresh: next });
+    if (!res || res.ok === false || res.error) {
+      throw new Error((res && res.error) || '설정을 저장하지 못했습니다.');
+    }
+    if (typeof res.github_auto_refresh === 'boolean') {
+      applyGithubAutoRefreshState(res.github_auto_refresh);
+    }
+  } catch (err) {
+    applyGithubAutoRefreshState(!next);
+    if (typeof showCustomToast === 'function') {
+      showCustomToast((err && err.message) || '설정을 저장하지 못했습니다.', 'GITHUB');
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function getGhAutoRefreshTooltipCopy() {
+  return currentUiLang === 'en'
+    ? 'When on, refreshes GitHub status automatically on app launch and when opening the GitHub page. When off, checks only when you click Refresh.'
+    : '켜두면 앱을 다시 켜거나 GitHub 페이지에 들어올 때마다 상태를 자동으로 새로고침합니다. 꺼두면 [새로고침] 버튼을 누를 때만 확인합니다.';
+}
+
+function positionGhAutoRefreshTooltipAt(tip, clientX, clientY) {
+  if (!tip) return;
+  const vw = window.innerWidth || document.documentElement.clientWidth || 1280;
+  const vh = window.innerHeight || document.documentElement.clientHeight || 800;
+  const pad = 8;
+  const offset = 14;
+  const rect = tip.getBoundingClientRect();
+  const w = rect.width || 240;
+  const h = rect.height || 54;
+  let left = clientX + offset;
+  let top = clientY + offset;
+  if (left + w > vw - pad) {
+    left = clientX - w - offset;
+  }
+  if (top + h > vh - pad) {
+    top = clientY - h - offset;
+  }
+  left = Math.max(pad, Math.min(vw - w - pad, left));
+  top = Math.max(pad, Math.min(vh - h - pad, top));
+  tip.style.left = Math.round(left) + 'px';
+  tip.style.top = Math.round(top) + 'px';
+}
+
+function showGhAutoRefreshTooltip(ev) {
+  const tip = document.getElementById('gh-auto-refresh-tooltip');
+  if (!tip) return;
+  tip.textContent = getGhAutoRefreshTooltipCopy();
+  tip.hidden = false;
+  let cx = ev && typeof ev.clientX === 'number' ? ev.clientX : 0;
+  let cy = ev && typeof ev.clientY === 'number' ? ev.clientY : 0;
+  if (!cx && !cy) {
+    const r = document.getElementById('btn-gh-auto-refresh')?.getBoundingClientRect();
+    if (r) { cx = r.left + r.width / 2; cy = r.top + r.height / 2; }
+  }
+  positionGhAutoRefreshTooltipAt(tip, cx, cy);
+  tip.classList.add('is-visible');
+}
+
+function moveGhAutoRefreshTooltip(ev) {
+  const tip = document.getElementById('gh-auto-refresh-tooltip');
+  if (!tip || tip.hidden || !ev) return;
+  positionGhAutoRefreshTooltipAt(tip, ev.clientX || 0, ev.clientY || 0);
+}
+
+function hideGhAutoRefreshTooltip() {
+  const tip = document.getElementById('gh-auto-refresh-tooltip');
+  if (!tip) return;
+  tip.classList.remove('is-visible');
+  tip.hidden = true;
+}
+
+if (!window.__ghTooltipGlobalBound) {
+  window.__ghTooltipGlobalBound = true;
+  window.addEventListener('scroll', hideGhAutoRefreshTooltip, true);
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') hideGhAutoRefreshTooltip();
+  });
+}
 
 // Ref-counted loading modal state (never closes until all nested/concurrent promises + DOM paints finish)
 let ghLoadingLockCount = 0;
@@ -22600,22 +22839,68 @@ async function checkGithubInitialConnectPrompt() {
 }
 
 function updateGithubAccountBar(st) {
-  const badge = document.getElementById('gh-connected-badge');
   const sel = document.getElementById('gh-account-select');
-  if (!st) return;
-  const accounts = st.accounts || [];
-  const activeUser = st.connected_account || (accounts.find(a => a.active) || {}).username || '';
-  if (badge) {
-    badge.textContent = st.connected && activeUser
-      ? `Connected: @${activeUser}`
-      : (accounts.length > 0 ? `gh 감지됨 (${accounts.length}개 계정)` : 'gh 미연결');
+  if (!sel) return;
+  const isEn = currentUiLang === 'en';
+  const accounts = (st && Array.isArray(st.accounts)) ? st.accounts : [];
+  const activeUser = st
+    ? (st.connected_account || (accounts.find(a => a.active) || {}).username || '')
+    : '';
+  const hasConnectedActive = Boolean(st && st.connected && activeUser);
+
+  const acctOptions = [];
+  if (!hasConnectedActive) {
+    const emptyLbl = !st
+      ? (isEn ? 'Not Connected' : '연결 안 됨')
+      : (accounts.length > 0
+          ? (isEn ? 'Select account...' : '연결할 계정 선택...')
+          : (isEn ? 'Not Connected' : '연결 안 됨'));
+    acctOptions.push(`<option value="" selected>${escapeHtml(emptyLbl)}</option>`);
   }
-  if (sel) {
-    sel.innerHTML = accounts.length === 0
-      ? `<option value="">감지된 gh 계정 없음</option>`
-      : accounts.map(a =>
-          `<option value="${escapeHtml(a.username)}" ${a.username === activeUser ? 'selected' : ''}>@${escapeHtml(a.username)} (${escapeHtml(a.host || 'github.com')})</option>`
-        ).join('');
+  accounts.forEach(a => {
+    const selAttr = (hasConnectedActive && a.username === activeUser) ? ' selected' : '';
+    acctOptions.push(`<option value="${escapeHtml(a.username)}"${selAttr}>@${escapeHtml(a.username)} (${escapeHtml(a.host || 'github.com')})</option>`);
+  });
+
+  const grpAccountsLbl = isEn ? 'GitHub Accounts' : 'GitHub 계정';
+  const grpActionsLbl = isEn ? 'Account Actions' : '계정 관리';
+  const reloadLbl = isEn ? 'Reload Accounts' : '계정 다시 불러오기';
+  const disconnectLbl = isEn ? 'Disconnect' : '연결 해제';
+
+  sel.disabled = false;
+  sel.innerHTML = `
+    <optgroup label="${escapeHtml(grpAccountsLbl)}">
+      ${acctOptions.join('')}
+    </optgroup>
+    <optgroup label="${escapeHtml(grpActionsLbl)}">
+      <option value="__gh_reload_accounts__">${escapeHtml(reloadLbl)}</option>
+      <option value="__gh_disconnect__">${escapeHtml(disconnectLbl)}</option>
+    </optgroup>
+  `;
+  ghLastAccountSelectValue = hasConnectedActive ? activeUser : '';
+  sel.value = ghLastAccountSelectValue;
+  if (typeof syncCustomSelectTrigger === 'function') syncCustomSelectTrigger(sel);
+}
+
+async function handleGithubAccountSelectChange(selEl) {
+  const sel = selEl || document.getElementById('gh-account-select');
+  if (!sel) return;
+  const val = String(sel.value || '');
+  if (val === '__gh_reload_accounts__') {
+    sel.value = ghLastAccountSelectValue || '';
+    if (typeof syncCustomSelectTrigger === 'function') syncCustomSelectTrigger(sel);
+    await openGithubConnectModalUi();
+    return;
+  }
+  if (val === '__gh_disconnect__') {
+    sel.value = '';
+    if (typeof syncCustomSelectTrigger === 'function') syncCustomSelectTrigger(sel);
+    await disconnectGithubUi();
+    return;
+  }
+  if (val) {
+    ghLastAccountSelectValue = val;
+    await switchGithubAccountUi(val);
   }
 }
 
@@ -22623,8 +22908,11 @@ function openGithubConnectModalWithAccounts(accounts, preselected) {
   const modal = document.getElementById('github-connect-modal');
   const listEl = document.getElementById('gh-modal-accounts-list');
   if (!modal || !listEl) return;
-  ghSelectedModalAccount = preselected || (accounts[0] && accounts[0].username) || '';
-  listEl.innerHTML = (accounts || []).map(a => {
+  const acctList = Array.isArray(accounts) ? accounts : [];
+  ghSelectedModalAccount = preselected || (acctList[0] && acctList[0].username) || '';
+  listEl.innerHTML = acctList.length === 0
+    ? `<div style="font-size:12.5px; color:var(--text-secondary); padding:10px 6px;">${escapeHtml(currentUiLang === 'en' ? 'No authenticated gh CLI accounts found. Run gh auth login first, then reload.' : '감지된 gh CLI 계정이 없습니다. gh auth login 후 다시 시도해 주세요.')}</div>`
+    : acctList.map(a => {
     const isSel = a.username === ghSelectedModalAccount;
     return `
       <div class="gh-account-option ${isSel ? 'selected' : ''}" data-gh-user="${escapeHtml(a.username)}" onclick="selectGithubModalAccount('${escapeJsAttr(a.username)}')">
@@ -22683,6 +22971,7 @@ async function confirmGithubConnectModal() {
         ghAuthState = res.status;
         syncWorkspaceGithubStateFromAuth(res.status, res.workspace_state);
         updateGithubAccountBar(res.status);
+        saveGithubCachedSnapshot();
       }
       updateStep('GitHub 워크벤치 화면으로 전환 중...', 1);
       switchPanel('github', null, true);
@@ -22718,8 +23007,10 @@ async function disconnectGithubUi() {
         syncWorkspaceGithubStateFromAuth(res, res.workspace_state);
         updateGithubAccountBar(res);
       }
+      ghCachedRepos = [];
       syncWorkspaceSelectedRepo('', false);
       ghLoadedRepoKey = '';
+      saveGithubCachedSnapshot();
       renderGithubReposGrid();
       renderGithubUnselectedRepoState();
       persistWorkspaceStateDebounced();
@@ -22763,6 +23054,7 @@ async function switchGithubAccountUi(username) {
         ghAuthState = res.status;
         syncWorkspaceGithubStateFromAuth(res.status, res.workspace_state);
         updateGithubAccountBar(res.status);
+        saveGithubCachedSnapshot();
       }
       updateStep('레포지토리 목록을 새로 불러오는 중...', 1);
       syncWorkspaceSelectedRepo('', true);
@@ -22777,20 +23069,34 @@ async function loadGithubPanel(forceRefresh = false, skipStatusFetch = false) {
     return await ghPanelInFlightPromise;
   }
 
-  // If repositories and auth state are already cached and forceRefresh is false,
-  // re-render immediately without popping a redundant blocking modal.
-  if (!forceRefresh && ghCachedRepos.length > 0 && ghAuthState) {
+  // Manual refresh default (github_auto_refresh === false):
+  // Never call /api/github/* automatically when forceRefresh is false.
+  if (!forceRefresh && !ghAutoRefreshEnabled) {
+    updateGithubAccountBar(ghAuthState);
     renderGithubReposGrid();
     if (!ghSelectedRepoKey || !ghLoadedRepoKey) {
       renderGithubUnselectedRepoState();
     }
-    api('/api/github/status').then(st => {
-      if (st && st.ok) {
-        ghAuthState = st;
-        syncWorkspaceGithubStateFromAuth(st, null);
-        updateGithubAccountBar(st);
-      }
-    }).catch(() => {});
+    return;
+  }
+
+  // Auto-refresh ON + already cached: render cached grid immediately, optionally sync auth if auto-refresh ON.
+  if (!forceRefresh && ghCachedRepos.length > 0 && ghAuthState) {
+    updateGithubAccountBar(ghAuthState);
+    renderGithubReposGrid();
+    if (!ghSelectedRepoKey || !ghLoadedRepoKey) {
+      renderGithubUnselectedRepoState();
+    }
+    if (ghAutoRefreshEnabled && !skipStatusFetch) {
+      api('/api/github/status').then(st => {
+        if (st && st.ok) {
+          ghAuthState = st;
+          syncWorkspaceGithubStateFromAuth(st, null);
+          updateGithubAccountBar(st);
+          saveGithubCachedSnapshot();
+        }
+      }).catch(() => {});
+    }
     return;
   }
 
@@ -22843,6 +23149,7 @@ async function loadGithubPanel(forceRefresh = false, skipStatusFetch = false) {
           }
         }
 
+        saveGithubCachedSnapshot();
         updateStep('레포지토리 목록 화면을 렌더링하는 중...', 2);
         renderGithubReposGrid();
 
@@ -22881,7 +23188,12 @@ function renderGithubReposGrid() {
   });
 
   if (filtered.length === 0) {
-    grid.innerHTML = `<div style="color:var(--text-muted); font-size:12px; padding:8px;">표시할 레포지토리가 없습니다.</div>`;
+    const emptyMsg = (!ghAuthState && ghCachedRepos.length === 0 && !ghAutoRefreshEnabled)
+      ? (currentUiLang === 'en'
+          ? 'Click Refresh at the top right to load GitHub account status and repositories.'
+          : '우측 상단 [새로고침] 버튼을 눌러 GitHub 계정 및 레포지토리 상태를 불러오세요.')
+      : (currentUiLang === 'en' ? 'No repositories to display.' : '표시할 레포지토리가 없습니다.');
+    grid.innerHTML = `<div style="color:var(--text-muted); font-size:12px; padding:8px;">${escapeHtml(emptyMsg)}</div>`;
     return;
   }
 
@@ -25954,6 +26266,15 @@ const CUSTOM_SELECT_META = {
         tag: 'LIGHT',
         desc: '깔끔하고 선명한 모노크롬 라이트 화면'
       }
+    }
+  },
+  'gh-account-select': {
+    badge: 'GITHUB',
+    title: 'GitHub 계정 및 연결 관리',
+    icon: 'solar-github',
+    options: {
+      '__gh_reload_accounts__': { tag: 'SYNC', desc: '로컬 gh CLI 및 키링 계정을 다시 불러옵니다' },
+      '__gh_disconnect__': { tag: 'OFF', desc: '현재 GitHub 계정 연결을 해제합니다' }
     }
   },
   'lang-select': {
@@ -34890,5 +35211,6 @@ async function sendCrewInspectorMessageUi() {
 
 renderCrewBoardRosterAndHeader();
 </script>
+<div class="gh-auto-refresh-tooltip" id="gh-auto-refresh-tooltip" role="tooltip" hidden></div>
 </body>
 </html>
