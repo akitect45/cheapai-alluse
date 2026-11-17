@@ -186,6 +186,10 @@ pub struct ChatThread {
     /// Empty means a general conversation without an attached project.
     #[serde(default)]
     pub workspace_path: String,
+    #[serde(default)]
+    pub title_locked: bool,
+    #[serde(default)]
+    pub auto_titled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -647,6 +651,8 @@ fn init_schema(conn: &Connection) -> Result<()> {
         "ALTER TABLE threads ADD COLUMN depth INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE threads ADD COLUMN agent_status TEXT NOT NULL DEFAULT 'idle'",
         "ALTER TABLE threads ADD COLUMN workspace_path TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE threads ADD COLUMN title_locked INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE threads ADD COLUMN auto_titled INTEGER NOT NULL DEFAULT 0",
     ] {
         let _ = conn.execute(alter_sql, []);
     }
@@ -881,6 +887,8 @@ fn row_to_chat_thread(r: &rusqlite::Row<'_>) -> rusqlite::Result<ChatThread> {
         depth,
         agent_status,
         workspace_path: r.get("workspace_path").unwrap_or_default(),
+        title_locked: r.get::<_, i64>("title_locked").unwrap_or(0) != 0,
+        auto_titled: r.get::<_, i64>("auto_titled").unwrap_or(0) != 0,
     })
 }
 
@@ -1001,7 +1009,7 @@ fn list_threads_in_workspace_conn(
     let effective_limit = limit.unwrap_or(200).clamp(1, 200);
     let mut stmt = conn.prepare(&format!(
         "SELECT t.id, t.title, t.mode, t.model, t.effort, t.created_at, t.updated_at,
-                t.parent_thread_id, t.root_thread_id, t.agent_path, t.agent_role, t.role_instructions, t.depth, t.agent_status, t.workspace_path
+                t.parent_thread_id, t.root_thread_id, t.agent_path, t.agent_role, t.role_instructions, t.depth, t.agent_status, t.workspace_path, t.title_locked, t.auto_titled
          FROM threads t
           WHERE {ROOT_PRED} AND (?3 IS NULL OR t.workspace_path = ?3)
          ORDER BY t.updated_at DESC, t.rowid DESC
@@ -1060,7 +1068,7 @@ fn list_threads_in_workspace_conn(
             .join(", ");
         let child_sql = format!(
             "SELECT id, title, mode, model, effort, created_at, updated_at,
-                    parent_thread_id, root_thread_id, agent_path, agent_role, role_instructions, depth, agent_status, workspace_path
+                    parent_thread_id, root_thread_id, agent_path, agent_role, role_instructions, depth, agent_status, workspace_path, title_locked, auto_titled
              FROM threads
              WHERE depth > 0 AND parent_thread_id != ''
                AND (root_thread_id IN ({placeholders}) OR parent_thread_id IN ({placeholders}))
@@ -1090,7 +1098,7 @@ fn list_threads_in_workspace_conn(
 fn list_threads_conn(conn: &Connection) -> Result<Vec<ChatThread>> {
     let mut stmt = conn.prepare(
         "SELECT id, title, mode, model, effort, created_at, updated_at,
-                parent_thread_id, root_thread_id, agent_path, agent_role, role_instructions, depth, agent_status, workspace_path
+                parent_thread_id, root_thread_id, agent_path, agent_role, role_instructions, depth, agent_status, workspace_path, title_locked, auto_titled
          FROM threads ORDER BY updated_at DESC, rowid DESC",
     )?;
     let rows = stmt.query_map([], row_to_chat_thread)?;
@@ -1099,6 +1107,21 @@ fn list_threads_conn(conn: &Connection) -> Result<Vec<ChatThread>> {
         out.push(r?);
     }
     Ok(out)
+}
+
+pub fn is_default_placeholder_thread_title(raw: &str) -> bool {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    let low = trimmed.to_ascii_lowercase();
+    matches!(
+        low.as_str(),
+        "새 채팅" | "새 대화" | "new chat" | "new thread" | "untitled"
+    ) || low.starts_with("new session")
+        || low.starts_with("새 세션")
+        || low.starts_with("session #")
+        || low.starts_with("세션 #")
 }
 
 pub fn create_thread(title: &str, mode: &str, model: &str, effort: &str) -> Result<ChatThread> {
@@ -1133,12 +1156,13 @@ fn create_thread_conn(
     } else {
         effort.trim()
     };
+    let title_locked = !is_default_placeholder_thread_title(clean_title);
     let id = format!("thread-{}", &uuid::Uuid::new_v4().to_string()[..8]);
     let now = now_unix_secs();
     conn.execute(
-        "INSERT INTO threads (id, title, mode, model, effort, created_at, updated_at, parent_thread_id, root_thread_id, agent_path, agent_role, role_instructions, depth, agent_status)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '', ?1, '/root', 'root', '', 0, 'idle')",
-        params![id, clean_title, clean_mode, clean_model, clean_effort, now, now],
+        "INSERT INTO threads (id, title, mode, model, effort, created_at, updated_at, parent_thread_id, root_thread_id, agent_path, agent_role, role_instructions, depth, agent_status, title_locked, auto_titled)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '', ?1, '/root', 'root', '', 0, 'idle', ?8, 0)",
+        params![id, clean_title, clean_mode, clean_model, clean_effort, now, now, title_locked as i64],
     )?;
     Ok(ChatThread {
         id: id.clone(),
@@ -1156,6 +1180,8 @@ fn create_thread_conn(
         depth: 0,
         agent_status: "idle".to_string(),
         workspace_path: String::new(),
+        title_locked,
+        auto_titled: false,
     })
 }
 
@@ -1715,18 +1741,17 @@ fn rename_thread_conn(
     let Some(cur) = get_thread_exact_id_conn(conn, &resolved_tid) else {
         return Ok(None);
     };
-    let title = new_title
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or(cur.title.as_str());
+    let clean_new_title = new_title.map(str::trim).filter(|s| !s.is_empty());
+    let lock_title: i64 = if clean_new_title.is_some() { 1 } else { 0 };
+    let title = clean_new_title.unwrap_or(cur.title.as_str());
     let mode = new_mode
         .map(str::trim)
         .filter(|s| matches!(*s, "auto" | "pentest" | "computer" | "browser" | "crew"))
         .unwrap_or(cur.mode.as_str());
     let now = now_unix_secs();
     conn.execute(
-        "UPDATE threads SET title = ?1, mode = ?2, updated_at = ?3 WHERE id = ?4",
-        params![title, mode, now, resolved_tid],
+        "UPDATE threads SET title = ?1, mode = ?2, title_locked = CASE WHEN ?5 = 1 THEN 1 ELSE title_locked END, updated_at = ?3 WHERE id = ?4",
+        params![title, mode, now, resolved_tid, lock_title],
     )?;
     if new_mode.is_some() && cur.depth == 0 {
         let enabled_int = if mode.eq_ignore_ascii_case("crew") { 1 } else { 0 };
@@ -1780,7 +1805,7 @@ fn clear_thread_messages_conn(
     let now = now_unix_secs();
     if reset_title {
         conn.execute(
-            "UPDATE threads SET title = '새 채팅', updated_at = ?1 WHERE id = ?2",
+            "UPDATE threads SET title = '새 채팅', title_locked = 0, auto_titled = 0, updated_at = ?1 WHERE id = ?2",
             params![now, resolved_tid],
         )?;
     } else {
@@ -3052,33 +3077,91 @@ fn insert_message_conn(conn: &Connection, msg: &ChatMessage) -> Result<()> {
             params![msg.id, msg.thread_id, msg.role, msg.content],
         )?;
     }
-    if msg.role == "user" && msg.tool_name != "subagent_envelope" {
-        let trimmed = msg.content.trim();
-        if !trimmed.is_empty()
-            && !trimmed.starts_with('/')
-            && !trimmed.starts_with("[AGENT_ENVELOPE")
-            && !trimmed.starts_with("[SUBAGENT_AUTO_WAKE]")
-        {
-            let first_line = trimmed.lines().next().unwrap_or("").trim();
-            let auto_title: String = if first_line.chars().count() > 34 {
-                format!("{}…", first_line.chars().take(34).collect::<String>())
-            } else {
-                first_line.to_string()
-            };
-            if !auto_title.is_empty() {
-                conn.execute(
-                    "UPDATE threads SET title = ?1 WHERE id = ?2 AND (title = '새 채팅' OR title = '' OR title = 'New Chat')",
-                    params![auto_title, msg.thread_id],
-                )?;
-            }
-        }
-    }
     conn.execute(
         "UPDATE threads SET updated_at = ?1 WHERE id = ?2",
         params![msg.created_at, msg.thread_id],
     )?;
     tx.commit()?;
     Ok(())
+}
+
+pub fn is_thread_eligible_for_auto_title(thread_id: &str) -> bool {
+    let clean_tid = thread_id.trim();
+    if clean_tid.is_empty() {
+        return false;
+    }
+    let conn = lock_db();
+    let Some(t) = get_thread_exact_id_conn(&conn, clean_tid) else {
+        return false;
+    };
+    if t.depth > 0
+        || !t.parent_thread_id.trim().is_empty()
+        || t.mode.eq_ignore_ascii_case("crew_worker")
+        || t.title_locked
+        || t.auto_titled
+        || !is_default_placeholder_thread_title(&t.title)
+    {
+        return false;
+    }
+    let is_crew_member: bool = conn
+        .query_row(
+            "SELECT 1 FROM crew_members WHERE thread_id = ?1 LIMIT 1",
+            params![t.id],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+    if is_crew_member {
+        return false;
+    }
+    let user_msg_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM messages
+             WHERE thread_id = ?1
+               AND role = 'user'
+               AND tool_name != 'subagent_envelope'
+               AND tool_name != 'crew_fork_context'",
+            params![t.id],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    user_msg_count <= 1
+}
+
+pub fn try_apply_auto_thread_title(thread_id: &str, new_title: &str) -> Result<Option<ChatThread>> {
+    let clean_title = new_title.trim();
+    if clean_title.is_empty() {
+        return Ok(None);
+    }
+    let conn = lock_db();
+    let Some(t) = get_thread_exact_id_conn(&conn, thread_id) else {
+        return Ok(None);
+    };
+    if t.depth > 0
+        || !t.parent_thread_id.trim().is_empty()
+        || t.mode.eq_ignore_ascii_case("crew_worker")
+        || t.title_locked
+        || t.auto_titled
+        || !is_default_placeholder_thread_title(&t.title)
+    {
+        return Ok(None);
+    }
+    let now = now_unix_secs();
+    let changed = conn.execute(
+        "UPDATE threads
+         SET title = ?1, auto_titled = 1, updated_at = ?2
+         WHERE id = ?3
+           AND title_locked = 0
+           AND auto_titled = 0
+           AND depth = 0
+           AND parent_thread_id = ''
+           AND mode != 'crew_worker'",
+        params![clean_title, now, t.id],
+    )?;
+    if changed == 1 {
+        Ok(get_thread_exact_id_conn(&conn, &t.id))
+    } else {
+        Ok(None)
+    }
 }
 
 // Retain the established message-field API shared by the agent and HTTP server.
@@ -8854,7 +8937,7 @@ pub fn get_thread_by_id_or_path(
 fn get_thread_exact_id_conn(conn: &Connection, tid: &str) -> Option<ChatThread> {
     conn.query_row(
         "SELECT id, title, mode, model, effort, created_at, updated_at,
-                parent_thread_id, root_thread_id, agent_path, agent_role, role_instructions, depth, agent_status, workspace_path
+                parent_thread_id, root_thread_id, agent_path, agent_role, role_instructions, depth, agent_status, workspace_path, title_locked, auto_titled
          FROM threads WHERE id = ?1 OR LOWER(id) = LOWER(?1) LIMIT 1",
         params![tid.trim()],
         row_to_chat_thread,
@@ -8937,7 +9020,7 @@ fn get_thread_by_id_or_path_conn(
     for cand in &candidate_paths {
         if let Ok(found) = conn.query_row(
             "SELECT id, title, mode, model, effort, created_at, updated_at,
-                    parent_thread_id, root_thread_id, agent_path, agent_role, role_instructions, depth, agent_status, workspace_path
+                    parent_thread_id, root_thread_id, agent_path, agent_role, role_instructions, depth, agent_status, workspace_path, title_locked, auto_titled
              FROM threads
              WHERE (root_thread_id = ?1 OR id = ?1) AND LOWER(agent_path) = LOWER(?2)
              ORDER BY updated_at DESC, rowid DESC LIMIT 1",
@@ -8951,7 +9034,7 @@ fn get_thread_by_id_or_path_conn(
     // 3. Global agent_path / role / title match inside caller's tree first, then global
     if let Ok(found) = conn.query_row(
         "SELECT id, title, mode, model, effort, created_at, updated_at,
-                parent_thread_id, root_thread_id, agent_path, agent_role, role_instructions, depth, agent_status, workspace_path
+                parent_thread_id, root_thread_id, agent_path, agent_role, role_instructions, depth, agent_status, workspace_path, title_locked, auto_titled
          FROM threads
          WHERE (root_thread_id = ?1 OR id = ?1)
            AND (LOWER(agent_path) LIKE '%/' || LOWER(?2)
@@ -8977,7 +9060,7 @@ fn get_thread_by_id_or_path_conn(
     if matches!(clean_low.as_str(), "latest" | "last" | "newest" | "recent") {
         if let Ok(found) = conn.query_row(
             "SELECT id, title, mode, model, effort, created_at, updated_at,
-                    parent_thread_id, root_thread_id, agent_path, agent_role, role_instructions, depth, agent_status, workspace_path
+                    parent_thread_id, root_thread_id, agent_path, agent_role, role_instructions, depth, agent_status, workspace_path, title_locked, auto_titled
              FROM threads
              WHERE root_thread_id = ?1 AND depth > 0
              ORDER BY updated_at DESC, rowid DESC LIMIT 1",
@@ -8992,7 +9075,7 @@ fn get_thread_by_id_or_path_conn(
     if matches!(clean_low.as_str(), "first" | "oldest" | "initial") {
         if let Ok(found) = conn.query_row(
             "SELECT id, title, mode, model, effort, created_at, updated_at,
-                    parent_thread_id, root_thread_id, agent_path, agent_role, role_instructions, depth, agent_status, workspace_path
+                    parent_thread_id, root_thread_id, agent_path, agent_role, role_instructions, depth, agent_status, workspace_path, title_locked, auto_titled
              FROM threads
              WHERE root_thread_id = ?1 AND depth > 0
              ORDER BY created_at ASC, rowid ASC LIMIT 1",
@@ -9008,7 +9091,7 @@ fn get_thread_by_id_or_path_conn(
     let found = conn
         .query_row(
             "SELECT id, title, mode, model, effort, created_at, updated_at,
-                    parent_thread_id, root_thread_id, agent_path, agent_role, role_instructions, depth, agent_status, workspace_path
+                    parent_thread_id, root_thread_id, agent_path, agent_role, role_instructions, depth, agent_status, workspace_path, title_locked, auto_titled
              FROM threads
              WHERE (root_thread_id = ?1 OR id = ?1)
                AND (LOWER(agent_path) = LOWER(?2)
@@ -9033,7 +9116,7 @@ fn list_tree_threads_conn(conn: &Connection, thread_or_root_id: &str) -> Result<
     if clean.is_empty() || matches!(clean.to_ascii_lowercase().as_str(), "*" | "all") {
         let mut stmt = conn.prepare(
             "SELECT id, title, mode, model, effort, created_at, updated_at,
-                    parent_thread_id, root_thread_id, agent_path, agent_role, role_instructions, depth, agent_status, workspace_path
+                    parent_thread_id, root_thread_id, agent_path, agent_role, role_instructions, depth, agent_status, workspace_path, title_locked, auto_titled
              FROM threads
              ORDER BY root_thread_id ASC, depth ASC, agent_path ASC, created_at ASC",
         )?;
@@ -9057,7 +9140,7 @@ fn list_tree_threads_conn(conn: &Connection, thread_or_root_id: &str) -> Result<
 
     let mut stmt = conn.prepare(
         "SELECT id, title, mode, model, effort, created_at, updated_at,
-                parent_thread_id, root_thread_id, agent_path, agent_role, role_instructions, depth, agent_status, workspace_path
+                parent_thread_id, root_thread_id, agent_path, agent_role, role_instructions, depth, agent_status, workspace_path, title_locked, auto_titled
          FROM threads
          WHERE root_thread_id = ?1 OR id = ?1
          ORDER BY depth ASC, agent_path ASC, created_at ASC",
@@ -9169,7 +9252,7 @@ fn spawn_subagent_thread_conn(
     // Check if a subagent at `base_path` already exists in the same tree
     if let Ok(existing) = conn.query_row(
         "SELECT id, title, mode, model, effort, created_at, updated_at,
-                parent_thread_id, root_thread_id, agent_path, agent_role, role_instructions, depth, agent_status, workspace_path
+                parent_thread_id, root_thread_id, agent_path, agent_role, role_instructions, depth, agent_status, workspace_path, title_locked, auto_titled
          FROM threads
          WHERE root_thread_id = ?1 AND LOWER(agent_path) = LOWER(?2) AND depth > 0
          LIMIT 1",
@@ -9301,8 +9384,8 @@ fn spawn_subagent_thread_conn(
     conn.execute(
         "INSERT INTO threads
          (id, title, mode, model, effort, created_at, updated_at,
-          parent_thread_id, root_thread_id, agent_path, agent_role, role_instructions, depth, agent_status, workspace_path)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'idle', ?13)",
+          parent_thread_id, root_thread_id, agent_path, agent_role, role_instructions, depth, agent_status, workspace_path, title_locked, auto_titled)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'idle', ?13, 0, 0)",
         params![
             child_id,
             clean_title,
@@ -9387,6 +9470,8 @@ fn spawn_subagent_thread_conn(
         depth: child_depth,
         agent_status: "idle".to_string(),
         workspace_path: parent.workspace_path,
+        title_locked: false,
+        auto_titled: false,
     };
     Ok((child, false))
 }
@@ -9451,6 +9536,8 @@ fn send_agent_envelope_conn(
             depth: 0,
             agent_status: "idle".to_string(),
             workspace_path: String::new(),
+            title_locked: false,
+            auto_titled: false,
         },
     );
     let recipient = get_thread_by_id_or_path_conn(conn, &sender.id, recipient_selector)?
@@ -9890,6 +9977,8 @@ fn upsert_agent_board_post_conn(
         depth: 0,
         agent_status: "idle".to_string(),
         workspace_path: String::new(),
+        title_locked: false,
+        auto_titled: false,
     });
     let root_id = if author.root_thread_id.trim().is_empty() {
         author.id.clone()

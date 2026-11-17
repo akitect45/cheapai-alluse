@@ -11928,6 +11928,345 @@ pub(crate) fn reconstruct_llm_history_from_db_messages(
     history
 }
 
+fn has_active_llm_credentials_for_title(cfg: &AppConfig) -> bool {
+    let low_m = cfg.model.trim().to_ascii_lowercase();
+    if low_m.starts_with("openai-oauth/") {
+        return crate::oauth::is_provider_connected(crate::oauth::OAuthProvider::Openai);
+    }
+    if low_m.starts_with("claude-oauth/") {
+        return crate::oauth::is_provider_connected(crate::oauth::OAuthProvider::Claude);
+    }
+    !crate::config::is_masked_api_key(&cfg.api_key)
+}
+
+fn contains_hangul(text: &str) -> bool {
+    text.chars()
+        .any(|c| ('\u{AC00}'..='\u{D7A3}').contains(&c) || ('\u{3131}'..='\u{318E}').contains(&c))
+}
+
+fn cap_title_on_word_boundary(text: &str, max_chars: usize) -> String {
+    let trimmed = text.trim();
+    if trimmed.chars().count() <= max_chars {
+        return trimmed.to_string();
+    }
+    let mut out = String::new();
+    let mut count = 0usize;
+    for word in trimmed.split_whitespace() {
+        let wlen = word.chars().count();
+        let next_len = if out.is_empty() { wlen } else { count + 1 + wlen };
+        if next_len > max_chars {
+            break;
+        }
+        if !out.is_empty() {
+            out.push(' ');
+            count += 1;
+        }
+        out.push_str(word);
+        count += wlen;
+    }
+    if out.is_empty() {
+        trimmed.chars().take(max_chars).collect()
+    } else {
+        out
+    }
+}
+
+fn to_concise_english_title_case(text: &str) -> String {
+    const MINOR_WORDS: &[&str] = &[
+        "a", "an", "and", "as", "at", "by", "for", "from", "in", "of", "on", "or", "the", "to",
+        "vs", "with",
+    ];
+    let words: Vec<&str> = text.split_whitespace().collect();
+    words
+        .iter()
+        .enumerate()
+        .map(|(idx, w)| {
+            let low = w.to_ascii_lowercase();
+            if idx > 0 && idx + 1 < words.len() && MINOR_WORDS.contains(&low.as_str()) {
+                low
+            } else if w.chars().any(|c| c.is_ascii_uppercase())
+                && w.chars().skip(1).any(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+            {
+                // Preserve acronyms/camelCase like API, SSE, OAuth, Rust, Next.js
+                (*w).to_string()
+            } else {
+                let mut ch = w.chars();
+                match ch.next() {
+                    Some(first) => format!("{}{}", first.to_uppercase(), ch.as_str()),
+                    None => String::new(),
+                }
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+pub fn build_fallback_concise_title(user_prompt: &str) -> String {
+    let first_line = user_prompt
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty() && !l.starts_with("```"))
+        .unwrap_or("")
+        .trim();
+    if first_line.is_empty() {
+        return "이미지 대화".to_string();
+    }
+    let is_ko = contains_hangul(first_line);
+    let mut cleaned = first_line
+        .trim_matches(|c: char| matches!(c, '"' | '\'' | '`' | '#' | '*' | '>' | '-' | '“' | '”' | '‘' | '’'))
+        .to_string();
+
+    if is_ko {
+        for suffix in [
+            "해 주세요.",
+            "해주세요.",
+            "해 주세요",
+            "해주세요",
+            "알려 주세요",
+            "알려주세요",
+            "알려줘요",
+            "알려줘",
+            "부탁드립니다",
+            "부탁해요",
+            "부탁해",
+            "해줘요",
+            "해줘",
+            "만들어줘",
+            "고쳐줘",
+            "설명해줘",
+            "확인해봐",
+            "확인해줘",
+            "작성해줘",
+            "수정해줘",
+            "좀",
+        ] {
+            if let Some(stripped) = cleaned.trim().strip_suffix(suffix) {
+                let s = stripped.trim();
+                if s.chars().count() >= 4 {
+                    cleaned = s.to_string();
+                    break;
+                }
+            }
+        }
+        let words: Vec<&str> = cleaned.split_whitespace().take(6).collect();
+        let joined = words.join(" ");
+        let capped = cap_title_on_word_boundary(&joined, 38);
+        return capped
+            .trim_end_matches(|c: char| matches!(c, '.' | '。' | ',' | ':' | ';' | '!'))
+            .trim()
+            .to_string();
+    }
+
+    loop {
+        let low_en = cleaned.to_ascii_lowercase();
+        let mut matched = false;
+        for pfx in [
+            "please help me ",
+            "can you please ",
+            "could you please ",
+            "can you ",
+            "could you ",
+            "please ",
+            "help me ",
+            "how do i ",
+            "how can i ",
+            "how to ",
+            "tell me about ",
+            "explain how to ",
+            "explain how ",
+            "explain ",
+            "write a ",
+            "create a ",
+            "fix the ",
+            "fix ",
+        ] {
+            if low_en.starts_with(pfx) && cleaned.len() > pfx.len() + 3 {
+                cleaned = cleaned[pfx.len()..].trim().to_string();
+                matched = true;
+                break;
+            }
+        }
+        if !matched {
+            break;
+        }
+    }
+    let words: Vec<&str> = cleaned.split_whitespace().take(6).collect();
+    let title = to_concise_english_title_case(&words.join(" "));
+    let capped = cap_title_on_word_boundary(&title, 40);
+    capped
+        .trim_end_matches(|c: char| matches!(c, '.' | '。' | ',' | ':' | ';' | '!'))
+        .trim()
+        .to_string()
+}
+
+pub fn sanitize_generated_thread_title(raw: &str, fallback_source: &str) -> String {
+    let line = raw
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty() && !l.starts_with("```"))
+        .unwrap_or("")
+        .trim();
+    let strip_edge_wrappers = |inp: &str| -> String {
+        inp.trim()
+            .trim_matches(|c: char| {
+                matches!(
+                    c,
+                    '"' | '\'' | '`' | '#' | '*' | '>' | '-' | '“' | '”' | '‘' | '’'
+                )
+            })
+            .trim()
+            .to_string()
+    };
+    let mut s = strip_edge_wrappers(line);
+
+    for pfx in [
+        "title:",
+        "chat title:",
+        "conversation title:",
+        "summary:",
+        "제목:",
+        "주제:",
+        "요약:",
+    ] {
+        if s.to_ascii_lowercase().starts_with(pfx) {
+            s = s[pfx.len()..].trim().to_string();
+        }
+    }
+
+    s = strip_edge_wrappers(&s)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    s = s
+        .trim_end_matches(|c: char| matches!(c, '.' | '。' | ',' | ':' | ';'))
+        .trim()
+        .to_string();
+    s = strip_edge_wrappers(&s);
+    s = cap_title_on_word_boundary(&s, 40);
+    s = s
+        .trim_end_matches(|c: char| matches!(c, '.' | '。' | ',' | ':' | ';'))
+        .trim()
+        .to_string();
+    s = strip_edge_wrappers(&s);
+
+    if s.is_empty() {
+        let fb = build_fallback_concise_title(fallback_source);
+        if fb.is_empty() {
+            "새 채팅".to_string()
+        } else {
+            fb
+        }
+    } else if !contains_hangul(&s) && s == s.to_ascii_lowercase() {
+        to_concise_english_title_case(&s)
+    } else {
+        s
+    }
+}
+
+async fn generate_concise_thread_title_via_llm(cfg: &AppConfig, user_prompt: &str) -> Result<String> {
+    let mut title_cfg = cfg.clone();
+    title_cfg.effort = "low".to_string();
+    title_cfg.max_steps = 1;
+    let prompt_excerpt: String = user_prompt.trim().chars().take(800).collect();
+    let system_prompt = concat!(
+        "Generate a concise conversation title summarizing the user's request.\n",
+        "Rules:\n",
+        "1. Output ONLY the plain title (max 40 characters).\n",
+        "2. Match the user's language: concise 3-6 word noun phrase for Korean; 3-6 word Title Case for English.\n",
+        "3. Summarize the core topic instead of literally truncating the prompt.\n",
+        "4. No quotes, no markdown symbols (# * `), no 'Title:'/'제목:' prefix, no trailing period, single line."
+    );
+    let history = vec![LlmTurnMessage {
+        role: "user".to_string(),
+        content: prompt_excerpt,
+        image_b64: None,
+        tool_call_id: None,
+        tool_name: None,
+        tool_calls: Vec::new(),
+    }];
+    let resp = tokio::time::timeout(
+        std::time::Duration::from_secs(12),
+        crate::llm::call_llm_streaming(&title_cfg, system_prompt, &history, &[], |_| {}),
+    )
+    .await
+    .map_err(|_| anyhow!("Thread title generation timed out"))??;
+    Ok(resp.content)
+}
+
+pub(crate) async fn generate_and_apply_auto_thread_title(
+    thread_id: &str,
+    user_prompt: &str,
+    cfg: &AppConfig,
+) -> Option<String> {
+    if !crate::db::is_thread_eligible_for_auto_title(thread_id) {
+        return None;
+    }
+    let trimmed = user_prompt.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let raw_title = if has_active_llm_credentials_for_title(cfg) {
+        match generate_concise_thread_title_via_llm(cfg, trimmed).await {
+            Ok(text) if !text.trim().is_empty() => text,
+            _ => build_fallback_concise_title(trimmed),
+        }
+    } else {
+        build_fallback_concise_title(trimmed)
+    };
+    let final_title = sanitize_generated_thread_title(&raw_title, trimmed);
+    if final_title.is_empty() || crate::db::is_default_placeholder_thread_title(&final_title) {
+        return None;
+    }
+    if let Ok(Some(updated)) = crate::db::try_apply_auto_thread_title(thread_id, &final_title) {
+        emit_event(
+            "thread_title_updated",
+            json!({
+                "thread_id": updated.id,
+                "title": updated.title,
+                "auto_generated": true,
+            }),
+        );
+        emit_event(
+            "threads_updated",
+            json!({
+                "thread_id": updated.id,
+                "title": updated.title,
+            }),
+        );
+        return Some(updated.title);
+    }
+    None
+}
+
+pub(crate) fn maybe_spawn_auto_thread_title(
+    thread_id: &str,
+    user_prompt: &str,
+    cfg: &AppConfig,
+    is_crew_worker: bool,
+) {
+    if is_crew_worker || crate::crew::is_crew_worker_thread(thread_id) {
+        return;
+    }
+    let trimmed = user_prompt.trim();
+    if trimmed.is_empty()
+        || trimmed.starts_with('/')
+        || trimmed.starts_with("[AGENT_ENVELOPE")
+        || trimmed.starts_with("[SUBAGENT_AUTO_WAKE]")
+        || trimmed.starts_with("[CREW_DIRECTOR_AUTO_WAKE]")
+    {
+        return;
+    }
+    if !crate::db::is_thread_eligible_for_auto_title(thread_id) {
+        return;
+    }
+    let tid = thread_id.to_string();
+    let prompt_owned = trimmed.to_string();
+    let cfg_owned = cfg.clone();
+    tokio::spawn(async move {
+        let _ = generate_and_apply_auto_thread_title(&tid, &prompt_owned, &cfg_owned).await;
+    });
+}
+
 /// Runs a full multi-step autonomous agent turn on `thread_id`.
 pub async fn run_agent_turn(
     thread_id: String,
@@ -12364,6 +12703,7 @@ pub async fn run_agent_turn_with_attachments(
         let (user_msg, _resolved_att) =
             persist_user_chat_message_with_attachments(&thread_id, &user_prompt, &attachments)?;
         emit_event("user_message", serde_json::to_value(&user_msg)?);
+        maybe_spawn_auto_thread_title(&thread_id, &user_prompt, &cfg, is_crew_worker);
         if !is_crew_worker && mode.eq_ignore_ascii_case("crew") {
             let _ = crate::crew::ensure_crew_mode_enabled(&thread_id);
         }
@@ -15211,5 +15551,126 @@ mod config_tool_redaction_tests {
             std::env::remove_var("ALLUSE_GLOBAL_RULES_HOME");
         }
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[tokio::test]
+    async fn auto_thread_title_respects_sanitization_once_only_manual_lock_crew_exclusion_and_fallback() {
+        // 1. Sanitization rules (Korean + English Title Case + markdown/quote/prefix/period strip + <=40 chars)
+        assert_eq!(
+            super::sanitize_generated_thread_title(
+                "\"Title: **Rust 빌드 에러 해결 방법**.\"\nsecond line ignored",
+                "fallback"
+            ),
+            "Rust 빌드 에러 해결 방법"
+        );
+        assert_eq!(
+            super::sanitize_generated_thread_title(
+                "`websocket reconnect loop debugging and retry fix`.",
+                "fallback"
+            ),
+            "Websocket Reconnect Loop Debugging And"
+        );
+        let ko_fb = super::build_fallback_concise_title("스냅드래곤 ARM64 윈도우 빠른 시작 버그 원인 분석해줘");
+        assert!(!ko_fb.is_empty() && !ko_fb.ends_with("해줘") && ko_fb.chars().count() <= 40);
+
+        // 2. First message auto-title via mock LLM endpoint + SSE emission + 2nd message protection
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let srv_handle = tokio::spawn(async move {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else {
+                    break;
+                };
+                tokio::spawn(async move {
+                    let mut buf = vec![0u8; 8192];
+                    let n = stream.read(&mut buf).await.unwrap_or(0);
+                    let raw = String::from_utf8_lossy(&buf[..n]).to_string();
+                    let head = raw.split("\r\n\r\n").next().unwrap_or("");
+                    let req_line = head.lines().next().unwrap_or("");
+                    let sse_body = if req_line.contains("/responses") {
+                        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"\\\"제목: OAuth 토큰 리프레시 수정.\\\"\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_t1\"}}\n\n".to_string()
+                    } else {
+                        "data: {\"choices\":[{\"delta\":{\"content\":\"OAuth Token Refresh Fix\"}}]}\n\ndata: [DONE]\n\n".to_string()
+                    };
+                    let http_resp = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        sse_body.len(),
+                        sse_body
+                    );
+                    let _ = stream.write_all(http_resp.as_bytes()).await;
+                    let _ = stream.shutdown().await;
+                });
+            }
+        });
+
+        let mut cfg = crate::config::AppConfig::default();
+        cfg.base_url = format!("http://127.0.0.1:{port}/v1");
+        cfg.api_key = "cai_test_title_key_123456".to_string();
+        cfg.model = "gpt-6-astra".to_string();
+
+        let t1 = crate::db::create_thread("새 채팅", "auto", "gpt-6-astra", "low").unwrap();
+        crate::db::append_message(&t1.id, "user", "OAuth 로그인 시 토큰 리프레시 401 문제 고쳐줘", "", "", "", "", "{}").unwrap();
+        assert!(crate::db::is_thread_eligible_for_auto_title(&t1.id));
+
+        let mut sse_rx = super::subscribe_events();
+        let applied = super::generate_and_apply_auto_thread_title(&t1.id, "OAuth 로그인 시 토큰 리프레시 401 문제 고쳐줘", &cfg).await;
+        assert_eq!(applied.as_deref(), Some("OAuth 토큰 리프레시 수정"));
+
+        let t1_after = crate::db::get_thread_by_id_or_path(&t1.id, "self").unwrap().unwrap();
+        assert_eq!(t1_after.title, "OAuth 토큰 리프레시 수정");
+        assert!(t1_after.auto_titled);
+
+        let mut saw_title_evt = false;
+        let mut saw_threads_evt = false;
+        while let Ok(ev) = sse_rx.try_recv() {
+            let etype = ev.get("type").and_then(|v| v.as_str()).unwrap_or("");
+            if etype == "thread_title_updated" && ev["thread_id"] == t1.id {
+                assert_eq!(ev["title"], "OAuth 토큰 리프레시 수정");
+                assert_eq!(ev["auto_generated"], true);
+                saw_title_evt = true;
+            }
+            if etype == "threads_updated" && ev["thread_id"] == t1.id && ev["title"] == "OAuth 토큰 리프레시 수정" {
+                saw_threads_evt = true;
+            }
+        }
+        assert!(saw_title_evt && saw_threads_evt);
+
+        // 2nd message must NOT overwrite auto-titled thread
+        crate::db::append_message(&t1.id, "user", "두 번째 메시지입니다", "", "", "", "", "{}").unwrap();
+        assert!(!crate::db::is_thread_eligible_for_auto_title(&t1.id));
+        assert!(super::generate_and_apply_auto_thread_title(&t1.id, "두 번째 메시지입니다", &cfg).await.is_none());
+
+        // 3. Manual rename locks title permanently (title_locked = true)
+        let t_manual = crate::db::create_thread("New Chat", "auto", "gpt-6-astra", "low").unwrap();
+        let renamed = crate::db::rename_thread(&t_manual.id, Some("내가 정한 제목"), None).unwrap().unwrap();
+        assert!(renamed.title_locked);
+        assert!(!crate::db::is_thread_eligible_for_auto_title(&t_manual.id));
+        assert!(crate::db::try_apply_auto_thread_title(&t_manual.id, "덮어쓰기 시도").unwrap().is_none());
+        assert_eq!(
+            crate::db::get_thread_by_id_or_path(&t_manual.id, "self").unwrap().unwrap().title,
+            "내가 정한 제목"
+        );
+
+        // 4. Crew worker thread is strictly excluded
+        let t_crew = crate::db::create_thread("새 채팅", "crew", "gpt-6-astra", "low").unwrap();
+        let (worker_rec, _) = crate::crew::add_single_crew_member(
+            &t_crew.id, "director", "title-skip-worker", "worker", "work", "", "", "inherit", false, 0, None, &cfg, false,
+        ).unwrap();
+        assert!(!crate::db::is_thread_eligible_for_auto_title(&worker_rec.thread_id));
+        assert!(super::generate_and_apply_auto_thread_title(&worker_rec.thread_id, "워커 브리프", &cfg).await.is_none());
+
+        // 5. Offline / no-key fallback generates clean concise title without errors
+        let mut offline_cfg = cfg.clone();
+        offline_cfg.api_key = String::new();
+        let t_fb = crate::db::create_thread("New Chat", "auto", "gpt-6-astra", "low").unwrap();
+        let fb_title = super::generate_and_apply_auto_thread_title(&t_fb.id, "Please explain how Rust async channels work", &offline_cfg).await.unwrap();
+        assert_eq!(fb_title, "Rust Async Channels Work");
+
+        let _ = crate::db::delete_thread(&t1.id);
+        let _ = crate::db::delete_thread(&t_manual.id);
+        let _ = crate::db::delete_thread(&t_crew.id);
+        let _ = crate::db::delete_thread(&t_fb.id);
+        srv_handle.abort();
     }
 }

@@ -1499,6 +1499,14 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
                 .and_then(|v| v.as_str());
             let mode = body.get("mode").and_then(|v| v.as_str());
             let updated = rename_thread(tid, title, mode)?;
+            if let Some(ref th) = updated {
+                if title.is_some() {
+                    emit_event(
+                        "thread_title_updated",
+                        json!({ "thread_id": th.id, "title": th.title, "auto_generated": false }),
+                    );
+                }
+            }
             emit_event(
                 "threads_updated",
                 json!({ "thread_id": tid, "renamed": true }),
