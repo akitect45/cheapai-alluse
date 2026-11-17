@@ -6891,6 +6891,533 @@
   }
 
   /* Filter & Channel Bar */
+  /* ── Antigravity-Inspired 3-Tab Crew Sidecar, Pixel Avatars & Inspector ── */
+  .crew-live-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 21px;
+    padding: 0 8px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .crew-live-pill .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-muted);
+  }
+  .crew-live-pill.is-live {
+    color: var(--text);
+    border-color: var(--crew-working-border);
+  }
+  .crew-live-pill.is-live .dot {
+    background: #22c55e;
+    animation: streamBadgePulse 1.15s ease-in-out infinite;
+  }
+  .crew-sidecar-tabs {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 0 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-sidebar);
+    flex-shrink: 0;
+  }
+  .crew-tab-strip {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .crew-tab-btn {
+    position: relative;
+    height: 34px;
+    padding: 0 2px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-family: var(--font-sans);
+    font-size: 12.5px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+    transition: color 0.12s ease;
+  }
+  .crew-tab-btn:hover {
+    color: var(--text);
+  }
+  .crew-tab-btn.active {
+    color: var(--text);
+  }
+  .crew-tab-btn.active::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 2px;
+    border-radius: 2px 2px 0 0;
+    background: var(--text);
+  }
+  .crew-tab-count {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    font-weight: 500;
+  }
+  .crew-tab-btn.active .crew-tab-count {
+    color: var(--text-secondary);
+  }
+  .crew-sidecar-searchbar {
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-canvas);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .crew-sidecar-searchwrap {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    height: 30px;
+    padding: 0 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+  }
+  .crew-sidecar-searchwrap:focus-within {
+    border-color: var(--border-focus);
+  }
+  .crew-sidecar-searchwrap input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    background: transparent;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 12px;
+    outline: none;
+  }
+  .crew-tab-view {
+    display: none;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .crew-tab-view.active {
+    display: flex;
+  }
+  .crew-members-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 8px 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .crew-group-heading {
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    padding: 10px 6px 4px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .crew-member-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 9px 10px;
+    border-radius: 9px;
+    border: 1px solid transparent;
+    background: transparent;
+    cursor: pointer;
+    transition: background 0.12s ease, border-color 0.12s ease;
+    min-width: 0;
+  }
+  .crew-member-row:hover {
+    background: var(--bg-hover);
+    border-color: var(--border);
+  }
+  .crew-member-row.is-director {
+    background: var(--bg-elevated);
+    border-color: var(--border);
+    margin-bottom: 2px;
+  }
+  .crew-member-row.is-working {
+    background: var(--bg-elevated);
+    border-color: var(--border-subtle);
+  }
+  .crew-member-row.is-inspecting {
+    border-color: var(--border-strong);
+    background: var(--bg-elevated);
+  }
+  .crew-member-row.is-killed {
+    opacity: 0.56;
+  }
+  .crew-avatar-wrap {
+    position: relative;
+    width: 36px;
+    height: 36px;
+    border-radius: 9px;
+    background: var(--bg-sidebar);
+    border: 1px solid var(--border);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    overflow: hidden;
+  }
+  .crew-member-row.is-working .crew-avatar-wrap {
+    border-color: var(--crew-working-border);
+  }
+  .crew-pixel-canvas {
+    width: 36px;
+    height: 36px;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    display: block;
+  }
+  .crew-avatar-dot {
+    position: absolute;
+    right: 2px;
+    bottom: 2px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    border: 1.5px solid var(--bg-elevated);
+    background: var(--text-muted);
+  }
+  .crew-avatar-dot.is-working {
+    background: #22c55e;
+  }
+  .crew-avatar-dot.is-stopped {
+    background: #eab308;
+  }
+  .crew-row-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2.5px;
+  }
+  .crew-row-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+  }
+  .crew-row-ident {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+  .crew-row-handle {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--text);
+    white-space: nowrap;
+  }
+  .crew-row-status-txt {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .crew-row-status-txt.is-working {
+    color: #22c55e;
+  }
+  .crew-row-status-txt.is-stopped {
+    color: #eab308;
+  }
+  .crew-row-right {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .crew-row-model-chip {
+    max-width: 132px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .crew-row-brief {
+    font-size: 12px;
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .crew-row-tool-line {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11.5px;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-top: 1px;
+  }
+  .crew-row-tool-line.is-working {
+    color: var(--text);
+  }
+  .crew-row-quick {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 4px;
+    flex-wrap: wrap;
+  }
+  .crew-row-err {
+    font-size: 11px;
+    color: #ef4444;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Graph Tab */
+  .crew-graph-wrap {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 14px;
+    position: relative;
+    background: var(--bg-canvas);
+  }
+  .crew-graph-stage {
+    position: relative;
+    min-height: 360px;
+    width: 100%;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    overflow: hidden;
+  }
+  .crew-graph-svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+  }
+  .crew-graph-edge {
+    fill: none;
+    stroke: var(--border-strong);
+    stroke-width: 1.5;
+    opacity: 0.65;
+  }
+  .crew-graph-edge.is-active {
+    stroke: #22c55e;
+    stroke-width: 2;
+    stroke-dasharray: 6 4;
+    opacity: 0.95;
+    animation: crewEdgePulse 1s linear infinite;
+  }
+  @keyframes crewEdgePulse {
+    from { stroke-dashoffset: 20; }
+    to { stroke-dashoffset: 0; }
+  }
+  .crew-graph-node {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    min-width: 132px;
+    max-width: 164px;
+    padding: 7px 9px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg-canvas);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    box-shadow: var(--shadow-sm);
+    transition: border-color 0.14s ease, transform 0.12s ease;
+    z-index: 2;
+  }
+  .crew-graph-node:hover {
+    border-color: var(--border-focus);
+    transform: translate(-50%, -52%);
+  }
+  .crew-graph-node.is-working {
+    border-color: var(--crew-working-border);
+  }
+  .crew-graph-node-meta {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .crew-graph-node-name {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    font-weight: 700;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .crew-graph-node-tool {
+    font-size: 10.5px;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Central Worker Trajectory Inspector inside #panel-chat */
+  #panel-chat.has-crew-inspector #chat-viewport,
+  #panel-chat.has-crew-inspector .composer-container {
+    display: none !important;
+  }
+  .crew-worker-inspector {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    height: 100%;
+    background: var(--bg-canvas);
+  }
+  .crew-worker-inspector[hidden] {
+    display: none !important;
+  }
+  .crew-insp-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-sidebar);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+  .crew-insp-head-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+  .crew-insp-head-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .crew-insp-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 16px 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .crew-insp-brief-card {
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    font-size: 12.5px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+  }
+  .crew-insp-turn {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-elevated);
+    overflow: hidden;
+  }
+  .crew-insp-turn summary {
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    background: var(--bg-sidebar);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .crew-insp-turn-body {
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .crew-insp-step {
+    padding: 6px 9px;
+    border-radius: 7px;
+    background: var(--bg-canvas);
+    border: 1px solid var(--border-subtle);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+  .crew-insp-step-kind {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 700;
+    color: var(--text-muted);
+    margin-bottom: 2px;
+  }
+  .crew-insp-composer {
+    padding: 10px 18px 14px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-canvas);
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .crew-insp-composer textarea {
+    flex: 1;
+    min-width: 0;
+    min-height: 36px;
+    max-height: 110px;
+    padding: 8px 11px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 13px;
+    resize: none;
+    outline: none;
+  }
+  .crew-insp-composer textarea:focus {
+    border-color: var(--border-focus);
+  }
+
+  /* Board Filter & Search */
   .crew-filter-bar {
     display: flex;
     align-items: center;
@@ -8865,6 +9392,17 @@
 
     <!-- 1. Chat & Autonomous Agent Panel (ChatGPT / Codex Monochrome UI) -->
     <div class="view-panel active" id="panel-chat">
+      <div class="crew-worker-inspector" id="crew-worker-inspector" hidden>
+        <div class="crew-insp-header">
+          <div class="crew-insp-head-left" id="crew-insp-head-left"></div>
+          <div class="crew-insp-head-actions" id="crew-insp-head-actions"></div>
+        </div>
+        <div class="crew-insp-scroll" id="crew-insp-scroll"></div>
+        <div class="crew-insp-composer">
+          <textarea id="crew-insp-input" rows="1" placeholder="이 크루에게 직접 지시 또는 후속 질문 입력 (Enter 전송)..." onkeydown="if(event.isComposing || event.keyCode===229) return; if(event.key==='Enter' && !event.shiftKey){ event.preventDefault(); void sendCrewInspectorMessageUi(); }"></textarea>
+          <button type="button" class="btn primary" style="height:36px; padding:0 14px; font-size:12.5px;" id="crew-insp-send-btn" onclick="void sendCrewInspectorMessageUi()">전송</button>
+        </div>
+      </div>
       <div class="chat-viewport" id="chat-viewport">
         <!-- Screenshot-Exact Prompt-Output Turn Navigator Rail -->
         <div class="turn-nav-rail" id="chat-turn-nav-rail" aria-label="대화 턴 탐색기"></div>
@@ -10527,7 +11065,7 @@
       </div>
     </div>
 
-    <!-- 12. ALLCREW (크루 보드) PANEL -->
+    <!-- 12. ALLCREW (크루 사이드카) PANEL -->
     <div class="view-panel" id="panel-crew">
       <div class="crew-board-shell">
         <div class="crew-board-header">
@@ -10547,13 +11085,14 @@
               <rect class="crew-px-frame" x="11" y="10" width="4" height="4"/>
               <rect class="crew-px-node crew-px-n3" x="12" y="11" width="2" height="2"/>
             </svg>
-            <button type="button" class="crew-board-title-btn" id="crew-board-title-btn" onclick="editCrewBoardTitleUi()" title="클릭하여 크루 보드 제목 변경">크루 보드</button>
-            <button type="button" class="crew-help-trigger" aria-label="크루 보드 안내" aria-expanded="false" data-crew-help-title="크루 보드 (#순서 · @멘션)" data-crew-help-body="역할별 크루 상태와 #번호 순서 보드를 실시간 확인합니다. 하단 입력창에서 @크루명 또는 @all로 직접 지시할 수 있습니다.">?</button>
+            <button type="button" class="crew-board-title-btn" id="crew-board-title-btn" onclick="editCrewBoardTitleUi()" title="클릭하여 크루 제목 변경">크루 보드</button>
+            <button type="button" class="crew-help-trigger" aria-label="크루 보드 안내" aria-expanded="false" data-crew-help-title="AllCrew 팀 협업" data-crew-help-body="메인 AI 한 명에게 목표를 지시하면 전담 팀원들에게 업무를 분배하고, 맥락을 공유하며 끝까지 협업합니다.">?</button>
             <span class="crew-state-badge state-working" id="crew-head-working-badge" style="display:none;"><span class="dot"></span><span id="crew-head-working-text">작업 중 0</span></span>
-            <span class="crew-state-badge state-waiting" id="crew-head-waiting-badge">대기 0</span>
+            <span class="crew-state-badge state-waiting" id="crew-head-waiting-badge" style="display:none;">대기 0</span>
             <span class="mono-badge" id="crew-head-seq-badge" style="font-size:11px; padding:1px 6px;">#0</span>
           </div>
           <div class="crew-board-head-right">
+            <span class="crew-live-pill" id="crew-live-pill"><span class="dot"></span><span id="crew-live-pill-text">Live</span></span>
             <button type="button" class="btn" id="crew-board-mode-btn" style="height:24px; padding:0 8px; font-size:11.5px;" onclick="toggleComposerCrewModeUi()">크루 모드 꺼짐</button>
             <button type="button" class="btn" id="crew-toggle-add-btn" style="height:24px; padding:0 8px; font-size:11.5px;" onclick="toggleCrewAddDrawerUi()">+ 크루 추가</button>
             <button type="button" class="btn" id="crew-kill-all-btn" style="height:24px; padding:0 8px; font-size:11.5px; display:none;" onclick="runCrewActionUi('kill_all')" title="실행 중인 모든 크루를 종료합니다">전체 종료</button>
@@ -10562,15 +11101,47 @@
           </div>
         </div>
 
+        <div class="crew-sidecar-tabs" id="crew-sidecar-tabs" role="tablist">
+          <div class="crew-tab-strip">
+            <button type="button" class="crew-tab-btn" id="crew-tab-btn-board" role="tab" aria-selected="false" onclick="switchCrewSidecarTab('board')">
+              <span id="crew-tab-label-board">Board</span>
+              <span class="crew-tab-count" id="crew-tab-count-board">0</span>
+            </button>
+            <button type="button" class="crew-tab-btn active" id="crew-tab-btn-members" role="tab" aria-selected="true" onclick="switchCrewSidecarTab('members')">
+              <span id="crew-tab-label-members">Members</span>
+              <span class="crew-tab-count" id="crew-tab-count-members">0</span>
+            </button>
+            <button type="button" class="crew-tab-btn" id="crew-tab-btn-graph" role="tab" aria-selected="false" onclick="switchCrewSidecarTab('graph')">
+              <span id="crew-tab-label-graph">Graph</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="crew-sidecar-searchbar">
+          <div class="crew-sidecar-searchwrap">
+            <svg class="solar-icon sm" style="color:var(--text-muted); flex-shrink:0;"><use href="#solar-search"/></svg>
+            <input id="crew-board-search" placeholder="크루 · 도구 · 보드(#번호, @멘션) 검색..." oninput="onCrewBoardSearchInput(this.value)" />
+          </div>
+        </div>
+
         <div class="crew-add-drawer" id="crew-add-drawer">
           <div class="crew-add-row">
-            <input id="crew-add-name" style="width:110px; font-family:var(--font-mono);" placeholder="이름 (예: coder)" spellcheck="false" />
-            <input id="crew-add-role" style="width:115px;" placeholder="역할 (예: 구현 크루)" />
+            <input id="crew-add-name" style="width:105px; font-family:var(--font-mono);" placeholder="이름 (예: coder)" spellcheck="false" />
+            <input id="crew-add-role" style="width:110px;" placeholder="역할 (예: 구현)" />
+            <select id="crew-add-model" style="max-width:175px;" title="크루 모델 선택"></select>
             <select id="crew-add-workspace" title="작업 공간 격리 방식">
-              <option value="inherit">기본 워크스페이스</option>
-              <option value="worktree">독립 워크트리</option>
+              <option value="inherit">공유 워크스페이스</option>
+              <option value="share">독립 작업 복사본 (share)</option>
+              <option value="branch">독립 브랜치 (branch)</option>
+              <option value="worktree">Git 워크트리</option>
             </select>
-            <button type="button" class="crew-help-trigger" aria-label="작업 공간 격리 안내" aria-expanded="false" data-crew-help-title="작업 공간 격리" data-crew-help-body="독립 워크트리는 별도 브랜치 사본을 생성해 병렬 파일 수정 충돌을 원천 방지합니다.">?</button>
+            <select id="crew-add-fork" style="max-width:130px;" title="대화 맥락 분기(선택)">
+              <option value="">새 대화 시작</option>
+              <option value="director">디렉터 맥락 분기</option>
+            </select>
+            <input id="crew-add-tasks" style="width:135px; font-family:var(--font-mono);" placeholder="tasks (예: api,ui)" spellcheck="false" />
+          </div>
+          <div class="crew-add-row">
             <input id="crew-add-brief" style="flex:1; min-width:170px;" placeholder="담당 목표 및 완료 기준 입력..." onkeydown="if(event.isComposing || event.keyCode===229) return; if(event.key==='Enter'){ event.preventDefault(); submitAddCrewUi(); }" />
             <button type="button" class="btn primary" style="height:27px; padding:0 10px; font-size:12px;" onclick="submitAddCrewUi()">배정</button>
           </div>
@@ -10584,44 +11155,55 @@
           </div>
         </div>
 
-        <div class="crew-roster-wrap" id="crew-roster-wrap">
-          <div class="crew-roster-grid" id="crew-roster-grid">
-            <div class="crew-roster-empty">활성 크루가 없습니다. 채팅에서 크루 모드로 지시하거나 + 크루 추가를 누르세요.</div>
+        <!-- Tab 1: Members -->
+        <div class="crew-tab-view active" id="crew-tab-view-members">
+          <div class="crew-members-scroll" id="crew-members-scroll">
+            <div id="crew-director-pinned"></div>
+            <div id="crew-roster-grid">
+              <div class="crew-roster-empty">활성 크루가 없습니다. 메인 AI에 목표를 지시하거나 + 크루 추가를 눌러 배정하세요.</div>
+            </div>
           </div>
         </div>
 
-        <div class="crew-filter-bar">
-          <div class="crew-channel-pills" id="crew-channel-pills">
-            <button type="button" class="crew-channel-pill active" data-crew-filter="all" onclick="setCrewBoardChannelFilter('all')">전체</button>
-            <button type="button" class="crew-channel-pill" data-crew-filter="@all" onclick="setCrewBoardChannelFilter('@all')">@all</button>
-            <button type="button" class="crew-channel-pill" data-crew-filter="director" onclick="setCrewBoardChannelFilter('director')">디렉터</button>
+        <!-- Tab 2: Board -->
+        <div class="crew-tab-view" id="crew-tab-view-board">
+          <div class="crew-filter-bar">
+            <div class="crew-channel-pills" id="crew-channel-pills">
+              <button type="button" class="crew-channel-pill active" data-crew-filter="all" onclick="setCrewBoardChannelFilter('all')">전체</button>
+              <button type="button" class="crew-channel-pill" data-crew-filter="@all" onclick="setCrewBoardChannelFilter('@all')">@all</button>
+              <button type="button" class="crew-channel-pill" data-crew-filter="director" onclick="setCrewBoardChannelFilter('director')">디렉터</button>
+            </div>
+            <div class="crew-filter-controls">
+              <select class="crew-kind-select" id="crew-kind-filter" onchange="onCrewKindFilterChange(this.value)" title="메시지 유형 필터">
+                <option value="all">전체 유형</option>
+                <option value="brief">임무</option>
+                <option value="post">대화</option>
+                <option value="handoff">인계</option>
+                <option value="verify">검수</option>
+                <option value="deliverable">결과</option>
+                <option value="decision">결정</option>
+              </select>
+            </div>
           </div>
-          <div class="crew-filter-controls">
-            <select class="crew-kind-select" id="crew-kind-filter" onchange="onCrewKindFilterChange(this.value)" title="메시지 유형 필터">
-              <option value="all">전체 유형</option>
-              <option value="brief">임무</option>
-              <option value="post">대화</option>
-              <option value="handoff">인계</option>
-              <option value="verify">검수</option>
-              <option value="deliverable">결과</option>
-              <option value="decision">결정</option>
-            </select>
-            <input class="crew-search-input" id="crew-board-search" placeholder="보드 검색 (#번호, @크루)..." oninput="onCrewBoardSearchInput(this.value)" />
+          <div class="crew-board-feed" id="crew-board-feed">
+            <div class="crew-feed-empty">크루 보드 메시지가 여기에 #순서대로 실시간 표시됩니다.</div>
+          </div>
+          <div class="crew-post-composer">
+            <div class="crew-mention-quick-row" id="crew-mention-quick-row">
+              <button type="button" class="crew-mention-chip" onclick="insertCrewMentionUi('@all')">@all</button>
+              <button type="button" class="crew-mention-chip" onclick="insertCrewMentionUi('@verifier')">@verifier</button>
+            </div>
+            <div class="crew-post-input-row">
+              <textarea class="crew-post-textarea" id="crew-post-input" rows="1" placeholder="@크루명 또는 @all 로 크루 보드에 직접 메시지 게시 (Enter 전송)..." oninput="autoResizeCrewPostInput(this)" onkeydown="if(event.isComposing || event.keyCode===229) return; if(event.key==='Enter' && !event.shiftKey){ event.preventDefault(); sendCrewBoardPostUi(); }"></textarea>
+              <button type="button" class="btn primary" style="height:32px; padding:0 12px; font-size:12px;" onclick="sendCrewBoardPostUi()">게시</button>
+            </div>
           </div>
         </div>
 
-        <div class="crew-board-feed" id="crew-board-feed">
-          <div class="crew-feed-empty">크루 보드 메시지가 여기에 #순서대로 실시간 표시됩니다.</div>
-        </div>
-
-        <div class="crew-post-composer">
-          <div class="crew-mention-quick-row" id="crew-mention-quick-row">
-            <button type="button" class="crew-mention-chip" onclick="insertCrewMentionUi('@all')">@all</button>
-            <button type="button" class="crew-mention-chip" onclick="insertCrewMentionUi('@verifier')">@verifier</button>
-          </div>
-          <div class="crew-post-input-row">
-            <textarea class="crew-post-textarea" id="crew-post-input" rows="1" placeholder="@크루명 또는 @all 로 크루 보드에 직접 메시지 게시 (Enter 전송)..." oninput="autoResizeCrewPostInput(this)" onkeydown="if(event.isComposing || event.keyCode===229) return; if(event.key==='Enter' && !event.shiftKey){ event.preventDefault(); sendCrewBoardPostUi(); }"></textarea>
-            <button type="button" class="btn primary" style="height:32px; padding:0 12px; font-size:12px;" onclick="sendCrewBoardPostUi()">게시</button>
+        <!-- Tab 3: Graph -->
+        <div class="crew-tab-view" id="crew-tab-view-graph">
+          <div class="crew-graph-wrap" id="crew-graph-wrap">
+            <div class="crew-graph-stage" id="crew-graph-stage"></div>
           </div>
         </div>
       </div>
@@ -12508,7 +13090,23 @@ const UI_KO_TO_EN_EXACT = {
   '연결 해제': 'Disconnect',
   'CheapAI 통합 모델': 'CheapAI Unified Models',
   'OpenAI OAuth (직접 연결)': 'OpenAI OAuth (Direct)',
-  'Claude OAuth (직접 연결)': 'Claude OAuth (Direct)'
+  'Claude OAuth (직접 연결)': 'Claude OAuth (Direct)',
+  '메인 대화로 복귀': 'Back to Main Chat',
+  '크루 인스펙터': 'Crew Inspector',
+  '재시도': 'Retry',
+  '깨우기': 'Nudge',
+  '작성': 'Posted',
+  '읽음': 'Read',
+  '디렉터 (@director)': 'Director (@director)',
+  '크루 협업 중': 'Crew Collaborating',
+  '크루 대기 중': 'Crews Standing By',
+  '공유 워크스페이스': 'Shared workspace',
+  '독립 작업 복사본 (share)': 'Working copy (share)',
+  '독립 브랜치 (branch)': 'Isolated branch (branch)',
+  '이 크루에게 직접 지시 또는 후속 질문 입력 (Enter 전송)...': 'Message this crew directly or send follow-up instructions (Enter)...',
+  '크루 · 도구 · 보드(#번호, @멘션) 검색...': 'Search crew, tools, or board (#seq, @mention)...',
+  '새 대화 시작': 'Fresh context',
+  '디렉터 맥락 분기': 'Fork director context'
 };
 
 const UI_EN_TO_KO_EXACT = (() => {
@@ -14733,10 +15331,12 @@ function renderThreadSidebar(savedBoxScrollTop = null) {
     const prevScrollTop = savedBoxScrollTop !== null ? savedBoxScrollTop : box.scrollTop;
     const byId = new Map(list.map(t => [t.id, t]));
     const childrenMap = new Map();
+    const visibleList = list.filter(t => t && t.mode !== 'crew_worker' && t.agent_role !== 'crew_worker');
+    const visibleById = new Map(visibleList.map(t => [t.id, t]));
     const rootThreads = [];
-    list.forEach(t => {
+    visibleList.forEach(t => {
       const pid = (t.parent_thread_id || '').trim();
-      if (Number(t.depth || 0) > 0 && pid && byId.has(pid) && pid !== t.id) {
+      if (Number(t.depth || 0) > 0 && pid && visibleById.has(pid) && pid !== t.id) {
         if (!childrenMap.has(pid)) childrenMap.set(pid, []);
         childrenMap.get(pid).push(t);
       } else {
@@ -14756,7 +15356,7 @@ function renderThreadSidebar(savedBoxScrollTop = null) {
       kids.forEach(appendSubtree);
     };
     rootThreads.forEach(appendSubtree);
-    list.forEach(appendSubtree);
+    visibleList.forEach(appendSubtree);
 
     const renderRows = (items) => items.map(t => {
       const rawTitle = String(t.title || '새 채팅');
@@ -14818,6 +15418,7 @@ function renderThreadSidebar(savedBoxScrollTop = null) {
 async function selectThread(id) {
   window.chatAreaActive = true;
   if (typeof clearChatSelectionUi === 'function') clearChatSelectionUi(false);
+  if (typeof closeCrewMemberInspector === 'function' && currentThreadId !== id) closeCrewMemberInspector(false);
   if (currentThreadId && currentThreadId !== id) {
     const prevRt = ensureThreadRuntime(currentThreadId);
     const chatInp = document.getElementById('chat-input');
@@ -30305,10 +30906,15 @@ function syncAllCrewChromeForActiveThread() {
     footerBtn.classList.toggle('is-crew-working', workingCount > 0);
   }
   if (footerTxt) {
+    const activeToolPreview = (st.members || [])
+      .filter(m => m && String(m.state || '').toLowerCase() === 'working')
+      .slice(0, 2)
+      .map(m => '@' + m.name + (m.tool_summary ? ' · ' + m.tool_summary : (m.current_tool ? ' · ' + m.current_tool : '')))
+      .join(' | ');
     const rawStatus = workingCount > 0
-      ? `${workingCount}명의 크루 작업 중`
-      : (waitingCount > 0 ? `크루 대기 중 · ${waitingCount}명` : '크루 대기 중');
-    footerTxt.textContent = translateUiString(rawStatus, currentUiLang);
+      ? (activeToolPreview || `${workingCount}명의 크루 작업 중`)
+      : (waitingCount > 0 ? `크루 대기 중 · ${waitingCount}` : '크루 대기 중');
+    footerTxt.textContent = workingCount > 0 && activeToolPreview ? activeToolPreview : translateUiString(rawStatus, currentUiLang);
   }
   if (footerSeq) {
     footerSeq.textContent = `#${Number(st.head_seq || 0)}`;
@@ -30449,18 +31055,95 @@ function collectAvailableCrewModelIds(currentModel) {
   return out;
 }
 
+function formatCrewElapsedCompact(startedAtSec, workedMs) {
+  const nowSec = Math.floor(Date.now() / 1000);
+  let sec = 0;
+  if (startedAtSec && Number(startedAtSec) > 0) {
+    const s = Number(startedAtSec) > 1e12 ? Math.floor(Number(startedAtSec) / 1000) : Number(startedAtSec);
+    sec = Math.max(0, nowSec - s);
+  } else if (workedMs && Number(workedMs) > 0) {
+    sec = Math.max(0, Math.round(Number(workedMs) / 1000));
+  } else {
+    return '';
+  }
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60);
+  return `${m}m ${sec % 60}s`;
+}
+
+function renderCrewPixelAvatarHtml(name, role, state, currentTool) {
+  return `<span class="crew-avatar-wrap"><canvas class="crew-pixel-canvas" width="36" height="36" data-crew-avatar="${escapeHtml(name || 'crew')}" data-crew-role="${escapeHtml(role || '')}" data-crew-state="${escapeHtml(state || 'waiting')}" data-crew-tool="${escapeHtml(currentTool || '')}"></canvas><span class="crew-avatar-dot ${state === 'working' ? 'is-working' : (state === 'stopped' ? 'is-stopped' : '')}"></span></span>`;
+}
+
+function renderCrewMemberRowHtml(m, isDirectorRow = false) {
+  const name = String(m.name || m.display_name || (isDirectorRow ? 'director' : 'crew'));
+  const state = String(m.state || 'waiting').toLowerCase();
+  const isKilled = state === 'killed';
+  const isStopped = state === 'stopped';
+  const isWorking = state === 'working';
+  const roleLabel = isDirectorRow
+    ? (currentUiLang === 'en' ? 'Coordinator' : '디렉터')
+    : translateUiString(crewRoleLabelKo(m.role, name), currentUiLang);
+  const statusText = isWorking
+    ? (currentUiLang === 'en' ? 'Working' : '작업 중')
+    : isStopped
+      ? (currentUiLang === 'en' ? 'Stopped' : '중단됨')
+      : isKilled
+        ? (currentUiLang === 'en' ? 'Killed' : '종료됨')
+        : (currentUiLang === 'en' ? 'Standing by' : '대기 중');
+  const elapsed = isWorking
+    ? formatCrewElapsedCompact(m.working_started_at, 0)
+    : (m.last_worked_ms ? formatCrewElapsedCompact(0, m.last_worked_ms) : '');
+  const seqNum = m.last_post_seq || m.head_seq || m.last_read_seq || 0;
+  const briefClean = String(m.brief || m.last_post_preview || '').replace(/\s+/g, ' ').trim();
+  const toolLine = m.tool_summary || m.current_tool || (isWorking ? (currentUiLang === 'en' ? 'Thinking...' : '생각 중...') : (m.last_post_preview || ''));
+  const inspecting = typeof activeCrewInspectorMember === 'string' && activeCrewInspectorMember === name && !isDirectorRow;
+  const errLine = m.last_error ? `${m.cancel_source ? '[' + m.cancel_source + '] ' : ''}${m.last_error}` : (m.cancel_reason || '');
+  const clickHandler = isDirectorRow ? 'closeCrewMemberInspector(true)' : `openCrewMemberInspector('${escapeJsAttr(name)}')`;
+
+  return `
+    <div class="crew-member-row${isDirectorRow ? ' is-director' : ''}${isWorking ? ' is-working' : ''}${isKilled ? ' is-killed' : ''}${inspecting ? ' is-inspecting' : ''}" data-crew-name="${escapeHtml(name)}" onclick="${clickHandler}">
+      ${renderCrewPixelAvatarHtml(name, m.role || (isDirectorRow ? 'director' : ''), state, m.current_tool || m.tool_summary || '')}
+      <div class="crew-row-main">
+        <div class="crew-row-top">
+          <div class="crew-row-ident">
+            <span class="crew-row-handle">@${escapeHtml(name)}</span>
+            <span class="crew-card-role">${escapeHtml(roleLabel)}</span>
+            <span class="crew-row-status-txt${isWorking ? ' is-working' : (isStopped ? ' is-stopped' : '')}">${escapeHtml(statusText)}${elapsed ? ' · ' + escapeHtml(elapsed) : ''}</span>
+          </div>
+          <div class="crew-row-right">
+            ${m.model ? `<span class="crew-row-model-chip" title="${escapeHtml(m.model)}">${escapeHtml(m.model)}</span>` : ''}
+            <span>#${Number(seqNum)}</span>
+          </div>
+        </div>
+        ${briefClean ? `<div class="crew-row-brief" title="${escapeHtml(briefClean)}">${escapeHtml(briefClean)}</div>` : ''}
+        ${toolLine ? `<div class="crew-row-tool-line${isWorking ? ' is-working' : ''}"><svg class="solar-icon sm" style="width:12px;height:12px;flex-shrink:0;"><use href="#${isWorking ? 'solar-pulse' : 'solar-chat'}"/></svg><span style="overflow:hidden;text-overflow:ellipsis;">${escapeHtml(toolLine)}</span></div>` : ''}
+        ${errLine && !isWorking ? `<div class="crew-row-err" title="${escapeHtml(errLine)}">${escapeHtml(errLine)}</div>` : ''}
+        ${!isDirectorRow ? `
+          <div class="crew-row-quick" onclick="event.stopPropagation()">
+            <button type="button" class="crew-mini-btn" onclick="openCrewMemberInspector('${escapeJsAttr(name)}')">${currentUiLang === 'en' ? 'Inspect' : '로그'}</button>
+            ${(isStopped || state === 'waiting') ? `<button type="button" class="crew-mini-btn" onclick="runCrewActionUi('${isStopped ? 'retry' : 'nudge'}', { name: '${escapeJsAttr(name)}' })">${currentUiLang === 'en' ? (isStopped ? 'Retry' : 'Nudge') : (isStopped ? '재시도' : '깨우기')}</button>` : ''}
+            ${isWorking ? `<button type="button" class="crew-mini-btn" onclick="runCrewActionUi('interrupt', { name: '${escapeJsAttr(name)}' })">${currentUiLang === 'en' ? 'Stop' : '중단'}</button>` : ''}
+            ${!isKilled ? `<button type="button" class="crew-mini-btn danger" onclick="runCrewActionUi('kill', { name: '${escapeJsAttr(name)}' })">${currentUiLang === 'en' ? 'Kill' : '종료'}</button>` : ''}
+          </div>
+        ` : ''}
+      </div>
+    </div>`;
+}
+
 function renderCrewBoardRosterAndHeader() {
   const tid = currentThreadId || 'thread-main';
   const st = ensureCrewThreadState(tid);
   const active = isCrewModeActive(tid);
-  const workingCount = Number((st.counts && st.counts.working) || 0);
-  const waitingCount = Number((st.counts && st.counts.waiting) || 0);
   const members = Array.isArray(st.members) ? st.members : [];
+  const counts = recomputeCrewCountsFromMembers(members);
+  const workingCount = Number((st.counts && st.counts.working) ?? counts.working ?? 0);
+  const waitingCount = Number((st.counts && st.counts.waiting) ?? counts.waiting ?? 0);
+  const posts = Array.isArray(crewBoardPostsByThread[tid]) ? crewBoardPostsByThread[tid] : [];
 
   const titleBtn = document.getElementById('crew-board-title-btn');
-  if (titleBtn) {
-    titleBtn.textContent = st.title || '크루 보드';
-  }
+  if (titleBtn) titleBtn.textContent = st.title || translateUiString('크루 보드', currentUiLang);
+
   const workBadge = document.getElementById('crew-head-working-badge');
   const workTxt = document.getElementById('crew-head-working-text');
   if (workBadge) workBadge.style.display = workingCount > 0 ? 'inline-flex' : 'none';
@@ -30471,6 +31154,17 @@ function renderCrewBoardRosterAndHeader() {
 
   const seqBadge = document.getElementById('crew-head-seq-badge');
   if (seqBadge) seqBadge.textContent = `#${Number(st.head_seq || 0)}`;
+
+  const livePill = document.getElementById('crew-live-pill');
+  const liveTxt = document.getElementById('crew-live-pill-text');
+  const isLiveNow = active || workingCount > 0 || (st.director && st.director.state === 'working');
+  if (livePill) livePill.classList.toggle('is-live', isLiveNow);
+  if (liveTxt) liveTxt.textContent = isLiveNow ? 'Live' : (currentUiLang === 'en' ? 'Idle' : '대기');
+
+  const boardCnt = document.getElementById('crew-tab-count-board');
+  if (boardCnt) boardCnt.textContent = String(Math.max(posts.length, Number(st.head_seq || 0)));
+  const memCnt = document.getElementById('crew-tab-count-members');
+  if (memCnt) memCnt.textContent = String(members.length + 1);
 
   const modeBtn = document.getElementById('crew-board-mode-btn');
   if (modeBtn) {
@@ -30484,64 +31178,66 @@ function renderCrewBoardRosterAndHeader() {
     killAllBtn.style.display = anyLive ? 'inline-flex' : 'none';
   }
 
-  // Watchdog Banner
   const wdBanner = document.getElementById('crew-watchdog-banner');
   const wdText = document.getElementById('crew-watchdog-text');
   if (wdBanner) {
     wdBanner.classList.toggle('open', Boolean(st.watchdogAlert));
-    if (st.watchdogAlert && wdText) {
-      wdText.textContent = st.watchdogAlert.message || '크루 응답 지연이 감지되었습니다.';
-    }
+    if (st.watchdogAlert && wdText) wdText.textContent = st.watchdogAlert.message || '크루 응답 지연이 감지되었습니다.';
   }
 
-  // Roster Cards
+  // Pinned Director Card
+  const dirBox = document.getElementById('crew-director-pinned');
+  if (dirBox) {
+    const rt = typeof ensureThreadRuntime === 'function' ? ensureThreadRuntime(tid) : null;
+    const dirSnap = st.director || {
+      name: 'director',
+      role: 'director',
+      model: document.getElementById('model-select')?.value || '',
+      state: (rt && rt.running) ? 'working' : 'waiting',
+      current_tool: (rt && rt.activeTool) || '',
+      tool_summary: (rt && rt.activeTool) ? `Running ${rt.activeTool}` : (rt && rt.running ? (currentUiLang === 'en' ? 'Coordinating crew...' : '크루 작업 조율 중...') : (currentUiLang === 'en' ? 'Ready for instructions' : '지시 대기 중')),
+      head_seq: Number(st.head_seq || 0),
+      working_started_at: 0
+    };
+    dirBox.innerHTML = renderCrewMemberRowHtml(dirSnap, true);
+  }
+
+  // Active & Standing By Members List
   const grid = document.getElementById('crew-roster-grid');
   if (grid) {
-    if (members.length === 0) {
-      grid.innerHTML = '<div class="crew-roster-empty">활성 크루가 없습니다. 채팅에서 크루 모드로 지시하거나 + 크루 추가를 누르세요.</div>';
+    const q = (typeof crewBoardSearchQuery === 'string' ? crewBoardSearchQuery : '').trim().toLowerCase();
+    const filteredMembers = members.filter(m => {
+      if (!m) return false;
+      if (!q) return true;
+      const hay = `@${m.name || ''} ${m.role || ''} ${m.model || ''} ${m.brief || ''} ${m.tool_summary || ''} ${m.current_tool || ''}`.toLowerCase();
+      return hay.includes(q);
+    });
+    if (filteredMembers.length === 0) {
+      grid.innerHTML = `<div class="crew-roster-empty">${escapeHtml(
+        members.length === 0
+          ? (currentUiLang === 'en' ? 'No active crew yet. Send a task to the Lead AI or click + Add Crew.' : '활성 크루가 없습니다. 메인 AI에 목표를 지시하거나 + 크루 추가를 눌러 배정하세요.')
+          : (currentUiLang === 'en' ? 'No matching crew members.' : '검색 조건과 일치하는 크루가 없습니다.')
+      )}</div>`;
     } else {
-      grid.innerHTML = members.map(m => {
-        const name = String(m.name || m.display_name || 'crew');
-        const state = String(m.state || 'waiting').toLowerCase();
-        const stateClass = ['working', 'waiting', 'stopped', 'killed'].includes(state) ? `state-${state}` : 'state-waiting';
-        const stateLabel = translateUiString(crewStateLabelKo(state, m.state_label), currentUiLang);
-        const roleLabel = crewRoleLabelKo(m.role, name);
-        const wsBadge = m.workspace_mode === 'worktree' ? ' · 워크트리' : '';
-        const models = collectAvailableCrewModelIds(m.model);
-        const modelOpts = models.map(mid =>
-          `<option value="${escapeHtml(mid)}"${mid === m.model ? ' selected' : ''}>${escapeHtml(mid)}</option>`
-        ).join('');
-        const isKilled = state === 'killed';
-        const seqInfo = m.last_post_seq
-          ? `작성 #${m.last_post_seq}`
-          : `읽음 #${m.last_read_seq || 0}`;
-        const briefClean = String(m.brief || '').replace(/\s+/g, ' ').trim();
-        return `
-          <div class="crew-member-card${state === 'working' ? ' is-working' : ''}${isKilled ? ' is-killed' : ''}" data-crew-name="${escapeHtml(name)}">
-            <div class="crew-card-top">
-              <div class="crew-card-ident">
-                <span class="crew-card-name" onclick="setCrewBoardChannelFilter('${escapeJsAttr(name)}')" title="클릭하여 @${escapeHtml(name)} 메시지 필터">@${escapeHtml(name)}</span>
-                <span class="crew-card-role">${escapeHtml(roleLabel + wsBadge)}</span>
-              </div>
-              <span class="crew-state-badge ${stateClass}"><span class="dot"></span><span>${escapeHtml(stateLabel)}</span></span>
-            </div>
-            <div class="crew-card-mid">
-              <select class="crew-model-select" aria-label="${escapeHtml(name)} 모델 선택" ${isKilled ? 'disabled' : ''} onchange="changeCrewMemberModelUi('${escapeJsAttr(name)}', this.value)">
-                ${modelOpts}
-              </select>
-              <span class="crew-card-seq-meta">${escapeHtml(seqInfo)}</span>
-            </div>
-            <div class="crew-card-actions">
-              <span class="crew-card-brief" title="${escapeHtml(briefClean)}">${escapeHtml(briefClean || '대기 중')}</span>
-              <div class="crew-card-btns">
-                <button type="button" class="crew-mini-btn" onclick="insertCrewMentionUi('@${escapeJsAttr(name)}')" title="보드 입력창에 @${escapeHtml(name)} 멘션 추가">@멘션</button>
-                ${state === 'working' ? `<button type="button" class="crew-mini-btn" onclick="runCrewActionUi('interrupt', { name: '${escapeJsAttr(name)}' })" title="현재 턴 중단">중단</button>` : ''}
-                ${!isKilled ? `<button type="button" class="crew-mini-btn danger" onclick="runCrewActionUi('kill', { name: '${escapeJsAttr(name)}' })" title="크루 종료">종료</button>` : ''}
-              </div>
-            </div>
-          </div>`;
-      }).join('');
+      const activeList = filteredMembers.filter(m => String(m.state || '').toLowerCase() === 'working');
+      const standList = filteredMembers.filter(m => String(m.state || '').toLowerCase() !== 'working');
+      let html = '';
+      if (activeList.length > 0) {
+        html += `<div class="crew-group-heading"><span>ACTIVE</span><span>${activeList.length}</span></div>`;
+        html += activeList.map(m => renderCrewMemberRowHtml(m, false)).join('');
+      }
+      if (standList.length > 0) {
+        html += `<div class="crew-group-heading"><span>STANDING BY</span><span>${standList.length}</span></div>`;
+        html += standList.map(m => renderCrewMemberRowHtml(m, false)).join('');
+      }
+      grid.innerHTML = html;
     }
+  }
+  if (typeof renderCrewCollaborationGraph === 'function' && crewSidecarActiveTab === 'graph') {
+    renderCrewCollaborationGraph();
+  }
+  if (typeof paintAllCrewPixelAvatarsNow === 'function') {
+    paintAllCrewPixelAvatarsNow();
   }
 
   // Channel Filter Pills & Quick @mention Chips
@@ -30745,6 +31441,40 @@ function handleAllCrewRealtimeEvent(evt) {
     return;
   }
 
+  if (evt.type === 'crew_member_telemetry') {
+    const targetName = String(evt.name || '').trim();
+    if (targetName === 'director') {
+      st.director = Object.assign({}, st.director || { name: 'director' }, {
+        state: evt.state || 'working',
+        current_step: evt.current_step ?? (st.director && st.director.current_step) ?? 0,
+        current_tool: evt.current_tool ?? '',
+        tool_summary: evt.tool_summary ?? '',
+        working_started_at: evt.working_started_at ?? (st.director && st.director.working_started_at) ?? 0
+      });
+    } else if (targetName) {
+      const idx = st.members.findIndex(m => m && m.name === targetName);
+      if (idx >= 0) {
+        st.members[idx] = Object.assign({}, st.members[idx], {
+          state: evt.state || st.members[idx].state,
+          current_step: evt.current_step ?? st.members[idx].current_step,
+          current_tool: evt.current_tool ?? '',
+          tool_summary: evt.tool_summary ?? '',
+          working_started_at: evt.working_started_at ?? st.members[idx].working_started_at
+        });
+        st.counts = recomputeCrewCountsFromMembers(st.members);
+      }
+    }
+    if (rootTid === currentThreadId) {
+      syncAllCrewChromeForActiveThread();
+      renderCrewBoardRosterAndHeader();
+      if (typeof syncChatLiveStatusRow === 'function') syncChatLiveStatusRow(rootTid);
+      if (activeCrewInspectorMember && activeCrewInspectorMember === targetName && typeof refreshActiveCrewInspectorUi === 'function') {
+        void refreshActiveCrewInspectorUi();
+      }
+    }
+    return;
+  }
+
   if (evt.type === 'crew_member_updated') {
     st.sseRev = Number(st.sseRev || 0) + 1;
     if (evt.member && evt.member.name) {
@@ -30773,11 +31503,17 @@ function handleAllCrewRealtimeEvent(evt) {
 
   if (evt.type === 'crew_board_post') {
     if (typeof evt.head_seq === 'number') st.head_seq = Math.max(st.head_seq || 0, evt.head_seq);
-    if (evt.post) upsertCrewBoardPosts(rootTid, [evt.post]);
+    if (evt.post) {
+      upsertCrewBoardPosts(rootTid, [evt.post]);
+      if (typeof recordCrewGraphPulseFromPost === 'function') recordCrewGraphPulseFromPost(evt.post);
+    }
     if (rootTid === currentThreadId) {
       syncAllCrewChromeForActiveThread();
       renderCrewBoardRosterAndHeader();
       renderCrewBoardFeed(false);
+      if (activeCrewInspectorMember && typeof refreshActiveCrewInspectorUi === 'function') {
+        void refreshActiveCrewInspectorUi();
+      }
     }
     return;
   }
@@ -30824,20 +31560,46 @@ async function confirmClearCrewBoardUi() {
   await runCrewActionUi('clear_board');
 }
 
+function syncCrewAddDrawerSelectors() {
+  const tid = currentThreadId || 'thread-main';
+  const st = ensureCrewThreadState(tid);
+  const modelSel = document.getElementById('crew-add-model');
+  if (modelSel && typeof renderGroupedChatModelOptionsHtml === 'function') {
+    const list = (typeof lastCachedChatModelsList !== 'undefined' && lastCachedChatModelsList.length > 0)
+      ? lastCachedChatModelsList
+      : collectAvailableCrewModelIds('').map(id => ({ id, name: id }));
+    const defaultOpt = `<option value="">${escapeHtml(currentUiLang === 'en' ? 'Default (Current Model)' : '기본 (현재 채팅 모델)')}</option>`;
+    modelSel.innerHTML = defaultOpt + renderGroupedChatModelOptionsHtml(list, '');
+  }
+  const forkSel = document.getElementById('crew-add-fork');
+  if (forkSel) {
+    const members = Array.isArray(st.members) ? st.members : [];
+    const opts = [
+      `<option value="">${escapeHtml(currentUiLang === 'en' ? 'Fresh context' : '새 대화 시작')}</option>`,
+      `<option value="director">${escapeHtml(currentUiLang === 'en' ? 'Fork director context' : '디렉터 맥락 분기')}</option>`,
+      ...members.filter(m => m && m.name).map(m => `<option value="${escapeHtml(m.name)}">@${escapeHtml(m.name)} 맥락 분기</option>`)
+    ];
+    forkSel.innerHTML = opts.join('');
+  }
+}
+
 function toggleCrewAddDrawerUi() {
   const drawer = document.getElementById('crew-add-drawer');
   if (!drawer) return;
   const open = drawer.classList.toggle('open');
   if (open) {
-    const inp = document.getElementById('crew-add-name');
-    if (inp) inp.focus();
+    syncCrewAddDrawerSelectors();
+    document.getElementById('crew-add-name')?.focus();
   }
 }
 
 async function submitAddCrewUi() {
   const nameInp = document.getElementById('crew-add-name');
   const roleInp = document.getElementById('crew-add-role');
+  const modelSel = document.getElementById('crew-add-model');
   const wsSel = document.getElementById('crew-add-workspace');
+  const forkSel = document.getElementById('crew-add-fork');
+  const tasksInp = document.getElementById('crew-add-tasks');
   const briefInp = document.getElementById('crew-add-brief');
   const rawName = (nameInp ? nameInp.value : '').trim().replace(/^@+/, '').replace(/\s+/g, '-').toLowerCase();
   const brief = (briefInp ? briefInp.value : '').trim();
@@ -30846,18 +31608,28 @@ async function submitAddCrewUi() {
     return;
   }
   const role = (roleInp && roleInp.value.trim()) || rawName;
+  const model = (modelSel ? modelSel.value : '').trim();
   const workspace = (wsSel && wsSel.value) || 'inherit';
+  const fork = (forkSel ? forkSel.value : '').trim();
+  const tasks = (tasksInp ? tasksInp.value : '').split(',').map(x => x.trim()).filter(Boolean);
+
   if (briefInp) briefInp.value = '';
   if (nameInp) nameInp.value = '';
+  if (tasksInp) tasksInp.value = '';
   const drawer = document.getElementById('crew-add-drawer');
   if (drawer) drawer.classList.remove('open');
 
-  await runCrewActionUi('add', {
+  const payload = {
     name: rawName,
     role,
     brief: brief || `${role} 담당 작업 수행`,
     workspace
-  });
+  };
+  if (model) payload.model = model;
+  if (fork) payload.fork = fork;
+  if (tasks.length > 0) payload.tasks = tasks;
+
+  await runCrewActionUi('add', payload);
 }
 
 async function changeCrewMemberModelUi(name, model) {
@@ -30910,6 +31682,7 @@ function onCrewKindFilterChange(kindVal) {
 
 function onCrewBoardSearchInput(val) {
   crewBoardSearchQuery = String(val || '');
+  renderCrewBoardRosterAndHeader();
   renderCrewBoardFeed(false);
 }
 
@@ -31216,11 +31989,17 @@ function computeChatLiveStatusState(tid = currentThreadId) {
   }
 
   if (isCrew && workingCrews > 0) {
+    const crewSt = typeof crewStateByThread !== 'undefined' ? crewStateByThread[targetTid] : null;
+    const activeSummary = (crewSt && Array.isArray(crewSt.members) ? crewSt.members : [])
+      .filter(m => m && String(m.state || '').toLowerCase() === 'working')
+      .slice(0, 3)
+      .map(m => '@' + m.name + (m.tool_summary ? ' (' + m.tool_summary + ')' : ''))
+      .join(', ');
     return {
       mode: 'crew',
       text: isEn
-        ? `${workingCrews} crew member${workingCrews === 1 ? '' : 's'} working in parallel...`
-        : `${workingCrews}명의 크루가 병렬로 작업하고 있어요...`,
+        ? (activeSummary ? `Crew collaborating: ${activeSummary}...` : 'Lead AI delegating to crew teammates...')
+        : (activeSummary ? `전담 팀 협업 중: ${activeSummary}...` : '전담 크루 팀원이 맥락을 공유하며 협업하고 있어요...'),
       showBoardLink: true
     };
   }
@@ -32647,6 +33426,425 @@ async function switchActiveConversationToCheapAi() {
 
 renderExternalOAuthCards();
 renderComposerOAuthUsageUi();
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * TRACK I: 3-TAB SIDECAR, PIXEL AVATAR ANIMATOR, GRAPH & WORKER INSPECTOR
+ * ═══════════════════════════════════════════════════════════════════════════ */
+let crewSidecarActiveTab = 'members';
+let activeCrewInspectorMember = '';
+const crewGraphRecentPulses = [];
+let crewPixelFrameTick = 0;
+
+function switchCrewSidecarTab(tab) {
+  const next = ['board', 'members', 'graph'].includes(tab) ? tab : 'members';
+  crewSidecarActiveTab = next;
+  ['board', 'members', 'graph'].forEach(t => {
+    const btn = document.getElementById('crew-tab-btn-' + t);
+    const view = document.getElementById('crew-tab-view-' + t);
+    if (btn) {
+      btn.classList.toggle('active', t === next);
+      btn.setAttribute('aria-selected', t === next ? 'true' : 'false');
+    }
+    if (view) view.classList.toggle('active', t === next);
+  });
+  if (next === 'graph') renderCrewCollaborationGraph();
+  if (next === 'board') renderCrewBoardFeed(false);
+  if (next === 'members') paintAllCrewPixelAvatarsNow();
+}
+
+function classifyCrewAvatarMotion(state, toolRaw) {
+  const s = String(state || 'waiting').toLowerCase();
+  if (s === 'stopped' || s === 'killed') return 'muted';
+  if (s !== 'working') return 'idle';
+  const t = String(toolRaw || '').toLowerCase();
+  if (/edit|write|patch|create|delete/.test(t)) return 'edit';
+  if (/read|search|grep|find|list|glob|board/.test(t) && !/post/.test(t)) return 'read';
+  if (/shell|run|cargo|cmd|exec|pwsh|terminal|test/.test(t)) return 'shell';
+  if (/post|message|send|mention|callback/.test(t)) return 'post';
+  return 'think';
+}
+
+function pickCrewAvatarPalette(name, role) {
+  const key = (String(name || '') + ' ' + String(role || '')).toLowerCase();
+  if (/director|coordinator|orch|lead|dir-/.test(key)) {
+    return { body: '#f59e0b', shade: '#b45309', visor: '#fef3c7', accent: '#fde68a', hat: 'crown' };
+  }
+  if (/verif|qa|review|test|audit|sec/.test(key)) {
+    return { body: '#8b5cf6', shade: '#5b21b6', visor: '#ede9fe', accent: '#c4b5fd', hat: 'shield' };
+  }
+  if (/research|analy|invest|data|search/.test(key)) {
+    return { body: '#10b981', shade: '#047857', visor: '#d1fae5', accent: '#6ee7b7', hat: 'lens' };
+  }
+  if (/coder|eng|core|ui|front|back|dev|build|ops/.test(key)) {
+    return { body: '#0ea5e9', shade: '#0369a1', visor: '#e0f2fe', accent: '#7dd3fc', hat: 'headset' };
+  }
+  const presets = [
+    { body: '#ec4899', shade: '#9d174d', visor: '#fce7f3', accent: '#f9a8d4', hat: 'antenna' },
+    { body: '#14b8a6', shade: '#0f766e', visor: '#ccfbf1', accent: '#5eead4', hat: 'antenna' },
+    { body: '#f97316', shade: '#c2410c', visor: '#ffedd5', accent: '#fdba74', hat: 'headset' },
+    { body: '#6366f1', shade: '#4338ca', visor: '#e0e7ff', accent: '#a5b4fc', hat: 'antenna' }
+  ];
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = ((h * 31) + key.charCodeAt(i)) >>> 0;
+  return presets[h % presets.length];
+}
+
+function drawCrewPixelAvatarCanvas(canvas, tick) {
+  if (!canvas || !canvas.getContext) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const name = canvas.getAttribute('data-crew-avatar') || 'crew';
+  const role = canvas.getAttribute('data-crew-role') || '';
+  const state = canvas.getAttribute('data-crew-state') || 'waiting';
+  const tool = canvas.getAttribute('data-crew-tool') || '';
+  const motion = classifyCrewAvatarMotion(state, tool);
+  const palRaw = pickCrewAvatarPalette(name, role);
+  const pal = motion === 'muted'
+    ? { body: '#71717a', shade: '#3f3f46', visor: '#d4d4d8', accent: '#a1a1aa', hat: palRaw.hat }
+    : palRaw;
+
+  const S = 3; // 12x12 pixel grid -> 36x36 crisp canvas
+  ctx.clearRect(0, 0, 36, 36);
+  ctx.imageSmoothingEnabled = false;
+  const px = (x, y, c, w = 1, h = 1) => {
+    ctx.fillStyle = c;
+    ctx.fillRect(Math.round(x * S), Math.round(y * S), Math.round(w * S), Math.round(h * S));
+  };
+
+  const bob = motion === 'idle'
+    ? (tick % 8 >= 6 ? 1 : 0)
+    : (motion === 'muted' ? 0 : (tick % 4 === 1 ? -1 : 0));
+  const y0 = 1 + (bob > 0 ? 1 : 0);
+
+  // Hat / Crown / Antenna accessory
+  if (pal.hat === 'crown') {
+    px(4, y0, pal.accent, 1, 1); px(6, y0, pal.accent, 1, 1); px(8, y0, pal.accent, 1, 1);
+    px(4, y0 + 1, pal.body, 5, 1);
+  } else if (pal.hat === 'shield') {
+    px(5, y0, pal.accent, 2, 1);
+    px(4, y0 + 1, pal.shade, 4, 1);
+  } else if (pal.hat === 'headset') {
+    px(2, y0 + 3, pal.accent, 1, 3);
+    px(9, y0 + 3, pal.accent, 1, 3);
+  } else if (pal.hat === 'lens') {
+    px(3, y0 + 1, pal.accent, 6, 1);
+  } else {
+    px(6, y0, pal.accent, 1, 1);
+    px(6, y0 + 1, pal.shade, 1, 1);
+  }
+
+  // Head + Visor + Eyes
+  px(3, y0 + 2, pal.body, 6, 4);
+  px(3, y0 + 5, pal.shade, 6, 1);
+  px(4, y0 + 3, pal.visor, 4, 2);
+  const blink = (tick % 16 === 0) && motion !== 'muted';
+  const eyeX = motion === 'read' ? (tick % 4 < 2 ? 4 : 5) : 4;
+  if (!blink) {
+    px(eyeX, y0 + 3, '#18181b', 1, 2);
+    px(eyeX + 2, y0 + 3, '#18181b', 1, 2);
+  } else {
+    px(4, y0 + 4, '#18181b', 4, 1);
+  }
+
+  // Torso
+  px(3, y0 + 6, pal.body, 6, 3);
+  px(4, y0 + 7, pal.accent, 4, 1);
+
+  // Animated Arms + Tool Sparks based on motion!
+  if (motion === 'edit') {
+    const alt = tick % 2;
+    px(2, y0 + 6 + alt, pal.shade, 1, 2);
+    px(9, y0 + 7 - alt, pal.shade, 1, 2);
+    px(1 + alt, y0 + 8, '#38bdf8', 1, 1);
+    px(10 - alt, y0 + 8, '#fb923c', 1, 1);
+  } else if (motion === 'read') {
+    px(2, y0 + 6, pal.shade, 1, 2);
+    px(9, y0 + 5 + (tick % 2), pal.accent, 2, 2); // magnifying lens sweep
+    px(10, y0 + 4 + (tick % 2), pal.visor, 1, 1);
+  } else if (motion === 'shell') {
+    px(2, y0 + 6, pal.shade, 1, 2);
+    px(9, y0 + 6, pal.shade, 1, 2);
+    if (tick % 2 === 0) px(10, y0 + 8, '#22c55e', 1, 2); // terminal cursor
+  } else if (motion === 'post') {
+    px(2, y0 + 6, pal.shade, 1, 2);
+    px(9, y0 + 5, pal.shade, 1, 2);
+    if (tick % 3 !== 2) px(10, y0 + 2 - (tick % 2), pal.accent, 1, 1); // radio pulse
+    if (tick % 3 === 1) px(11, y0 + 1, '#22c55e', 1, 1);
+  } else if (motion === 'think') {
+    px(2, y0 + 6, pal.shade, 1, 2);
+    px(9, y0 + 6, pal.shade, 1, 2);
+    px(9 + (tick % 2), y0 + 1, pal.accent, 1, 1);
+  } else {
+    px(2, y0 + 6, pal.shade, 1, 2);
+    px(9, y0 + 6, pal.shade, 1, 2);
+  }
+
+  // Legs
+  const walk = (motion === 'edit' || motion === 'post') && (tick % 2 === 1);
+  px(4, y0 + 9, pal.shade, 1, walk ? 1 : 2);
+  px(7, y0 + 9, pal.shade, 1, walk ? 2 : 1);
+}
+
+function paintAllCrewPixelAvatarsNow() {
+  document.querySelectorAll('canvas.crew-pixel-canvas[data-crew-avatar]').forEach(c => {
+    drawCrewPixelAvatarCanvas(c, crewPixelFrameTick);
+  });
+}
+
+if (!window.__crewPixelAnimTimer) {
+  window.__crewPixelAnimTimer = setInterval(() => {
+    const canvases = document.querySelectorAll('canvas.crew-pixel-canvas[data-crew-avatar]');
+    if (canvases.length === 0) return;
+    crewPixelFrameTick = (crewPixelFrameTick + 1) % 64;
+    canvases.forEach(c => drawCrewPixelAvatarCanvas(c, crewPixelFrameTick));
+  }, 150);
+}
+
+function recordCrewGraphPulseFromPost(post) {
+  if (!post || typeof post !== 'object') return;
+  const from = String(post.author_name || 'director').trim();
+  const mentions = Array.isArray(post.mentions) ? post.mentions : [];
+  const targets = mentions.length > 0 ? mentions : [];
+  targets.forEach(t => {
+    crewGraphRecentPulses.push({ from, to: String(t).trim(), at: Date.now() });
+  });
+  while (crewGraphRecentPulses.length > 24) crewGraphRecentPulses.shift();
+}
+
+function renderCrewCollaborationGraph() {
+  const stage = document.getElementById('crew-graph-stage');
+  if (!stage) return;
+  const tid = currentThreadId || 'thread-main';
+  const st = ensureCrewThreadState(tid);
+  const members = Array.isArray(st.members) ? st.members : [];
+  const posts = Array.isArray(crewBoardPostsByThread[tid]) ? crewBoardPostsByThread[tid] : [];
+  const q = (crewBoardSearchQuery || '').trim().toLowerCase();
+
+  const nodes = [
+    Object.assign({ name: 'director', role: 'director', state: (st.director && st.director.state) || 'waiting', tool_summary: (st.director && st.director.tool_summary) || '' }, st.director || {}),
+    ...members
+  ];
+
+  const W = Math.max(stage.clientWidth || 360, 340);
+  const maxCols = Math.max(1, Math.min(3, Math.floor((W - 24) / 180)));
+  const cols = Math.min(maxCols, Math.max(1, members.length || 1));
+  const rowsCount = Math.ceil(members.length / cols);
+  const H = Math.max(320, 140 + rowsCount * 96);
+  stage.style.height = H + 'px';
+
+  const posMap = new Map();
+  posMap.set('director', { x: Math.round(W / 2), y: 56 });
+  members.forEach((m, idx) => {
+    const r = Math.floor(idx / cols);
+    const c = idx % cols;
+    const itemsInRow = (r === rowsCount - 1 && members.length % cols !== 0) ? (members.length % cols) : cols;
+    const x = Math.round(((c + 0.5) / itemsInRow) * (W - 28) + 14);
+    const y = 158 + r * 92;
+    posMap.set(String(m.name), { x, y });
+  });
+
+  // Collect edges from recent board mentions + brief assignment
+  const edgeSet = new Map();
+  const now = Date.now();
+  const recentActive = new Set();
+  crewGraphRecentPulses.forEach(p => {
+    if (now - p.at < 8000) recentActive.add(`${p.from}->${p.to}`);
+  });
+
+  members.forEach(m => {
+    if (m && m.name) edgeSet.set(`director->${m.name}`, { from: 'director', to: m.name, active: String(m.state || '') === 'working' || recentActive.has(`director->${m.name}`) });
+  });
+  posts.slice(-40).forEach(p => {
+    const from = String(p.author_name || '').trim();
+    if (!from || !posMap.has(from)) return;
+    const ms = Array.isArray(p.mentions) ? p.mentions : [];
+    ms.forEach(rawT => {
+      const t = String(rawT || '').trim();
+      if (t === 'all') {
+        members.forEach(m => {
+          if (m && m.name && m.name !== from) {
+            const k = `${from}->${m.name}`;
+            edgeSet.set(k, { from, to: m.name, active: recentActive.has(k) || recentActive.has(`${from}->all`) });
+          }
+        });
+      } else if (posMap.has(t) && t !== from) {
+        const k = `${from}->${t}`;
+        edgeSet.set(k, { from, to: t, active: recentActive.has(k) });
+      }
+    });
+  });
+
+  const pathsHtml = Array.from(edgeSet.values()).map(e => {
+    const a = posMap.get(e.from);
+    const b = posMap.get(e.to);
+    if (!a || !b) return '';
+    const mx = (a.x + b.x) / 2;
+    const my = Math.min(a.y, b.y) + Math.abs(b.y - a.y) * 0.45 - 12;
+    return `<path class="crew-graph-edge${e.active ? ' is-active' : ''}" d="M ${a.x} ${a.y} Q ${mx} ${my} ${b.x} ${b.y}"/>`;
+  }).join('');
+
+  const nodesHtml = nodes.map(n => {
+    const name = String(n.name || 'crew');
+    const pt = posMap.get(name);
+    if (!pt) return '';
+    const state = String(n.state || 'waiting').toLowerCase();
+    const isWorking = state === 'working';
+    const matchHighlight = q && name.toLowerCase().includes(q);
+    const sub = n.tool_summary || n.current_tool || (isWorking ? 'Working...' : state);
+    const onclick = name === 'director' ? 'closeCrewMemberInspector(true)' : `openCrewMemberInspector('${escapeJsAttr(name)}')`;
+    return `
+      <div class="crew-graph-node${isWorking ? ' is-working' : ''}" style="left:${pt.x}px; top:${pt.y}px;${matchHighlight ? ' outline:2px solid var(--border-focus);' : ''}" onclick="${onclick}">
+        ${renderCrewPixelAvatarHtml(name, n.role || '', state, n.current_tool || '')}
+        <div class="crew-graph-node-meta">
+          <div class="crew-graph-node-name">@${escapeHtml(name)}</div>
+          <div class="crew-graph-node-tool" title="${escapeHtml(sub)}">${escapeHtml(sub)}</div>
+        </div>
+      </div>`;
+  }).join('');
+
+  stage.innerHTML = `<svg class="crew-graph-svg" viewBox="0 0 ${W} ${H}">${pathsHtml}</svg>${nodesHtml}`;
+  paintAllCrewPixelAvatarsNow();
+}
+
+async function openCrewMemberInspector(name) {
+  const memberName = String(name || '').trim();
+  if (!memberName || memberName === 'director') {
+    closeCrewMemberInspector(true);
+    return;
+  }
+  activeCrewInspectorMember = memberName;
+  const panelChat = document.getElementById('panel-chat');
+  if (panelChat) panelChat.classList.add('has-crew-inspector');
+  const insp = document.getElementById('crew-worker-inspector');
+  if (insp) insp.hidden = false;
+
+  // Ensure chat panel is visible in a split slot if not already mounted
+  if (typeof isPanelMountedInStage === 'function' && !isPanelMountedInStage('chat') && typeof switchPanel === 'function') {
+    switchPanel('chat');
+  }
+  renderCrewBoardRosterAndHeader();
+  await refreshActiveCrewInspectorUi();
+}
+
+function closeCrewMemberInspector(focusMainChat = false) {
+  activeCrewInspectorMember = '';
+  const panelChat = document.getElementById('panel-chat');
+  if (panelChat) panelChat.classList.remove('has-crew-inspector');
+  const insp = document.getElementById('crew-worker-inspector');
+  if (insp) insp.hidden = true;
+  renderCrewBoardRosterAndHeader();
+  if (focusMainChat) {
+    document.getElementById('chat-input')?.focus();
+  }
+}
+
+async function refreshActiveCrewInspectorUi() {
+  if (!activeCrewInspectorMember) return;
+  const tid = currentThreadId || 'thread-main';
+  const name = activeCrewInspectorMember;
+  const res = await api(`/api/crew/member_log?thread_id=${encodeURIComponent(tid)}&name=${encodeURIComponent(name)}&limit=120`);
+  if (!activeCrewInspectorMember || activeCrewInspectorMember !== name) return;
+
+  const st = ensureCrewThreadState(tid);
+  const member = (res && res.member) || (st.members || []).find(m => m && m.name === name) || { name, state: 'waiting', role: 'crew' };
+  const state = String(member.state || 'waiting').toLowerCase();
+  const isWorking = state === 'working';
+  const isStopped = state === 'stopped';
+  const isKilled = state === 'killed';
+
+  const headLeft = document.getElementById('crew-insp-head-left');
+  if (headLeft) {
+    headLeft.innerHTML = `
+      <button type="button" class="btn" id="btn-crew-insp-back" style="height:28px; padding:0 10px; font-size:12px;" onclick="closeCrewMemberInspector(true)">
+        <svg class="solar-icon sm"><use href="#solar-arrow-left"/></svg>
+        <span>${escapeHtml(translateUiString('메인 대화로 복귀', currentUiLang))}</span>
+      </button>
+      ${renderCrewPixelAvatarHtml(name, member.role || '', state, member.current_tool || member.tool_summary || '')}
+      <div style="display:flex; flex-direction:column; min-width:0;">
+        <div style="display:flex; align-items:center; gap:6px;">
+          <span class="crew-row-handle">@${escapeHtml(name)}</span>
+          <span class="crew-state-badge state-${['working','waiting','stopped','killed'].includes(state) ? state : 'waiting'}"><span class="dot"></span><span>${escapeHtml(translateUiString(crewStateLabelKo(state), currentUiLang))}</span></span>
+        </div>
+        <span class="crew-row-tool-line" style="margin-top:0;">${escapeHtml(member.tool_summary || member.current_tool || member.model || '')}</span>
+      </div>
+    `;
+  }
+
+  const headActions = document.getElementById('crew-insp-head-actions');
+  if (headActions) {
+    headActions.innerHTML = `
+      ${(isStopped || state === 'waiting') ? `<button type="button" class="btn" style="height:27px; padding:0 10px; font-size:12px;" onclick="runCrewActionUi('${isStopped ? 'retry' : 'nudge'}', { name: '${escapeJsAttr(name)}' })">${currentUiLang === 'en' ? (isStopped ? 'Retry' : 'Nudge') : (isStopped ? '재시도' : '깨우기')}</button>` : ''}
+      ${isWorking ? `<button type="button" class="btn" style="height:27px; padding:0 10px; font-size:12px;" onclick="runCrewActionUi('interrupt', { name: '${escapeJsAttr(name)}' })">${currentUiLang === 'en' ? 'Stop' : '중단'}</button>` : ''}
+      ${!isKilled ? `<button type="button" class="btn" style="height:27px; padding:0 10px; font-size:12px;" onclick="runCrewActionUi('kill', { name: '${escapeJsAttr(name)}' })">${currentUiLang === 'en' ? 'Kill' : '종료'}</button>` : ''}
+      <button type="button" class="btn ghost" style="height:27px; padding:0 8px; font-size:12px;" onclick="void refreshActiveCrewInspectorUi()">${currentUiLang === 'en' ? 'Refresh' : '새로고침'}</button>
+    `;
+  }
+
+  const body = document.getElementById('crew-insp-scroll');
+  if (body) {
+    const turns = (res && Array.isArray(res.turns)) ? res.turns : [];
+    const briefHtml = member.brief
+      ? `<div class="crew-insp-brief-card"><strong>${currentUiLang === 'en' ? 'Brief' : '임무 브리핑'}</strong>: ${escapeHtml(member.brief)}${member.last_error ? `<div class="crew-row-err" style="margin-top:6px; white-space:normal;">${escapeHtml((member.cancel_source ? '[' + member.cancel_source + '] ' : '') + member.last_error)}</div>` : ''}</div>`
+      : '';
+    let turnsHtml = '';
+    if (turns.length === 0) {
+      const fallbackPosts = (crewBoardPostsByThread[tid] || []).filter(p => p && (p.author_name === name || (Array.isArray(p.mentions) && p.mentions.includes(name))));
+      turnsHtml = fallbackPosts.length > 0
+        ? fallbackPosts.map(p => `<div class="crew-insp-step"><div class="crew-insp-step-kind">#${Number(p.seq || 0)} · @${escapeHtml(p.author_name || '')}</div><div class="md-content">${formatCrewBoardPostBodyHtml(p.content || '')}</div></div>`).join('')
+        : `<div class="crew-roster-empty">${escapeHtml(currentUiLang === 'en' ? 'No execution steps recorded yet for this worker.' : '아직 이 크루의 실행 스텝이 기록되지 않았습니다.')}</div>`;
+    } else {
+      turnsHtml = turns.map((turn, idx) => {
+        const dur = formatCrewElapsedCompact(0, turn.worked_ms) || (turn.worked_ms ? Math.round(turn.worked_ms) + 'ms' : '0s');
+        const isLast = idx === turns.length - 1;
+        const steps = Array.isArray(turn.steps) ? turn.steps : [];
+        const stepsHtml = steps.map(s => {
+          const kind = String(s.kind || 'assistant').toUpperCase();
+          const label = s.tool_summary || s.tool_name || kind;
+          const content = s.result_preview || s.content || s.tool_args || '';
+          return `
+            <div class="crew-insp-step">
+              <div class="crew-insp-step-kind">${escapeHtml(kind)}${s.tool_summary || s.tool_name ? ' · ' + escapeHtml(label) : ''}</div>
+              ${content ? `<div class="md-content" style="white-space:pre-wrap; overflow-wrap:anywhere;">${escapeHtml(String(content).slice(0, 1200))}</div>` : ''}
+            </div>`;
+        }).join('');
+        return `
+          <details class="crew-insp-turn"${isLast ? ' open' : ''}>
+            <summary>
+              <span>Worked for ${escapeHtml(dur)}</span>
+              <span style="font-family:var(--font-mono); font-size:11px; color:var(--text-muted);">Turn #${Number(turn.turn_index || idx + 1)}</span>
+            </summary>
+            <div class="crew-insp-turn-body">
+              ${turn.trigger_prompt ? `<div class="crew-insp-step"><div class="crew-insp-step-kind">TRIGGER</div><div>${escapeHtml(turn.trigger_prompt)}</div></div>` : ''}
+              ${stepsHtml}
+            </div>
+          </details>`;
+      }).join('');
+    }
+    body.innerHTML = briefHtml + turnsHtml;
+  }
+
+  const inp = document.getElementById('crew-insp-input');
+  if (inp) {
+    inp.placeholder = translateUiString('이 크루에게 직접 지시 또는 후속 질문 입력 (Enter 전송)...', currentUiLang);
+  }
+  const sendBtn = document.getElementById('crew-insp-send-btn');
+  if (sendBtn) sendBtn.textContent = currentUiLang === 'en' ? 'Send' : '전송';
+  paintAllCrewPixelAvatarsNow();
+}
+
+async function sendCrewInspectorMessageUi() {
+  if (!activeCrewInspectorMember) return;
+  const inp = document.getElementById('crew-insp-input');
+  if (!inp) return;
+  const text = inp.value.trim();
+  if (!text) return;
+  inp.value = '';
+  const tid = currentThreadId || 'thread-main';
+  await runCrewActionUi('nudge', { name: activeCrewInspectorMember, text });
+  await refreshActiveCrewInspectorUi();
+}
+
+renderCrewBoardRosterAndHeader();
 </script>
 </body>
 </html>
