@@ -360,6 +360,7 @@ fn config_with_patch(cfg: &AppConfig, mut patch: Value) -> Result<AppConfig> {
             "split_browser_open",
             "exclude_self_from_capture",
             "ai_self_heal_enabled",
+            "auto_load_user_rules",
         ] {
             if let Some(b) = json_opt_bool(patch_obj.get(bool_key)) {
                 patch_obj.insert(bool_key.to_string(), json!(b));
@@ -1263,6 +1264,7 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
                 "screenshot_max_dim": updated.screenshot_max_dim,
                 "ai_self_heal_enabled": updated.ai_self_heal_enabled,
                 "artex_enabled": updated.artex_enabled,
+                "auto_load_user_rules": updated.auto_load_user_rules,
                 "models": crate::config::merge_models_preserving_composite(
                     updated.models,
                     crate::oauth::list_connected_models_for_catalog()
@@ -1309,6 +1311,7 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
                 "screenshot_max_dim": updated.screenshot_max_dim,
                 "ai_self_heal_enabled": updated.ai_self_heal_enabled,
                 "artex_enabled": updated.artex_enabled,
+                "auto_load_user_rules": updated.auto_load_user_rules,
                 "models": crate::config::merge_models_preserving_composite(
                     updated.models,
                     crate::oauth::list_connected_models_for_catalog()
@@ -1898,6 +1901,31 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
                 "removed": removed,
                 "id": clean_id,
             }))
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // Auto-Loaded Antigravity Rules (`AGENTS.md` / `CLAUDE.md` / `GEMINI.md`)
+        // ─────────────────────────────────────────────────────────────────────
+        ("GET", "/api/rules/status") => {
+            let cfg = get_config();
+            let q_ws = q
+                .get("workspace")
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            let q_tid = q
+                .get("thread_id")
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            let resolved_ws = q_ws.or_else(|| {
+                q_tid
+                    .as_deref()
+                    .map(crate::crew::effective_workspace_for_thread)
+                    .filter(|s| !s.is_empty())
+            });
+            Ok(crate::rules::inspect_rules_status_json(
+                resolved_ws.as_deref(),
+                cfg.auto_load_user_rules,
+            ))
         }
 
         // ─────────────────────────────────────────────────────────────────────
@@ -6345,5 +6373,41 @@ mod http_security_tests {
         }
         crate::oauth::clear_test_caches();
         let _ = std::fs::remove_file(&tmp_vault);
+    }
+
+    #[tokio::test]
+    async fn api_rules_status_route_returns_global_and_workspace_rules() {
+        let tmp = std::env::temp_dir().join(format!(
+            "alluse_srv_rules_{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let home = tmp.join("home");
+        let ancestor = tmp.join("projects");
+        let ws = ancestor.join("business");
+        std::fs::create_dir_all(home.join(".gemini")).unwrap();
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::write(home.join(".gemini").join("GEMINI.md"), "SRV_GLOBAL_RULE").unwrap();
+        std::fs::write(ancestor.join("AGENTS.md"), "SRV_ANCESTOR_RULE").unwrap();
+        std::fs::write(ws.join("AGENTS.md"), "SRV_WORKSPACE_RULE").unwrap();
+
+        unsafe {
+            std::env::set_var("ALLUSE_GLOBAL_RULES_HOME", &home);
+        }
+
+        let query = format!("workspace={}", urlencoding::encode(ws.to_str().unwrap()));
+        let res = route_api("GET", "/api/rules/status", &query, json!({}))
+            .await
+            .expect("GET /api/rules/status");
+        assert_eq!(res["ok"], true);
+        assert_eq!(res["globalRules"].as_array().unwrap().len(), 1);
+        assert_eq!(res["workspaceRules"].as_array().unwrap().len(), 2);
+        assert_eq!(res["workspaceRules"][0]["scope"], "ancestor");
+        assert_eq!(res["workspaceRules"][1]["scope"], "workspace");
+        assert_eq!(res["budgetTokens"], 20_000);
+
+        unsafe {
+            std::env::remove_var("ALLUSE_GLOBAL_RULES_HOME");
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

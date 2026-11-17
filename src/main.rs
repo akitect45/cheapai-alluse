@@ -23,6 +23,7 @@ pub mod github;
 pub mod llm;
 pub mod media;
 pub mod oauth;
+pub mod rules;
 pub mod search;
 pub mod self_heal;
 pub mod server;

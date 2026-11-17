@@ -2304,16 +2304,38 @@ pub fn build_system_prompt(cfg: &AppConfig, mode: &str, thread_id: &str) -> Stri
     } else {
         "### Hierarchical Agent Tree & Shared Board Context"
     };
-    let project_context = match crate::db::get_thread_by_id_or_path(thread_id, "self").ok().flatten() {
-        Some(thread) if !thread.workspace_path.is_empty() => format!(
+    let attached_ws = {
+        let ws = crate::crew::effective_workspace_for_thread(thread_id);
+        if !ws.is_empty() {
+            ws
+        } else {
+            std::env::var("ALLUSE_WORKSPACE")
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_default()
+        }
+    };
+    let project_context = if !attached_ws.is_empty() {
+        format!(
             "Attached project folder: {}. Resolve relative file paths and default shell cwd against this folder. This conversation's project overrides global workspace settings and workspace paths in older messages or personal memory. Read relevant project instructions (AGENTS.md) before changing project files.",
-            thread.workspace_path
-        ),
-        _ => "No project is attached to this conversation. Do not assume the AllUse installation or a project mentioned in another conversation is the user's project. General chat, web and desktop tasks remain available. Local tools default to the user's home folder; use explicit paths when the user names a folder.".to_string(),
+            attached_ws
+        )
+    } else {
+        "No project is attached to this conversation. Do not assume the AllUse installation or a project mentioned in another conversation is the user's project. General chat, web and desktop tasks remain available. Local tools default to the user's home folder; use explicit paths when the user names a folder.".to_string()
+    };
+    let user_rules_block = crate::rules::render_user_rules_for_prompt(
+        (!attached_ws.is_empty()).then_some(attached_ws.as_str()),
+        cfg.auto_load_user_rules,
+    );
+    let user_rules_section = if user_rules_block.is_empty() {
+        String::new()
+    } else {
+        format!("\n\n{user_rules_block}")
     };
 
     format!(
-        r#"You are **AllUse**, a dedicated native cross-platform AI Assistant ({platform_badge}, os=`{os_name}`, arch=`{arch_name}`) with FULL AUTHORITY over this user's personal computer and embedded browser.
+        r#"You are **AllUse**, a dedicated native cross-platform AI Assistant ({platform_badge}, os=`{os_name}`, arch=`{arch_name}`) with FULL AUTHORITY over this user's personal computer and embedded browser.{user_rules_section}
 
 ### Hardware & Display Topology on This Computer
 - Host Platform: {platform_badge} (OS: `{os_name}`, Arch: `{arch_name}`, Project Root: `{proj_root}`)
@@ -12275,12 +12297,15 @@ pub async fn run_agent_turn_with_attachments(
     let thread_meta = crate::db::get_thread_by_id_or_path(&thread_id, "self")
         .ok()
         .flatten();
-    let turn_workspace = chat_workspace_dir(
+    let eff_thread_ws = crate::crew::effective_workspace_for_thread(&thread_id);
+    let turn_workspace = chat_workspace_dir(if !eff_thread_ws.is_empty() {
+        eff_thread_ws.as_str()
+    } else {
         thread_meta
             .as_ref()
             .map(|t| t.workspace_path.as_str())
-            .unwrap_or(""),
-    )?;
+            .unwrap_or("")
+    })?;
     cfg.default_workspace = turn_workspace.clone();
     if !is_thread_interrupted(&thread_id) {
         if thread_meta.as_ref().map(|m| m.depth == 0).unwrap_or(true)
@@ -15112,5 +15137,79 @@ mod config_tool_redaction_tests {
         let _ = crate::attachments::remove_staged_attachment(&staged[1].id);
         let _ = crate::db::delete_thread(&t_single.id);
         let _ = crate::db::delete_thread(&t_multi.id);
+    }
+
+    #[test]
+    fn build_system_prompt_injects_user_rules_for_main_crew_director_and_worker() {
+        let tmp = std::env::temp_dir().join(format!(
+            "alluse_prompt_rules_{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let home = tmp.join("home");
+        let ancestor = tmp.join("projects");
+        let ws = ancestor.join("business");
+        std::fs::create_dir_all(home.join(".gemini")).unwrap();
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::write(home.join(".gemini").join("GEMINI.md"), "PROMPT_GLOBAL_RULE_XYZ").unwrap();
+        std::fs::write(ancestor.join("AGENTS.md"), "PROMPT_ANCESTOR_RULE_ABC").unwrap();
+        std::fs::write(ws.join("CLAUDE.md"), "PROMPT_WORKSPACE_RULE_123").unwrap();
+
+        unsafe {
+            std::env::set_var("ALLUSE_GLOBAL_RULES_HOME", &home);
+        }
+
+        let cfg = crate::config::AppConfig::default();
+        let t_unattached = crate::db::create_thread("Unattached Rules", "auto", "gpt-6-astra", "low").unwrap();
+        let p_unattached = super::build_system_prompt(&cfg, "auto", &t_unattached.id);
+        assert!(p_unattached.contains("<user_rules>"));
+        assert!(p_unattached.contains("PROMPT_GLOBAL_RULE_XYZ"));
+        assert!(!p_unattached.contains("PROMPT_WORKSPACE_RULE_123"));
+
+        let t_root = crate::db::create_thread("Crew Root Rules", "crew", "gpt-6-astra", "low").unwrap();
+        crate::db::set_thread_workspace(&t_root.id, ws.to_str().unwrap()).unwrap();
+        let p_director = super::build_system_prompt(&cfg, "crew", &t_root.id);
+        assert!(p_director.contains("PROMPT_GLOBAL_RULE_XYZ"));
+        assert!(p_director.contains("PROMPT_ANCESTOR_RULE_ABC"));
+        assert!(p_director.contains("PROMPT_WORKSPACE_RULE_123"));
+
+        let (member_rec, _) = crate::crew::add_single_crew_member(
+            &t_root.id,
+            "director",
+            "rule-worker",
+            "worker",
+            "check inherited rules",
+            "",
+            "",
+            "inherit",
+            false,
+            0,
+            None,
+            &cfg,
+            false,
+        )
+        .unwrap();
+        let worker_tid = member_rec.thread_id;
+        assert_eq!(crate::crew::effective_workspace_for_thread(&worker_tid), ws.to_str().unwrap());
+        let p_worker = super::build_system_prompt(&cfg, "crew_worker", &worker_tid);
+        assert!(p_worker.contains("PROMPT_GLOBAL_RULE_XYZ"));
+        assert!(p_worker.contains("PROMPT_ANCESTOR_RULE_ABC"));
+        assert!(p_worker.contains("PROMPT_WORKSPACE_RULE_123"));
+
+        // Verify Crew Director tool restriction remains intact (no fs_read_file)
+        let mut dir_tools = super::tool_definitions();
+        dir_tools.retain(|tool| {
+            matches!(
+                tool["function"]["name"].as_str().unwrap_or_default(),
+                "crew_manage" | "crew_post" | "crew_read"
+            )
+        });
+        assert_eq!(dir_tools.len(), 3);
+
+        let _ = crate::db::delete_thread(&t_unattached.id);
+        let _ = crate::db::delete_thread(&t_root.id);
+        unsafe {
+            std::env::remove_var("ALLUSE_GLOBAL_RULES_HOME");
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

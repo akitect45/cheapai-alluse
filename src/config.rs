@@ -62,6 +62,10 @@ fn default_artex_enabled() -> bool {
     true
 }
 
+fn default_auto_load_user_rules() -> bool {
+    true
+}
+
 pub fn detect_system_ui_language() -> &'static str {
     for var in ["ALLUSE_LANG", "LC_ALL", "LC_MESSAGES", "LANG"] {
         if let Ok(val) = std::env::var(var) {
@@ -260,6 +264,8 @@ pub struct AppConfig {
     pub ai_self_heal_enabled: bool,
     #[serde(default = "default_artex_enabled")]
     pub artex_enabled: bool,
+    #[serde(default = "default_auto_load_user_rules")]
+    pub auto_load_user_rules: bool,
     #[serde(default)]
     pub auth_username: String,
     #[serde(default)]
@@ -344,6 +350,7 @@ impl Default for AppConfig {
             default_video_model: default_video_model(),
             ai_self_heal_enabled: DEFAULT_AI_SELF_HEAL_ENABLED,
             artex_enabled: true,
+            auto_load_user_rules: true,
             auth_username: String::new(),
             auth_key_name: String::new(),
             auth_source: String::new(),

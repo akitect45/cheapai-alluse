@@ -4539,15 +4539,63 @@ pub fn get_crew_member_log(
     }))
 }
 
+/// Resolves effective workspace path for any thread, falling back to `root_thread_id`'s
+/// `workspace_path` when a crew worker inherits the root session's project.
+pub fn effective_workspace_for_thread(thread_id: &str) -> String {
+    let clean_tid = thread_id.trim();
+    if clean_tid.is_empty() {
+        return String::new();
+    }
+    let conn = crate::db::lock_db();
+    let own_ws: String = conn
+        .query_row(
+            "SELECT workspace_path FROM threads WHERE id = ?1 LIMIT 1",
+            params![clean_tid],
+            |r| r.get(0),
+        )
+        .unwrap_or_default();
+    if !own_ws.trim().is_empty() {
+        return own_ws.trim().to_string();
+    }
+    let root_id = resolve_root_id_conn(&conn, clean_tid);
+    if !root_id.is_empty() && root_id != clean_tid {
+        let root_ws: String = conn
+            .query_row(
+                "SELECT workspace_path FROM threads WHERE id = ?1 LIMIT 1",
+                params![root_id],
+                |r| r.get(0),
+            )
+            .unwrap_or_default();
+        if !root_ws.trim().is_empty() {
+            return root_ws.trim().to_string();
+        }
+    }
+    String::new()
+}
+
 /// Renders dedicated prompt instructions for AllCrew (`디렉터` or `크루` worker).
 pub fn render_crew_prompt_context(thread_id: &str) -> String {
     let conn = crate::db::lock_db();
     let root_id = resolve_root_id_conn(&conn, thread_id);
     let member_opt = get_member_by_thread_conn(&conn, thread_id);
+    let root_ws: String = conn
+        .query_row(
+            "SELECT workspace_path FROM threads WHERE id = ?1 LIMIT 1",
+            params![root_id],
+            |r| r.get(0),
+        )
+        .unwrap_or_default();
     let status = get_session_status_conn(&conn, &root_id).ok();
 
     let mut out = String::new();
     if let Some(m) = member_opt {
+        let eff_member_ws = if !m.workspace_path.trim().is_empty() {
+            m.workspace_path.trim()
+        } else if !root_ws.trim().is_empty() {
+            root_ws.trim()
+        } else {
+            "기본 작업 폴더"
+        };
         out.push_str(&format!(
             r#"[AllCrew (`크루`) 작업자 역할 지침]
 - 당신의 크루 이름: `@{}` (표시명: `{}`, 역할: `{}`)
@@ -4564,11 +4612,7 @@ pub fn render_crew_prompt_context(thread_id: &str) -> String {
             m.role,
             m.root_thread_id,
             m.browser_session_id,
-            if m.workspace_path.is_empty() {
-                "기본 작업 폴더"
-            } else {
-                &m.workspace_path
-            }
+            eff_member_ws
         ));
     } else {
         out.push_str(
