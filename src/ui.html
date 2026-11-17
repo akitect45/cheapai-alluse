@@ -32885,6 +32885,7 @@ const externalOAuthState = {
   },
   manualOpen: { openai: false, claude: false },
   busy: { openai: false, claude: false },
+  refreshingUsage: { openai: false, claude: false },
   errors: { openai: '', claude: '' },
   pendingUrls: { openai: '', claude: '' },
   pendingSessionIds: { openai: '', claude: '' },
@@ -33042,9 +33043,9 @@ function renderSingleExternalOAuthCard(provider) {
         <button type="button" class="btn primary" id="oauth-use-${provider}" onclick="selectExternalOAuthModel('${provider}')" ${busy ? 'disabled' : ''}>
           <span>${escapeHtml(extOAuthText('이 계정 모델 선택', 'Use This Model'))}</span>
         </button>
-        <button type="button" class="btn" id="oauth-refresh-usage-${provider}" onclick="refreshExternalOAuthUsage(true)" ${busy ? 'disabled' : ''}>
+        <button type="button" class="btn${externalOAuthState.refreshingUsage && externalOAuthState.refreshingUsage[provider] ? ' is-busy' : ''}" id="oauth-refresh-usage-${provider}" onclick="refreshExternalOAuthUsage(true, '${provider}')" ${busy ? 'disabled' : ''}>
           <svg class="solar-icon sm"><use href="#solar-refresh"/></svg>
-          <span>${escapeHtml(extOAuthText('사용량 새로고침', 'Refresh Usage'))}</span>
+          <span>${escapeHtml((externalOAuthState.refreshingUsage && externalOAuthState.refreshingUsage[provider]) ? extOAuthText('새로고침 중...', 'Refreshing...') : extOAuthText('사용량 새로고침', 'Refresh Usage'))}</span>
         </button>
         <button type="button" class="btn" id="oauth-disconnect-${provider}" onclick="disconnectExternalOAuth('${provider}')" ${busy ? 'disabled' : ''}>
           <span>${escapeHtml(extOAuthText('연결 해제', 'Disconnect'))}</span>
@@ -33363,11 +33364,48 @@ function renderExternalOAuthUsageBoxHtml(provider, usage) {
   `;
 }
 
-async function refreshExternalOAuthUsage(force = false) {
+async function refreshExternalOAuthUsage(force = false, provider = '') {
+  const prov = String(provider || '').trim().toLowerCase();
+  if (prov === 'openai' || prov === 'claude') {
+    externalOAuthState.busy[prov] = true;
+    externalOAuthState.refreshingUsage[prov] = true;
+    externalOAuthState.errors[prov] = '';
+    renderSingleExternalOAuthCard(prov);
+    try {
+      const res = await api(`/api/oauth/${prov}/usage`, 'POST', { force: force !== false });
+      if (res && res.ok !== false) {
+        const statusPayload = res.status || (res.providers ? res : (res.provider ? res : { provider: prov, usage: res.usage || res }));
+        ingestExternalOAuthStatus(statusPayload);
+        const usageErr = res.lastError || (res.usage && res.usage.lastError) || '';
+        if (usageErr && !(externalOAuthState.providers[prov]?.usage?.lastError)) {
+          externalOAuthState.errors[prov] = String(usageErr);
+        }
+      } else {
+        const errMsg = (res && (res.error || res.lastError || (res.usage && res.usage.lastError)))
+          || extOAuthText('사용량 새로고침에 실패했습니다.', 'Failed to refresh subscription usage.');
+        externalOAuthState.errors[prov] = String(errMsg);
+        if (typeof showCustomToast === 'function') {
+          showCustomToast(String(errMsg), 'OAUTH');
+        }
+      }
+    } catch (err) {
+      const errMsg = (err && err.message) ? String(err.message) : extOAuthText('사용량 새로고침 중 오류가 발생했습니다.', 'Error refreshing subscription usage.');
+      externalOAuthState.errors[prov] = errMsg;
+      if (typeof showCustomToast === 'function') {
+        showCustomToast(errMsg, 'OAUTH');
+      }
+    } finally {
+      externalOAuthState.busy[prov] = false;
+      externalOAuthState.refreshingUsage[prov] = false;
+      renderSingleExternalOAuthCard(prov);
+    }
+    return;
+  }
+
   try {
     const res = await api(`/api/oauth/usage?force=${force ? 1 : 0}`, 'GET');
     if (res && res.ok !== false) {
-      ingestExternalOAuthStatus(res);
+      ingestExternalOAuthStatus(res.status || res);
     }
   } catch (_) {}
 }

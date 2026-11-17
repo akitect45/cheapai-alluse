@@ -1880,7 +1880,10 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
         // ─────────────────────────────────────────────────────────────────────
         // External OAuth (OpenAI ChatGPT/Codex & Anthropic Claude)
         // ─────────────────────────────────────────────────────────────────────
-        ("GET", "/api/oauth/status") => Ok(crate::oauth::build_status_response()),
+        ("GET", "/api/oauth/status") => {
+            crate::oauth::warm_connected_usage_if_empty().await;
+            Ok(crate::oauth::build_status_response())
+        }
 
         ("GET", "/api/oauth/usage") => {
             let force = q
@@ -6280,6 +6283,7 @@ mod http_security_tests {
         unsafe {
             std::env::set_var("ALLUSE_OAUTH_VAULT_PATH", &tmp_vault);
         }
+        crate::oauth::clear_test_caches();
         let st = route_api("GET", "/api/oauth/status", "", json!({}))
             .await
             .expect("GET /api/oauth/status");
@@ -6316,6 +6320,7 @@ mod http_security_tests {
         unsafe {
             std::env::remove_var("ALLUSE_OAUTH_VAULT_PATH");
         }
+        crate::oauth::clear_test_caches();
         let _ = std::fs::remove_file(&tmp_vault);
     }
 }

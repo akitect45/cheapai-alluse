@@ -26,7 +26,9 @@ pub const CLAUDE_OAUTH_MANUAL_REDIRECT_URI: &str =
     "https://console.anthropic.com/oauth/code/callback";
 pub const CLAUDE_API_DEFAULT_BASE_URL: &str = "https://api.anthropic.com";
 pub const CLAUDE_OAUTH_CALLBACK_PATH: &str = "/callback";
+pub const OPENAI_CLI_USER_AGENT: &str = "codex_cli_rs/0.104.0 (Windows 11; arm64)";
 pub const OPENAI_USAGE_DEFAULT_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
+pub const OPENAI_USAGE_FALLBACK_URL: &str = "https://chatgpt.com/backend-api/codex/usage";
 pub const OPENAI_MODELS_DEFAULT_URL: &str =
     "https://chatgpt.com/backend-api/codex/models?client_version=0.1.0";
 
@@ -188,6 +190,14 @@ static USAGE_CACHE: LazyLock<Mutex<HashMap<OAuthProvider, OAuthUsageSnapshot>>> 
 static MODELS_CACHE: LazyLock<Mutex<HashMap<OAuthProvider, (u64, Vec<crate::config::ModelInfo>)>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+#[cfg(test)]
+pub(crate) fn clear_test_caches() {
+    *VAULT_CACHE.lock().unwrap() = None;
+    USAGE_CACHE.lock().unwrap().clear();
+    MODELS_CACHE.lock().unwrap().clear();
+    PENDING_OAUTH_SESSIONS.lock().unwrap().clear();
+}
+
 fn now_unix_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -195,12 +205,15 @@ fn now_unix_secs() -> u64 {
         .unwrap_or(0)
 }
 
-fn env_or_default(var: &str, default_val: &str) -> String {
+fn env_override(var: &str) -> Option<String> {
     std::env::var(var)
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| default_val.to_string())
+}
+
+fn env_or_default(var: &str, default_val: &str) -> String {
+    env_override(var).unwrap_or_else(|| default_val.to_string())
 }
 
 pub fn openai_authorize_url() -> String {
@@ -409,6 +422,60 @@ pub fn list_connected_models_for_catalog() -> Vec<crate::config::ModelInfo> {
     out
 }
 
+async fn send_openai_backend_get(
+    client: &reqwest::Client,
+    url: &str,
+    rec: &OAuthTokenRecord,
+    allow_refresh: bool,
+) -> std::result::Result<reqwest::Response, String> {
+    async fn attempt(
+        client: &reqwest::Client,
+        url: &str,
+        token: &str,
+        account_id: Option<&str>,
+    ) -> std::result::Result<reqwest::Response, reqwest::Error> {
+        let mut req = client
+            .get(url)
+            .bearer_auth(token.trim())
+            .header("User-Agent", OPENAI_CLI_USER_AGENT)
+            .header("Accept", "application/json")
+            .header("originator", "codex_cli_rs");
+        if let Some(acct) = account_id.map(str::trim).filter(|s| !s.is_empty()) {
+            req = req.header("ChatGPT-Account-Id", acct);
+        }
+        req.send().await
+    }
+
+    let mut cur_rec = rec.clone();
+    let initial_acct = Some(cur_rec.account_id.as_str()).filter(|s| !s.trim().is_empty());
+    let mut resp = attempt(client, url, &cur_rec.access_token, initial_acct)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if resp.status().as_u16() == 401 && allow_refresh {
+        if let Ok(refreshed) = refresh_provider_token(OAuthProvider::Openai).await {
+            cur_rec = refreshed;
+            let acct = Some(cur_rec.account_id.as_str()).filter(|s| !s.trim().is_empty());
+            resp = attempt(client, url, &cur_rec.access_token, acct)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+    }
+
+    // Personal ChatGPT accounts can fail with 400/402/403/404 if ChatGPT-Account-Id is stale or org-scoped.
+    if !cur_rec.account_id.trim().is_empty()
+        && matches!(resp.status().as_u16(), 400 | 402 | 403 | 404)
+    {
+        if let Ok(no_acct_resp) = attempt(client, url, &cur_rec.access_token, None).await {
+            if no_acct_resp.status().is_success() || no_acct_resp.status().as_u16() != 403 {
+                return Ok(no_acct_resp);
+            }
+        }
+    }
+
+    Ok(resp)
+}
+
 pub async fn fetch_connected_catalog_models_with_remote() -> Vec<crate::config::ModelInfo> {
     let mut out = Vec::new();
     let now = now_unix_secs();
@@ -431,14 +498,9 @@ pub async fn fetch_connected_catalog_models_with_remote() -> Vec<crate::config::
                     .timeout(std::time::Duration::from_secs(4))
                     .build()
                 {
-                    let mut req = client
-                        .get(openai_models_url())
-                        .bearer_auth(rec.access_token.trim())
-                        .header("originator", "codex_cli_rs");
-                    if !rec.account_id.trim().is_empty() {
-                        req = req.header("ChatGPT-Account-Id", rec.account_id.trim());
-                    }
-                    if let Ok(resp) = req.send().await {
+                    if let Ok(resp) =
+                        send_openai_backend_get(&client, &openai_models_url(), &rec, true).await
+                    {
                         if resp.status().is_success() {
                             if let Ok(val) = resp.json::<Value>().await {
                                 let arr_opt = val
@@ -873,16 +935,22 @@ pub async fn fetch_usage_for_provider(
         return snap;
     };
 
-    let resp_res = match provider {
+    let primary_res = match provider {
         OAuthProvider::Openai => {
-            let mut req = client
-                .get(openai_usage_url())
-                .bearer_auth(rec.access_token.trim())
-                .header("originator", "codex_cli_rs");
-            if !rec.account_id.trim().is_empty() {
-                req = req.header("ChatGPT-Account-Id", rec.account_id.trim());
+            let primary_url = openai_usage_url();
+            let res = send_openai_backend_get(&client, &primary_url, &rec, true).await;
+            match res {
+                Ok(r)
+                    if r.status().as_u16() == 404
+                        && env_override("ALLUSE_OPENAI_USAGE_URL").is_none()
+                        && !primary_url.eq_ignore_ascii_case(OPENAI_USAGE_FALLBACK_URL) =>
+                {
+                    send_openai_backend_get(&client, OPENAI_USAGE_FALLBACK_URL, &rec, false)
+                        .await
+                        .or(Ok(r))
+                }
+                other => other,
             }
-            req.send().await
         }
         OAuthProvider::Claude => {
             client
@@ -892,10 +960,11 @@ pub async fn fetch_usage_for_provider(
                 .header("anthropic-beta", "oauth-2025-04-20")
                 .send()
                 .await
+                .map_err(|e| e.to_string())
         }
     };
 
-    match resp_res {
+    match primary_res {
         Ok(resp) => {
             let status_code = resp.status();
             let hdrs = resp.headers().clone();
@@ -911,85 +980,205 @@ pub async fn fetch_usage_for_provider(
                     .unwrap_or(snap);
             }
             if !status_code.is_success() {
-                snap.last_error = format!("HTTP {status_code}");
+                let detail = serde_json::from_str::<Value>(&body_txt)
+                    .ok()
+                    .and_then(|v| {
+                        v.get("detail")
+                            .or_else(|| v.get("message"))
+                            .or_else(|| v.get("error").and_then(|e| e.get("message").or(Some(e))))
+                            .and_then(|s| s.as_str())
+                            .map(|s| s.trim().to_string())
+                    })
+                    .filter(|s| !s.is_empty());
+                snap.last_error = match detail {
+                    Some(d) => format!("HTTP {}: {d}", status_code.as_u16()),
+                    None => format!("HTTP {status_code}"),
+                };
                 snap.updated_at = now;
                 USAGE_CACHE.lock().unwrap().insert(provider, snap.clone());
                 return snap;
             }
-            if let Ok(val) = serde_json::from_str::<Value>(&body_txt) {
-                match provider {
-                    OAuthProvider::Openai => {
-                        if let Some(plan) = val.get("plan_type").and_then(|v| v.as_str()) {
-                            snap.plan_type = plan.trim().to_string();
+            match serde_json::from_str::<Value>(&body_txt) {
+                Ok(val) => {
+                    let parse_reset = |obj: &Value| -> String {
+                        let direct = normalize_reset_at_value(
+                            obj.get("resets_at").or_else(|| obj.get("reset_at")),
+                        );
+                        if !direct.is_empty() {
+                            return direct;
                         }
-                        if let Some(rl) = val.get("rate_limit") {
-                            if rl.get("limit_reached").and_then(|v| v.as_bool()) == Some(true) {
-                                snap.exhausted = true;
-                            }
-                            if let Some(pw) = rl.get("primary_window") {
-                                let pct = pw
-                                    .get("used_percent")
-                                    .and_then(|v| v.as_f64())
-                                    .unwrap_or(0.0);
-                                let rst = normalize_reset_at_value(pw.get("reset_at"));
-                                snap.primary_window = Some(make_usage_window("5h", pct, rst));
-                            }
-                            if let Some(sw) = rl.get("secondary_window") {
-                                let pct = sw
-                                    .get("used_percent")
-                                    .and_then(|v| v.as_f64())
-                                    .unwrap_or(0.0);
-                                let rst = normalize_reset_at_value(sw.get("reset_at"));
-                                snap.secondary_window = Some(make_usage_window("7d", pct, rst));
-                            }
-                        }
-                    }
-                    OAuthProvider::Claude => {
-                        if let Some(plan) = val
-                            .get("plan_type")
-                            .or_else(|| val.get("subscription_type"))
-                            .and_then(|v| v.as_str())
+                        if let Some(secs) = obj
+                            .get("reset_after_seconds")
+                            .and_then(|v| v.as_u64().or_else(|| v.as_f64().map(|f| f.max(0.0) as u64)))
+                            .filter(|&s| s > 0)
                         {
-                            snap.plan_type = plan.trim().to_string();
+                            return unix_secs_to_iso8601(now.saturating_add(secs));
                         }
-                        let parse_claude_win = |obj: &Value, label: &str| -> OAuthUsageWindow {
-                            let raw = obj
-                                .get("utilization")
-                                .or_else(|| obj.get("used_percent"))
-                                .and_then(|v| v.as_f64())
-                                .unwrap_or(0.0);
-                            let pct = if raw > 0.0 && raw <= 1.0 {
-                                raw * 100.0
-                            } else {
-                                raw
+                        String::new()
+                    };
+                    let parse_pct = |obj: &Value| -> f64 {
+                        if let Some(up) = obj.get("used_percent").and_then(|v| v.as_f64()) {
+                            return up;
+                        }
+                        let raw = obj
+                            .get("utilization")
+                            .and_then(|v| v.as_f64())
+                            .unwrap_or(0.0);
+                        if raw > 0.0 && raw <= 1.0 {
+                            raw * 100.0
+                        } else {
+                            raw
+                        }
+                    };
+
+                    snap.exhausted = false;
+                    snap.primary_window = None;
+                    snap.secondary_window = None;
+
+                    match provider {
+                        OAuthProvider::Openai => {
+                            if let Some(plan) = val.get("plan_type").and_then(|v| v.as_str()) {
+                                snap.plan_type = plan.trim().to_string();
+                            }
+                            let apply_rl = |snap: &mut OAuthUsageSnapshot, rl: &Value| {
+                                if rl.get("limit_reached").and_then(|v| v.as_bool()) == Some(true) {
+                                    snap.exhausted = true;
+                                }
+                                if snap.primary_window.is_none() {
+                                    if let Some(pw) =
+                                        rl.get("primary_window").filter(|v| v.is_object())
+                                    {
+                                        snap.primary_window = Some(make_usage_window(
+                                            "5h",
+                                            parse_pct(pw),
+                                            parse_reset(pw),
+                                        ));
+                                    }
+                                }
+                                if snap.secondary_window.is_none() {
+                                    if let Some(sw) =
+                                        rl.get("secondary_window").filter(|v| v.is_object())
+                                    {
+                                        snap.secondary_window = Some(make_usage_window(
+                                            "7d",
+                                            parse_pct(sw),
+                                            parse_reset(sw),
+                                        ));
+                                    }
+                                }
                             };
-                            let rst = normalize_reset_at_value(
-                                obj.get("resets_at").or_else(|| obj.get("reset_at")),
-                            );
-                            make_usage_window(label, pct, rst)
-                        };
-                        if let Some(w5) = val.get("five_hour").filter(|v| v.is_object()) {
-                            snap.primary_window = Some(parse_claude_win(w5, "5h"));
+                            if let Some(rl) = val.get("rate_limit").filter(|v| v.is_object()) {
+                                apply_rl(&mut snap, rl);
+                            }
+                            if snap.primary_window.is_none() || snap.secondary_window.is_none() {
+                                if let Some(extra) =
+                                    val.get("additional_rate_limits").and_then(|v| v.as_array())
+                                {
+                                    for item in extra {
+                                        if let Some(rl) =
+                                            item.get("rate_limit").filter(|v| v.is_object())
+                                        {
+                                            apply_rl(&mut snap, rl);
+                                        } else if item.is_object() {
+                                            apply_rl(&mut snap, item);
+                                        }
+                                    }
+                                }
+                            }
+                            if snap.primary_window.is_none() {
+                                if let Some(cr) =
+                                    val.get("code_review_rate_limit").filter(|v| v.is_object())
+                                {
+                                    apply_rl(&mut snap, cr);
+                                }
+                            }
+                            if snap.primary_window.is_none()
+                                && snap.secondary_window.is_none()
+                                && !snap.exhausted
+                                && (val.get("plan_type").is_some() || val.get("rate_limit").is_some())
+                            {
+                                snap.primary_window =
+                                    Some(make_usage_window("5h", 0.0, String::new()));
+                            }
                         }
-                        if let Some(w7) = val.get("seven_day").filter(|v| v.is_object()) {
-                            snap.secondary_window = Some(parse_claude_win(w7, "7d"));
+                        OAuthProvider::Claude => {
+                            if let Some(plan) = val
+                                .get("plan_type")
+                                .or_else(|| val.get("subscription_type"))
+                                .and_then(|v| v.as_str())
+                            {
+                                snap.plan_type = plan.trim().to_string();
+                            }
+                            if let Some(w5) = val.get("five_hour").filter(|v| v.is_object()) {
+                                snap.primary_window = Some(make_usage_window(
+                                    "5h",
+                                    parse_pct(w5),
+                                    parse_reset(w5),
+                                ));
+                            }
+                            if let Some(w7) = val.get("seven_day").filter(|v| v.is_object()) {
+                                snap.secondary_window = Some(make_usage_window(
+                                    "7d",
+                                    parse_pct(w7),
+                                    parse_reset(w7),
+                                ));
+                            }
+                            // (Claude null-window synthesis lands in Claude OAuth commit)
                         }
                     }
+                    snap.last_error.clear();
+                    snap.updated_at = now;
+                    finalize_usage_snapshot(&mut snap, None);
+                    USAGE_CACHE.lock().unwrap().insert(provider, snap.clone());
+                    emit_oauth_usage_updated();
                 }
-                snap.last_error.clear();
-                snap.updated_at = now;
-                finalize_usage_snapshot(&mut snap, None);
-                USAGE_CACHE.lock().unwrap().insert(provider, snap.clone());
-                emit_oauth_usage_updated();
+                Err(_) => {
+                    snap.last_error = "Invalid usage JSON response".to_string();
+                    snap.updated_at = now;
+                    USAGE_CACHE.lock().unwrap().insert(provider, snap.clone());
+                }
             }
         }
         Err(e) => {
-            snap.last_error = e.to_string();
+            snap.last_error = e;
             snap.updated_at = now;
             USAGE_CACHE.lock().unwrap().insert(provider, snap.clone());
         }
     }
     snap
+}
+
+pub async fn warm_connected_usage_if_empty() {
+    let need_openai = is_provider_connected(OAuthProvider::Openai)
+        && USAGE_CACHE
+            .lock()
+            .unwrap()
+            .get(&OAuthProvider::Openai)
+            .map(|s| s.updated_at == 0)
+            .unwrap_or(true);
+    let need_claude = is_provider_connected(OAuthProvider::Claude)
+        && USAGE_CACHE
+            .lock()
+            .unwrap()
+            .get(&OAuthProvider::Claude)
+            .map(|s| s.updated_at == 0)
+            .unwrap_or(true);
+    if !need_openai && !need_claude {
+        return;
+    }
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(4), async {
+        if need_openai && need_claude {
+            let _ = tokio::join!(
+                fetch_usage_for_provider(OAuthProvider::Openai, false),
+                fetch_usage_for_provider(OAuthProvider::Claude, false)
+            );
+        } else if need_openai {
+            let _ = fetch_usage_for_provider(OAuthProvider::Openai, false).await;
+        } else if need_claude {
+            let _ = fetch_usage_for_provider(OAuthProvider::Claude, false).await;
+        }
+    })
+    .await;
 }
 
 pub async fn get_all_oauth_usage(force: bool) -> Value {
