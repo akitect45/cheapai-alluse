@@ -361,6 +361,7 @@ fn config_with_patch(cfg: &AppConfig, mut patch: Value) -> Result<AppConfig> {
             "exclude_self_from_capture",
             "ai_self_heal_enabled",
             "auto_load_user_rules",
+            "github_auto_refresh",
         ] {
             if let Some(b) = json_opt_bool(patch_obj.get(bool_key)) {
                 patch_obj.insert(bool_key.to_string(), json!(b));
@@ -1265,6 +1266,7 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
                 "ai_self_heal_enabled": updated.ai_self_heal_enabled,
                 "artex_enabled": updated.artex_enabled,
                 "auto_load_user_rules": updated.auto_load_user_rules,
+                "github_auto_refresh": updated.github_auto_refresh,
                 "models": crate::config::merge_models_preserving_composite(
                     updated.models,
                     crate::oauth::list_connected_models_for_catalog()
@@ -1285,6 +1287,7 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
                 "image_save_dir": crate::config::default_image_save_dir(),
                 "video_save_dir": crate::config::default_video_save_dir(),
                 "ai_self_heal_enabled": true,
+                "github_auto_refresh": false,
             });
             let updated = update_config(patch)?;
             let _ =
@@ -1312,6 +1315,7 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
                 "ai_self_heal_enabled": updated.ai_self_heal_enabled,
                 "artex_enabled": updated.artex_enabled,
                 "auto_load_user_rules": updated.auto_load_user_rules,
+                "github_auto_refresh": updated.github_auto_refresh,
                 "models": crate::config::merge_models_preserving_composite(
                     updated.models,
                     crate::oauth::list_connected_models_for_catalog()
@@ -6409,5 +6413,34 @@ mod http_security_tests {
             std::env::remove_var("ALLUSE_GLOBAL_RULES_HOME");
         }
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[tokio::test]
+    async fn api_config_github_auto_refresh_defaults_false_and_persists() {
+        let cfg_before = route_api("GET", "/api/config", "", json!({}))
+            .await
+            .expect("GET /api/config");
+        assert_eq!(cfg_before["github_auto_refresh"], false);
+
+        let enabled = route_api(
+            "POST",
+            "/api/config",
+            "",
+            json!({ "github_auto_refresh": true }),
+        )
+        .await
+        .expect("enable github_auto_refresh");
+        assert_eq!(enabled["ok"], true);
+        assert_eq!(enabled["github_auto_refresh"], true);
+
+        let cfg_after_on = route_api("GET", "/api/config", "", json!({}))
+            .await
+            .expect("GET /api/config after on");
+        assert_eq!(cfg_after_on["github_auto_refresh"], true);
+
+        let reset = route_api("POST", "/api/config/reset-default", "", json!({}))
+            .await
+            .expect("reset-default");
+        assert_eq!(reset["github_auto_refresh"], false);
     }
 }

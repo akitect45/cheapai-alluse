@@ -267,6 +267,8 @@ pub struct AppConfig {
     #[serde(default = "default_auto_load_user_rules")]
     pub auto_load_user_rules: bool,
     #[serde(default)]
+    pub github_auto_refresh: bool,
+    #[serde(default)]
     pub auth_username: String,
     #[serde(default)]
     pub auth_key_name: String,
@@ -351,6 +353,7 @@ impl Default for AppConfig {
             ai_self_heal_enabled: DEFAULT_AI_SELF_HEAL_ENABLED,
             artex_enabled: true,
             auto_load_user_rules: true,
+            github_auto_refresh: false,
             auth_username: String::new(),
             auth_key_name: String::new(),
             auth_source: String::new(),
