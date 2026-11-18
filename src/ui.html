@@ -9043,7 +9043,7 @@
       <div style="display:flex; justify-content:space-between; align-items:center; padding-top:8px; border-top:1px solid var(--border); margin-top:2px;">
         <button class="btn ghost" style="font-size:12.5px; height:26px; padding:0 8px;" onclick="openCheapAiExternalUrl('https://cheapai.im/api/dashboard#usage')">CheapAI 대시보드 열기 ↗</button>
         <div style="display:flex; gap:6px;">
-          <button class="btn ghost" style="font-size:12.5px; height:26px; padding:0 8px;" onclick="closeCheapAiAuthOverlay(); openApiSettingsModal()">
+          <button class="btn ghost" style="font-size:12.5px; height:26px; padding:0 8px;" onclick="openApiSettingsModal(); closeCheapAiAuthOverlay()">
             <svg class="solar-icon sm"><use href="#solar-settings"/></svg>
             <span>상세 설정</span>
           </button>
@@ -14332,6 +14332,12 @@ function applyUiLanguage(lang) {
     }
     if (typeof renderRulesStatusUi === 'function' && lastRulesStatusPayload) {
       renderRulesStatusUi(lastRulesStatusPayload);
+    }
+    if (typeof renderSkillsStatusUi === 'function' && lastSkillsStatusPayload) {
+      renderSkillsStatusUi(lastSkillsStatusPayload);
+    }
+    if (document.getElementById('first-run-setup-modal')?.classList.contains('open') && typeof renderFirstRunGithubBox === 'function' && typeof ghAuthState !== 'undefined' && ghAuthState) {
+      renderFirstRunGithubBox(ghAuthState);
     }
     if (typeof updateGithubAccountBar === 'function') {
       updateGithubAccountBar(typeof ghAuthState !== 'undefined' ? ghAuthState : null);
@@ -31063,9 +31069,17 @@ function renderUsagePop() {
       action = 'login';
     }
   } else if (snap.state === 'failed') {
-    head.textContent = '사용량을 불러오지 못했습니다';
-    rows.push('<div class="usage-pop-note">네트워크나 로그인 상태를 확인한 뒤 다시 시도해 주세요.</div>');
-    action = 'retry';
+    if (activeOAuthConnected) {
+      head.textContent = activeOAuth === 'openai' ? '사용량 출처: OpenAI OAuth' : '사용량 출처: Claude OAuth';
+      action = 'manage';
+    } else if (hasNonCheapAiTarget) {
+      head.textContent = `사용량 출처: ${fallbackTarget.label}`;
+      action = 'manage';
+    } else {
+      head.textContent = '사용량을 불러오지 못했습니다';
+      rows.push('<div class="usage-pop-note">네트워크나 로그인 상태를 확인한 뒤 다시 시도해 주세요.</div>');
+      action = 'retry';
+    }
   } else if (snap.state === 'loading') {
     head.textContent = '사용량 확인 중…';
     row(`${usagePeriodName('week')} 한도`, '—');
@@ -34724,8 +34738,8 @@ async function disconnectExternalOAuth(provider) {
 }
 
 function openExternalOAuthFromOnboarding() {
-  closeCheapAiAuthOverlay();
   openApiSettingsModal('account');
+  closeCheapAiAuthOverlay();
   requestAnimationFrame(() => {
     document.getElementById('external-oauth-section')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   });
