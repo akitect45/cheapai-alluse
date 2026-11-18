@@ -380,8 +380,9 @@ fn collect_workspace_candidates(ws: &Path, home: &Path) -> Vec<CandidateRule> {
 
     let mut chain: Vec<PathBuf> = Vec::new();
     let mut cur_opt = Some(ws.to_path_buf());
+    let real_home = crate::config::user_home_dir();
     while let Some(cur) = cur_opt {
-        if same_dir(&cur, home) || cur.parent().is_none() {
+        if same_dir(&cur, home) || same_dir(&cur, &real_home) || cur.parent().is_none() {
             break;
         }
         chain.push(cur.clone());
