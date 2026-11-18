@@ -6175,6 +6175,20 @@
   .app-update-asset-meta { font-size:12px; color:var(--text-secondary); font-family:var(--font-mono); word-break:break-all; }
   .app-update-notes { max-height:160px; overflow-y:auto; white-space:pre-wrap; margin:0; font-size:12px; line-height:1.5; overscroll-behavior:contain; }
   .app-update-status { font-size:12px; color:var(--text-secondary); min-height:18px; line-height:1.45; }
+  .first-run-section { display:flex; flex-direction:column; gap:8px; padding:12px; border-radius:10px; border:1px solid var(--border); background:var(--bg-elevated); }
+  .first-run-section-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .first-run-section-title { display:inline-flex; align-items:center; gap:7px; font-size:12.5px; font-weight:700; color:var(--text); }
+  .first-run-theme-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px; }
+  .first-run-theme-card { display:flex; align-items:center; gap:10px; padding:10px 11px; border-radius:9px; border:1px solid var(--border); background:var(--bg-input); color:var(--text); cursor:pointer; text-align:left; font:inherit; transition:border-color .15s, background-color .15s; }
+  .first-run-theme-card:hover { border-color:var(--border-strong); background:var(--bg-hover); }
+  .first-run-theme-card.selected { border-color:var(--text-primary); background:var(--bg-active); }
+  .first-run-theme-swatch { width:22px; height:22px; border-radius:6px; border:1px solid var(--border-strong); flex-shrink:0; }
+  .first-run-theme-swatch.dark { background:#0d0d0d; }
+  .first-run-theme-swatch.light { background:#f7f7f8; }
+  .first-run-theme-meta { display:flex; flex-direction:column; gap:1px; min-width:0; }
+  .first-run-theme-name { font-size:12.5px; font-weight:700; color:var(--text); }
+  .first-run-theme-sub { font-size:11.5px; color:var(--text-secondary); }
+  .first-run-gh-box { display:flex; flex-direction:column; gap:7px; }
   .settings-system-panel .panel-scroll { padding:0; overflow:visible; }
   .settings-system-panel h3 { flex-direction:column; align-items:stretch; flex-wrap:nowrap; gap:8px; }
   .settings-system-panel h3 > .card-title-left { flex:none; width:100%; }
@@ -9160,6 +9174,67 @@
         <button type="button" class="btn" id="btn-app-update-later" onclick="closeAppUpdateModal()">나중에</button>
         <button type="button" class="btn primary" id="btn-app-update-apply" onclick="applyAppUpdateFromModal()">지금 다운로드 및 업데이트</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- First-Run Setup Modal (Strictly Theme Selection + GitHub Connection ONLY) -->
+<div class="modal-backdrop" id="first-run-setup-modal" onclick="if(event.target === this) finishFirstRunSetupModal(true)">
+  <div class="modal-card" style="width:480px; max-width:94vw; gap:14px; padding:22px;">
+    <div class="modal-hdr">
+      <div class="modal-title">
+        <img src="/assets/cheapai_logo_icon.png" alt="AllUse" style="width:24px; height:24px; border-radius:6px; object-fit:contain;" />
+        <span>초기 설정 · 테마 및 GitHub 연결</span>
+      </div>
+      <button type="button" class="btn ghost icon-only" onclick="finishFirstRunSetupModal(true)" title="닫기">
+        <svg class="solar-icon sm"><use href="#solar-close"/></svg>
+      </button>
+    </div>
+
+    <div class="first-run-section" id="first-run-theme-section">
+      <div class="first-run-section-head">
+        <span class="first-run-section-title">
+          <svg class="solar-icon sm"><use href="#solar-palette"/></svg>
+          <span>화면 테마 선택</span>
+        </span>
+      </div>
+      <div class="first-run-theme-grid" role="radiogroup" aria-label="화면 테마 선택">
+        <button type="button" class="first-run-theme-card" id="first-run-theme-obsidian" data-first-run-skin="obsidian" role="radio" aria-checked="true" onclick="selectFirstRunSkin('obsidian')">
+          <span class="first-run-theme-swatch dark" aria-hidden="true"></span>
+          <span class="first-run-theme-meta">
+            <span class="first-run-theme-name">다크 모드</span>
+            <span class="first-run-theme-sub">Obsidian</span>
+          </span>
+        </button>
+        <button type="button" class="first-run-theme-card" id="first-run-theme-light" data-first-run-skin="light" role="radio" aria-checked="false" onclick="selectFirstRunSkin('light')">
+          <span class="first-run-theme-swatch light" aria-hidden="true"></span>
+          <span class="first-run-theme-meta">
+            <span class="first-run-theme-name">라이트 모드</span>
+            <span class="first-run-theme-sub">Atelier Light</span>
+          </span>
+        </button>
+      </div>
+    </div>
+
+    <div class="first-run-section" id="first-run-github-section">
+      <div class="first-run-section-head">
+        <span class="first-run-section-title">
+          <svg class="solar-icon sm"><use href="#solar-github"/></svg>
+          <span>GitHub 연결</span>
+        </span>
+        <button type="button" class="btn" id="btn-first-run-gh-refresh" style="height:24px; padding:0 8px; font-size:11.5px;" onclick="refreshFirstRunGithubStatus()">
+          <svg class="solar-icon sm"><use href="#solar-refresh"/></svg>
+          <span>다시 확인</span>
+        </button>
+      </div>
+      <div class="first-run-gh-box" id="first-run-gh-body">
+        <div style="font-size:12px; color:var(--text-secondary);">gh CLI 로그인 계정을 확인하는 중...</div>
+      </div>
+    </div>
+
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:2px;">
+      <button type="button" class="btn" id="btn-first-run-skip" onclick="finishFirstRunSetupModal(true)">건너뛰기</button>
+      <button type="button" class="btn primary" id="btn-first-run-done" onclick="finishFirstRunSetupModal(false)">완료</button>
     </div>
   </div>
 </div>
@@ -12171,6 +12246,8 @@ document.addEventListener('keydown', event => {
     else return;
     if (event.key !== 'Tab') event.preventDefault();
     event.stopImmediatePropagation();
+  } else if (document.getElementById('first-run-setup-modal')?.classList.contains('open')) {
+    if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); finishFirstRunSetupModal(true); }
   } else if (document.getElementById('app-update-modal')?.classList.contains('open')) {
     if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); closeAppUpdateModal(); }
   } else if (modal.classList.contains('open')) {
@@ -12210,6 +12287,10 @@ function closeApiSettingsModal() {
   const modal = document.getElementById('api-settings-modal');
   if (modal) modal.classList.remove('open');
   if (typeof syncUiOverlayCutoutWithHost === 'function') syncUiOverlayCutoutWithHost();
+  if (window.__pendingFirstRunSetupAfterAuth && !document.getElementById('cheapai-auth-overlay')?.classList.contains('open')) {
+    window.__pendingFirstRunSetupAfterAuth = false;
+    if (typeof openFirstRunSetupModal === 'function') void openFirstRunSetupModal();
+  }
 }
 
 function applyPublicApiKeyState(config, clearInput = false) {
@@ -12329,10 +12410,176 @@ async function openCheapAiAuthOverlay(view = 'options', preloadedAuth = null) {
   }
 }
 
+let firstRunSelectedGhAccount = '';
+let firstRunGhAccounts = [];
+let firstRunGhConnected = false;
+
+function hasAnyExternalOAuthConnected() {
+  return Boolean(
+    typeof externalOAuthState !== 'undefined' &&
+    externalOAuthState.providers &&
+    ((externalOAuthState.providers.openai && externalOAuthState.providers.openai.connected) ||
+     (externalOAuthState.providers.claude && externalOAuthState.providers.claude.connected))
+  );
+}
+
+function syncFirstRunThemeButtonsUi(skin) {
+  const norm = normalizeUiSkin(skin || document.documentElement.getAttribute('data-skin') || 'obsidian');
+  const darkBtn = document.getElementById('first-run-theme-obsidian');
+  const lightBtn = document.getElementById('first-run-theme-light');
+  if (darkBtn) {
+    const isDark = norm !== 'light';
+    darkBtn.classList.toggle('selected', isDark);
+    darkBtn.setAttribute('aria-checked', String(isDark));
+  }
+  if (lightBtn) {
+    const isLight = norm === 'light';
+    lightBtn.classList.toggle('selected', isLight);
+    lightBtn.setAttribute('aria-checked', String(isLight));
+  }
+}
+
+function selectFirstRunSkin(skin) {
+  changeSkin(skin);
+  syncFirstRunThemeButtonsUi(skin);
+}
+
+function selectFirstRunGhAccount(username) {
+  firstRunSelectedGhAccount = String(username || '');
+  document.querySelectorAll('#first-run-gh-body .gh-account-option').forEach(el => {
+    el.classList.toggle('selected', el.getAttribute('data-gh-user') === firstRunSelectedGhAccount);
+  });
+}
+
+function renderFirstRunGithubBox(res) {
+  const box = document.getElementById('first-run-gh-body');
+  if (!box) return;
+  const isEn = currentUiLang === 'en';
+  if (!res || res.ok === false) {
+    firstRunGhAccounts = [];
+    firstRunGhConnected = false;
+    box.innerHTML = `<div style="font-size:12px; color:var(--text-secondary); line-height:1.5;">${escapeHtml(isEn ? 'Could not check gh CLI status. You can connect GitHub later in the GitHub panel.' : 'gh CLI 상태를 확인하지 못했습니다. 나중에 좌측 GitHub 메뉴에서 연결할 수 있습니다.')}</div>`;
+    return;
+  }
+  const accounts = Array.isArray(res.accounts) ? res.accounts : [];
+  firstRunGhAccounts = accounts;
+  firstRunGhConnected = Boolean(res.connected && res.connected_account);
+  if (firstRunGhConnected) {
+    box.innerHTML = `
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 10px; border-radius:8px; border:1px solid var(--border); background:var(--bg-input);">
+        <div style="font-size:12.5px; font-weight:600; color:var(--text);">@${escapeHtml(res.connected_account)}</div>
+        <span class="mono-badge inverted">${escapeHtml(isEn ? 'Connected' : '연결됨')}</span>
+      </div>`;
+    return;
+  }
+  if (accounts.length === 0) {
+    box.innerHTML = `<div style="font-size:12px; color:var(--text-secondary); line-height:1.5;">${escapeHtml(isEn ? 'No authenticated gh CLI accounts found. Run gh auth login and click Refresh, or skip for now.' : '감지된 gh CLI 계정이 없습니다. gh auth login 후 [다시 확인]을 누르거나 건너뛸 수 있습니다.')}</div>`;
+    return;
+  }
+  if (!firstRunSelectedGhAccount || !accounts.some(a => a.username === firstRunSelectedGhAccount)) {
+    const activeAcc = accounts.find(a => a.active) || accounts[0];
+    firstRunSelectedGhAccount = activeAcc ? activeAcc.username : '';
+  }
+  const rows = accounts.map(a => {
+    const isSel = a.username === firstRunSelectedGhAccount;
+    return `
+      <div class="gh-account-option ${isSel ? 'selected' : ''}" data-gh-user="${escapeHtml(a.username)}" onclick="selectFirstRunGhAccount('${escapeJsAttr(a.username)}')">
+        <div>
+          <div style="font-weight:600; font-size:12.5px; color:var(--text);">@${escapeHtml(a.username)}</div>
+          <div style="font-size:11.5px; color:var(--text-muted); font-family:var(--font-mono);">${escapeHtml(a.host || 'github.com')}</div>
+        </div>
+        <span class="mono-badge ${a.active ? 'inverted' : ''}">${escapeHtml(a.active ? (isEn ? 'gh active' : 'gh 활성') : (isEn ? 'Available' : '선택 가능'))}</span>
+      </div>`;
+  }).join('');
+  box.innerHTML = `
+    ${rows}
+    <div style="display:flex; justify-content:flex-end; margin-top:2px;">
+      <button type="button" class="btn primary" id="btn-first-run-gh-connect" style="height:28px; padding:0 12px; font-size:12px;" onclick="connectFirstRunGithubAccount()">${escapeHtml(isEn ? 'Connect Selected Account' : '선택 계정 연결')}</button>
+    </div>`;
+}
+
+async function refreshFirstRunGithubStatus() {
+  const btn = document.getElementById('btn-first-run-gh-refresh');
+  if (btn) btn.disabled = true;
+  try {
+    const res = await api('/api/github/status');
+    if (res && res.ok) {
+      ghAuthState = res;
+      syncWorkspaceGithubStateFromAuth(res, null);
+      updateGithubAccountBar(res);
+    }
+    renderFirstRunGithubBox(res);
+  } catch (_) {
+    renderFirstRunGithubBox(null);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function connectFirstRunGithubAccount() {
+  const targetUser = firstRunSelectedGhAccount || (firstRunGhAccounts[0] && firstRunGhAccounts[0].username) || '';
+  if (!targetUser) return;
+  const btn = document.getElementById('btn-first-run-gh-connect');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = currentUiLang === 'en' ? 'Connecting...' : '연결 중...';
+  }
+  try {
+    const res = await api('/api/github/connect', 'POST', { username: targetUser });
+    if (res && res.status) {
+      ghAuthState = res.status;
+      syncWorkspaceGithubStateFromAuth(res.status, res.workspace_state);
+      updateGithubAccountBar(res.status);
+      saveGithubCachedSnapshot();
+      renderFirstRunGithubBox(res.status);
+    } else {
+      await refreshFirstRunGithubStatus();
+    }
+  } catch (_) {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function openFirstRunSetupModal() {
+  const modal = document.getElementById('first-run-setup-modal');
+  if (!modal) return;
+  syncFirstRunThemeButtonsUi(document.documentElement.getAttribute('data-skin') || 'obsidian');
+  modal.classList.add('open');
+  if (typeof syncUiOverlayCutoutWithHost === 'function') syncUiOverlayCutoutWithHost();
+  await refreshFirstRunGithubStatus();
+}
+
+async function finishFirstRunSetupModal(skipped = false) {
+  window.__pendingFirstRunSetupAfterAuth = false;
+  const modal = document.getElementById('first-run-setup-modal');
+  if (modal) modal.classList.remove('open');
+  if (typeof syncUiOverlayCutoutWithHost === 'function') syncUiOverlayCutoutWithHost();
+  try {
+    localStorage.setItem('alluse_onboarding_v1_done', '1');
+  } catch (_) {}
+  try {
+    await api('/api/config', 'POST', { onboarding_completed: true });
+  } catch (_) {}
+  if (skipped && !firstRunGhConnected && firstRunGhAccounts.length > 0) {
+    try {
+      const res = await api('/api/github/connect', 'POST', { dismiss_only: true });
+      if (res && res.workspace_state) {
+        syncWorkspaceGithubStateFromAuth(null, res.workspace_state);
+      }
+    } catch (_) {}
+  }
+}
+
 function closeCheapAiAuthOverlay() {
   stopCheapAiDevicePollTimer();
   const overlay = document.getElementById('cheapai-auth-overlay');
   if (overlay) overlay.classList.remove('open');
+  if (typeof syncUiOverlayCutoutWithHost === 'function') syncUiOverlayCutoutWithHost();
+  const settingsOpen = document.getElementById('api-settings-modal')?.classList.contains('open');
+  if (window.__pendingFirstRunSetupAfterAuth && !settingsOpen) {
+    window.__pendingFirstRunSetupAfterAuth = false;
+    void openFirstRunSetupModal();
+  }
 }
 
 function switchCheapAiAuthView(view) {
@@ -13733,6 +13980,14 @@ const UI_KO_TO_EN_EXACT = {
   '나중에': 'Later',
   '최신 버전입니다.': 'You are up to date.',
   '업데이트 설치를 시작했습니다.': 'Started update installer.',
+  '초기 설정 · 테마 및 GitHub 연결': 'Initial Setup · Theme & GitHub',
+  '화면 테마 선택': 'Choose Theme',
+  '다크 모드': 'Dark Mode',
+  '라이트 모드': 'Light Mode',
+  'GitHub 연결': 'Connect GitHub',
+  '다시 확인': 'Recheck',
+  '건너뛰기': 'Skip',
+  '완료': 'Finish',
   '자동 주입': 'Auto Inject',
   '자동 새로고침': 'Auto Refresh',
   'GitHub 계정': 'GitHub Accounts',
@@ -13908,7 +14163,7 @@ function isTranslatableUiNode(el) {
   if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'SVG' || tag === 'PATH' || tag === 'USE' || tag === 'CODE') {
     return false;
   }
-  if (el.closest && el.closest('.msg.user .user-bubble, .msg.assistant .assistant-body, .assistant-msg-footer, #chat-live-status-row, #crew-board-feed, #crew-roster-grid, #crew-insp-messages, #cfg-rules-summary-badge, #cfg-rules-list, #mem-editor-textarea, #asl-editor, .custom-select-trigger, #custom-select-popover, #custom-context-menu, #chat-project-modal, #thread-list, #sidebar-new-chat, #active-thread-header-title')) {
+  if (el.closest && el.closest('.msg.user .user-bubble, .msg.assistant .assistant-body, .assistant-msg-footer, #chat-live-status-row, #crew-board-feed, #crew-roster-grid, #crew-insp-messages, #cfg-rules-summary-badge, #cfg-rules-list, #cfg-skills-summary-badge, #cfg-skills-list, #app-update-notes, #first-run-gh-body, #mem-editor-textarea, #asl-editor, .custom-select-trigger, #custom-select-popover, #custom-context-menu, #chat-project-modal, #thread-list, #sidebar-new-chat, #active-thread-header-title')) {
     return false;
   }
   const fc = el.firstChild;
@@ -14193,11 +14448,21 @@ async function initApp() {
       st.config.browser_width_ratio || 0.48
     );
     refreshModelsFromConnectedBaseUrl({ silent: true });
-    if (typeof refreshExternalOAuthStatus === 'function') refreshExternalOAuthStatus();
+    if (typeof refreshExternalOAuthStatus === 'function') await refreshExternalOAuthStatus();
     if (typeof refreshExternalOAuthUsage === 'function') refreshExternalOAuthUsage(false);
-    if (!st.config.has_api_key) {
+    let localOnboardingDone = false;
+    try {
+      localOnboardingDone = localStorage.getItem('alluse_onboarding_v1_done') === '1';
+    } catch (_) {}
+    const needsFirstRunOnboarding = (st.config.onboarding_completed === false) && !localOnboardingDone;
+    const hasAnyLogin = Boolean(st.config.has_api_key) || hasAnyExternalOAuthConnected();
+    if (!hasAnyLogin) {
+      if (needsFirstRunOnboarding) window.__pendingFirstRunSetupAfterAuth = true;
       openCheapAiAuthOverlay('options', st.auth || null);
+    } else if (needsFirstRunOnboarding) {
+      void openFirstRunSetupModal();
     }
+    window.__suppressLegacyGithubStartupPrompt = needsFirstRunOnboarding;
   }
   if (st && st.browser) {
     renderBrowserBar(st.browser);
@@ -14210,7 +14475,7 @@ async function initApp() {
   await switchBrowserSessionUi(currentThreadId);
   await loadMessages(currentThreadId);
   connectSse();
-  if (typeof ghAutoRefreshEnabled !== 'undefined' && ghAutoRefreshEnabled) {
+  if (!window.__suppressLegacyGithubStartupPrompt && typeof ghAutoRefreshEnabled !== 'undefined' && ghAutoRefreshEnabled) {
     checkGithubInitialConnectPrompt();
   }
   bindUsageRingTip();
@@ -24613,6 +24878,9 @@ function syncUiOverlayCutoutWithHost() {
     const delModal = document.getElementById('media-delete-confirm-modal');
     const apiModal = document.getElementById('api-settings-modal');
     const updateModal = document.getElementById('app-update-modal');
+    const firstRunModal = document.getElementById('first-run-setup-modal');
+    const cheapaiAuthModal = document.getElementById('cheapai-auth-overlay');
+    const ghConnectModal = document.getElementById('github-connect-modal');
     const rolePop = document.getElementById('img-send-video-popover');
     const selectPop = document.getElementById('custom-select-popover');
     const ctxMenu = document.getElementById('custom-context-menu');
@@ -24630,6 +24898,15 @@ function syncUiOverlayCutoutWithHost() {
       radius = 0;
     } else if (updateModal && updateModal.classList.contains('open')) {
       activeEl = updateModal;
+      radius = 0;
+    } else if (firstRunModal && firstRunModal.classList.contains('open')) {
+      activeEl = firstRunModal;
+      radius = 0;
+    } else if (cheapaiAuthModal && cheapaiAuthModal.classList.contains('open')) {
+      activeEl = cheapaiAuthModal;
+      radius = 0;
+    } else if (ghConnectModal && ghConnectModal.classList.contains('open')) {
+      activeEl = ghConnectModal;
       radius = 0;
     } else if (rolePop && rolePop.classList.contains('open')) {
       activeEl = rolePop;
