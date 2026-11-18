@@ -362,6 +362,7 @@ fn config_with_patch(cfg: &AppConfig, mut patch: Value) -> Result<AppConfig> {
             "ai_self_heal_enabled",
             "auto_load_user_rules",
             "github_auto_refresh",
+            "onboarding_completed",
         ] {
             if let Some(b) = json_opt_bool(patch_obj.get(bool_key)) {
                 patch_obj.insert(bool_key.to_string(), json!(b));
@@ -462,7 +463,119 @@ fn config_with_patch(cfg: &AppConfig, mut patch: Value) -> Result<AppConfig> {
     }
     updated.default_image_model = updated.default_image_model.trim().to_string();
     updated.default_video_model = updated.default_video_model.trim().to_string();
+    updated.web_origin = crate::config::sanitize_public_web_origin(&updated.web_origin);
     Ok(updated)
+}
+
+pub fn resolve_usage_dashboard_target(cfg: &AppConfig, model_opt: Option<&str>) -> Value {
+    let active_model = model_opt
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(&cfg.model)
+        .trim();
+    let lower_model = active_model.to_ascii_lowercase();
+    let lower_base = cfg.base_url.trim().to_ascii_lowercase();
+    let lower_prov = cfg.provider_name.trim().to_ascii_lowercase();
+
+    if lower_model.starts_with("openai-oauth/") {
+        return json!({
+            "ok": true,
+            "provider_kind": "openai_oauth",
+            "label": "ChatGPT / Codex",
+            "url": "https://chatgpt.com/codex/settings/usage",
+            "model": active_model,
+        });
+    }
+    if lower_model.starts_with("claude-oauth/") {
+        return json!({
+            "ok": true,
+            "provider_kind": "claude_oauth",
+            "label": "Claude",
+            "url": "https://claude.ai/settings/usage",
+            "model": active_model,
+        });
+    }
+    if lower_base.contains("api.openai.com")
+        || (lower_prov == "openai" && !lower_base.contains("cheapai.im"))
+    {
+        return json!({
+            "ok": true,
+            "provider_kind": "openai_api",
+            "label": "OpenAI Platform",
+            "url": "https://platform.openai.com/usage",
+            "model": active_model,
+        });
+    }
+    if lower_base.contains("api.anthropic.com")
+        || ((lower_prov == "anthropic" || lower_prov == "claude")
+            && !lower_base.contains("cheapai.im"))
+    {
+        return json!({
+            "ok": true,
+            "provider_kind": "anthropic_api",
+            "label": "Anthropic Console",
+            "url": "https://console.anthropic.com/settings/usage",
+            "model": active_model,
+        });
+    }
+    if lower_base.contains("openrouter.ai") {
+        return json!({
+            "ok": true,
+            "provider_kind": "openrouter",
+            "label": "OpenRouter",
+            "url": "https://openrouter.ai/activity",
+            "model": active_model,
+        });
+    }
+    if lower_base.contains("generativelanguage.googleapis.com") {
+        return json!({
+            "ok": true,
+            "provider_kind": "google_ai",
+            "label": "Google AI Studio",
+            "url": "https://aistudio.google.com/apikey",
+            "model": active_model,
+        });
+    }
+    if lower_base.contains("api.deepseek.com") {
+        return json!({
+            "ok": true,
+            "provider_kind": "deepseek",
+            "label": "DeepSeek",
+            "url": "https://platform.deepseek.com/usage",
+            "model": active_model,
+        });
+    }
+    if lower_base.contains("api.x.ai") {
+        return json!({
+            "ok": true,
+            "provider_kind": "xai",
+            "label": "xAI Console",
+            "url": "https://console.x.ai",
+            "model": active_model,
+        });
+    }
+    if !lower_base.is_empty()
+        && !crate::config::is_public_web_origin(&cfg.base_url)
+        && lower_prov != "cheapai"
+    {
+        return json!({
+            "ok": true,
+            "provider_kind": "local",
+            "label": "Local Model",
+            "url": "",
+            "model": active_model,
+        });
+    }
+
+    let origin = crate::media::resolve_cheapai_web_origin(cfg, None);
+    let url = format!("{}/api/dashboard#usage", origin.trim_end_matches('/'));
+    json!({
+        "ok": true,
+        "provider_kind": "cheapai",
+        "label": "CheapAI",
+        "url": url,
+        "model": active_model,
+    })
 }
 
 pub fn update_config(patch: Value) -> Result<AppConfig> {
@@ -1151,6 +1264,11 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
                 .error_for_status()?.json().await?;
             Ok(json!({ "current_version": env!("CARGO_PKG_VERSION"), "latest_version": release["tag_name"] }))
         }
+        ("GET", "/api/app/usage-dashboard") => {
+            let cfg = get_config();
+            let model_opt = q.get("model").map(|s| s.as_str());
+            Ok(resolve_usage_dashboard_target(&cfg, model_opt))
+        }
         ("GET", "/api/status") | ("GET", "/api/state") => {
             let cfg = get_config();
             let monitors = enumerate_monitors();
@@ -1185,7 +1303,7 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
                     "username": cfg.auth_username,
                     "key_name": cfg.auth_key_name,
                     "auth_source": cfg.auth_source,
-                    "web_origin": cfg.web_origin,
+                    "web_origin": crate::media::resolve_cheapai_web_origin(&cfg, None),
                     "model": cfg.model,
                     "effort": cfg.effort,
                     "skin": cfg.skin,
@@ -1202,6 +1320,7 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
                     "artex_enabled": cfg.artex_enabled,
                     "auto_load_user_rules": cfg.auto_load_user_rules,
                     "github_auto_refresh": cfg.github_auto_refresh,
+                    "onboarding_completed": cfg.onboarding_completed,
                     "models": cfg.models,
                 }
             }))
@@ -1210,6 +1329,7 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
         ("GET", "/api/config") => {
             let cfg = get_config();
             let mut val = public_config_value(&cfg);
+            val["web_origin"] = json!(crate::media::resolve_cheapai_web_origin(&cfg, None));
             let oauth_models = crate::oauth::list_connected_models_for_catalog();
             if !oauth_models.is_empty() {
                 val["models"] = json!(crate::config::merge_models_preserving_composite(
@@ -1252,7 +1372,7 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
                 "username": updated.auth_username,
                 "key_name": updated.auth_key_name,
                 "auth_source": updated.auth_source,
-                "web_origin": updated.web_origin,
+                "web_origin": crate::media::resolve_cheapai_web_origin(&updated, None),
                 "model": updated.model,
                 "effort": updated.effort,
                 "skin": updated.skin,
@@ -1270,6 +1390,7 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
                 "artex_enabled": updated.artex_enabled,
                 "auto_load_user_rules": updated.auto_load_user_rules,
                 "github_auto_refresh": updated.github_auto_refresh,
+                "onboarding_completed": updated.onboarding_completed,
                 "models": crate::config::merge_models_preserving_composite(
                     updated.models,
                     crate::oauth::list_connected_models_for_catalog()
@@ -1319,6 +1440,7 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
                 "artex_enabled": updated.artex_enabled,
                 "auto_load_user_rules": updated.auto_load_user_rules,
                 "github_auto_refresh": updated.github_auto_refresh,
+                "onboarding_completed": updated.onboarding_completed,
                 "models": crate::config::merge_models_preserving_composite(
                     updated.models,
                     crate::oauth::list_connected_models_for_catalog()
@@ -6482,5 +6604,80 @@ mod http_security_tests {
             .await
             .expect("reset-default");
         assert_eq!(reset["github_auto_refresh"], false);
+    }
+
+    #[tokio::test]
+    async fn usage_dashboard_route_branches_by_model_and_sanitizes_loopback_origin() {
+        let mut cfg = AppConfig::default();
+        cfg.web_origin = "http://127.0.0.1:62136".to_string();
+
+        let cheapai_res = resolve_usage_dashboard_target(&cfg, Some("gpt-6.1-sol"));
+        assert_eq!(cheapai_res["provider_kind"], "cheapai");
+        assert_eq!(cheapai_res["url"], "https://cheapai.im/api/dashboard#usage");
+
+        let openai_oauth = resolve_usage_dashboard_target(&cfg, Some("openai-oauth/gpt-5.4"));
+        assert_eq!(openai_oauth["provider_kind"], "openai_oauth");
+        assert_eq!(openai_oauth["url"], "https://chatgpt.com/codex/settings/usage");
+
+        let claude_oauth = resolve_usage_dashboard_target(&cfg, Some("claude-oauth/claude-sonnet-4-6"));
+        assert_eq!(claude_oauth["provider_kind"], "claude_oauth");
+        assert_eq!(claude_oauth["url"], "https://claude.ai/settings/usage");
+
+        let mut openai_cfg = cfg.clone();
+        openai_cfg.provider_name = "openai".to_string();
+        openai_cfg.base_url = "https://api.openai.com/v1".to_string();
+        let openai_api = resolve_usage_dashboard_target(&openai_cfg, Some("gpt-5.4"));
+        assert_eq!(openai_api["provider_kind"], "openai_api");
+        assert_eq!(openai_api["url"], "https://platform.openai.com/usage");
+
+        let mut anthropic_cfg = cfg.clone();
+        anthropic_cfg.provider_name = "anthropic".to_string();
+        anthropic_cfg.base_url = "https://api.anthropic.com/v1".to_string();
+        let anthropic_api = resolve_usage_dashboard_target(&anthropic_cfg, Some("claude-sonnet-4-6"));
+        assert_eq!(anthropic_api["provider_kind"], "anthropic_api");
+        assert_eq!(anthropic_api["url"], "https://console.anthropic.com/settings/usage");
+
+        let mut local_cfg = cfg.clone();
+        local_cfg.provider_name = "ollama".to_string();
+        local_cfg.base_url = "http://127.0.0.1:11434/v1".to_string();
+        let local_res = resolve_usage_dashboard_target(&local_cfg, Some("qwen3-coder"));
+        assert_eq!(local_res["provider_kind"], "local");
+        assert_eq!(local_res["url"], "");
+
+        let route_oauth = route_api("GET", "/api/app/usage-dashboard", "model=claude-oauth%2Fclaude-opus-4-6", json!({}))
+            .await
+            .expect("GET /api/app/usage-dashboard");
+        assert_eq!(route_oauth["ok"], true);
+        assert_eq!(route_oauth["provider_kind"], "claude_oauth");
+        assert_eq!(route_oauth["url"], "https://claude.ai/settings/usage");
+
+        let route_default = route_api("GET", "/api/app/usage-dashboard", "", json!({}))
+            .await
+            .expect("GET /api/app/usage-dashboard default");
+        assert_eq!(route_default["ok"], true);
+        assert!(route_default["url"].as_str().is_some_and(|u| !u.contains("127.0.0.1")));
+    }
+
+    #[tokio::test]
+    async fn api_config_persists_onboarding_completed_and_sanitizes_loopback_web_origin() {
+        let patched = route_api(
+            "POST",
+            "/api/config",
+            "",
+            json!({
+                "onboarding_completed": true,
+                "web_origin": "http://127.0.0.1:62136"
+            }),
+        )
+        .await
+        .expect("POST /api/config");
+        assert_eq!(patched["onboarding_completed"], true);
+        assert_eq!(patched["web_origin"], crate::config::DEFAULT_WEB_ORIGIN);
+
+        let st = route_api("GET", "/api/status", "", json!({}))
+            .await
+            .expect("GET /api/status");
+        assert_eq!(st["config"]["onboarding_completed"], true);
+        assert_eq!(st["config"]["web_origin"], crate::config::DEFAULT_WEB_ORIGIN);
     }
 }

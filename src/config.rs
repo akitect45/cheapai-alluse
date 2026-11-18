@@ -54,6 +54,50 @@ pub fn default_web_origin() -> String {
     DEFAULT_WEB_ORIGIN.to_string()
 }
 
+pub fn is_public_web_origin(origin: &str) -> bool {
+    let trimmed = strip_utf8_bom(origin)
+        .trim()
+        .trim_matches(|c: char| matches!(c, '"' | '\'' | '`'))
+        .trim()
+        .trim_end_matches('/');
+    if trimmed.is_empty() {
+        return false;
+    }
+    let with_scheme = if trimmed.contains("://") {
+        trimmed.to_string()
+    } else {
+        format!("https://{trimmed}")
+    };
+    let Ok(url) = reqwest::Url::parse(&with_scheme) else {
+        return false;
+    };
+    let host = url.host_str().unwrap_or("").trim_matches(['[', ']']);
+    let local = host.is_empty()
+        || host.eq_ignore_ascii_case("localhost")
+        || host == "127.0.0.1"
+        || host == "0.0.0.0"
+        || host == "::1"
+        || host.ends_with(".localhost");
+    !local && matches!(url.scheme(), "http" | "https")
+}
+
+pub fn sanitize_public_web_origin(origin: &str) -> String {
+    let clean = strip_utf8_bom(origin)
+        .trim()
+        .trim_matches(|c: char| matches!(c, '"' | '\'' | '`'))
+        .trim()
+        .trim_end_matches('/');
+    if is_public_web_origin(clean) {
+        if clean.contains("://") {
+            clean.to_string()
+        } else {
+            format!("https://{clean}")
+        }
+    } else {
+        default_web_origin()
+    }
+}
+
 fn default_ai_self_heal_enabled() -> bool {
     DEFAULT_AI_SELF_HEAL_ENABLED
 }
@@ -269,6 +313,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub github_auto_refresh: bool,
     #[serde(default)]
+    pub onboarding_completed: bool,
+    #[serde(default)]
     pub auth_username: String,
     #[serde(default)]
     pub auth_key_name: String,
@@ -354,6 +400,7 @@ impl Default for AppConfig {
             artex_enabled: true,
             auto_load_user_rules: true,
             github_auto_refresh: false,
+            onboarding_completed: false,
             auth_username: String::new(),
             auth_key_name: String::new(),
             auth_source: String::new(),
@@ -936,6 +983,22 @@ impl AppConfig {
         env_api_key: Option<&str>,
     ) -> Self {
         let mut cfg = Self::default();
+        let mut loaded_raw_has_onboarding = false;
+        let mut loaded_from_disk_had_api_key = false;
+
+        let inspect_raw_flags = |raw_str: &str| -> (bool, bool) {
+            if let Ok(v) = serde_json::from_str::<Value>(strip_utf8_bom(raw_str)) {
+                let has_onb = v.get("onboarding_completed").is_some();
+                let had_key = v
+                    .get("api_key")
+                    .and_then(Value::as_str)
+                    .map(clean_bearer_api_key)
+                    .is_some_and(|k| !is_masked_api_key(k));
+                (has_onb, had_key)
+            } else {
+                (false, false)
+            }
+        };
 
         // 1. Load saved local config if present (BOM-safe, with .bak recovery and .corrupt preservation)
         if path.exists() {
@@ -943,12 +1006,18 @@ impl AppConfig {
                 Ok(raw) if !strip_utf8_bom(&raw).trim().is_empty() => {
                     match parse_config_str_bom_safe(&raw) {
                         Ok(saved) => {
+                            let (has_onb, had_key) = inspect_raw_flags(&raw);
+                            loaded_raw_has_onboarding = has_onb;
+                            loaded_from_disk_had_api_key = had_key;
                             cfg = saved;
                         }
                         Err(_) => {
                             let _ = std::fs::copy(path, config_corrupt_path(path));
                             if let Ok(raw_bak) = std::fs::read_to_string(config_backup_path(path)) {
                                 if let Ok(saved_bak) = parse_config_str_bom_safe(&raw_bak) {
+                                    let (has_onb, had_key) = inspect_raw_flags(&raw_bak);
+                                    loaded_raw_has_onboarding = has_onb;
+                                    loaded_from_disk_had_api_key = had_key;
                                     cfg = saved_bak;
                                 }
                             }
@@ -958,6 +1027,9 @@ impl AppConfig {
                 Ok(_) => {
                     if let Ok(raw_bak) = std::fs::read_to_string(config_backup_path(path)) {
                         if let Ok(saved_bak) = parse_config_str_bom_safe(&raw_bak) {
+                            let (has_onb, had_key) = inspect_raw_flags(&raw_bak);
+                            loaded_raw_has_onboarding = has_onb;
+                            loaded_from_disk_had_api_key = had_key;
                             cfg = saved_bak;
                         }
                     }
@@ -966,6 +1038,9 @@ impl AppConfig {
             }
         } else if let Ok(raw_bak) = std::fs::read_to_string(config_backup_path(path)) {
             if let Ok(saved_bak) = parse_config_str_bom_safe(&raw_bak) {
+                let (has_onb, had_key) = inspect_raw_flags(&raw_bak);
+                loaded_raw_has_onboarding = has_onb;
+                loaded_from_disk_had_api_key = had_key;
                 cfg = saved_bak;
             }
         }
@@ -983,6 +1058,10 @@ impl AppConfig {
         // 2. Discover model catalog (and fallback URL/API key when empty) from ~/.config/opencode/opencode.json
         if let Some(ocp) = opencode_path {
             cfg.sync_from_opencode_at(ocp);
+        }
+
+        if !loaded_raw_has_onboarding && loaded_from_disk_had_api_key {
+            cfg.onboarding_completed = true;
         }
 
         cfg.normalize_loaded_fields();
@@ -1087,16 +1166,7 @@ impl AppConfig {
         self.default_video_model =
             normalize_model_id(&self.default_video_model, &self.provider_name).to_string();
 
-        let clean_web_origin = strip_utf8_bom(&self.web_origin)
-            .trim()
-            .trim_matches(|c: char| matches!(c, '"' | '\'' | '`'))
-            .trim()
-            .trim_end_matches('/');
-        if clean_web_origin.is_empty() {
-            self.web_origin = default_web_origin();
-        } else {
-            self.web_origin = clean_web_origin.to_string();
-        }
+        self.web_origin = sanitize_public_web_origin(&self.web_origin);
 
         if let Some(existing_id) = self
             .models
@@ -1194,15 +1264,15 @@ impl AppConfig {
                 .or_else(|| v.get("web_origin"))
                 .and_then(Value::as_str)
                 .map(str::trim)
-                .filter(|s| !s.is_empty())
+                .filter(|s| is_public_web_origin(s))
             {
-                if self.web_origin.trim().is_empty()
+                if !is_public_web_origin(&self.web_origin)
                     || self
                         .web_origin
                         .trim()
                         .eq_ignore_ascii_case(DEFAULT_WEB_ORIGIN)
                 {
-                    self.web_origin = wo.trim_end_matches('/').to_string();
+                    self.web_origin = sanitize_public_web_origin(wo);
                 }
             }
         }
@@ -1215,7 +1285,7 @@ impl AppConfig {
                 }
             }
         }
-        if self.web_origin.trim().is_empty() {
+        if !is_public_web_origin(&self.web_origin) {
             self.web_origin = default_web_origin();
         }
     }
@@ -2828,5 +2898,66 @@ mod credential_security_tests {
         assert!(merged.iter().any(|m| m.provider == "openai-oauth" && m.id == "openai-oauth/gpt-5.4"));
         assert!(merged.iter().any(|m| m.provider == "cheapai" && m.id == "claude-sonnet-4-6"));
         assert!(merged.iter().any(|m| m.provider == "claude-oauth" && m.id == "claude-oauth/claude-sonnet-4-6"));
+    }
+
+    #[test]
+    fn loopback_web_origin_is_sanitized_and_onboarding_migrates_for_existing_keys() {
+        let tmp = std::env::temp_dir().join(format!(
+            "alluse_cfg_onboard_{}_{}",
+            std::process::id(),
+            TMP_FILE_SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::create_dir_all(&tmp);
+        let cfg_path = tmp.join("config.json");
+        let auth_path = tmp.join("auth.json");
+        let oc_path = tmp.join("opencode.json");
+
+        // 1. Clean new install -> onboarding_completed = false, web_origin = https://cheapai.im
+        let clean = AppConfig::load_from_paths(&cfg_path, Some(&auth_path), Some(&oc_path), None);
+        assert!(!clean.onboarding_completed);
+        assert_eq!(clean.web_origin, DEFAULT_WEB_ORIGIN);
+
+        // 2. Existing config.json with api_key and poisoned loopback web_origin -> migrates onboarding_completed = true and heals web_origin
+        std::fs::write(
+            &cfg_path,
+            r#"{
+                "base_url": "https://api.cheapai.im/v1",
+                "api_key": "cai_existing_user_key_123",
+                "provider_name": "cheapai",
+                "web_origin": "http://127.0.0.1:62136"
+            }"#,
+        )
+        .unwrap();
+        let migrated = AppConfig::load_from_paths(&cfg_path, Some(&auth_path), Some(&oc_path), None);
+        assert!(migrated.onboarding_completed);
+        assert_eq!(migrated.web_origin, DEFAULT_WEB_ORIGIN);
+
+        // 3. Explicit onboarding_completed=false is respected even with api_key present
+        std::fs::write(
+            &cfg_path,
+            r#"{
+                "base_url": "https://api.cheapai.im/v1",
+                "api_key": "cai_existing_user_key_123",
+                "provider_name": "cheapai",
+                "web_origin": "https://staging.cheapai.im/",
+                "onboarding_completed": false
+            }"#,
+        )
+        .unwrap();
+        let explicit = AppConfig::load_from_paths(&cfg_path, Some(&auth_path), Some(&oc_path), None);
+        assert!(!explicit.onboarding_completed);
+        assert_eq!(explicit.web_origin, "https://staging.cheapai.im");
+
+        // 4. Loopback auth.json webOrigin is ignored
+        std::fs::write(
+            &auth_path,
+            r#"{"apiKey":"cai_existing_user_key_456","webOrigin":"http://localhost:62136"}"#,
+        )
+        .unwrap();
+        let mut from_auth = AppConfig::default();
+        from_auth.sync_from_cheapai_auth_at(&auth_path, None);
+        assert_eq!(from_auth.web_origin, DEFAULT_WEB_ORIGIN);
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
