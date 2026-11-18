@@ -6168,6 +6168,13 @@
   .cfg-rules-item-right { display:inline-flex; align-items:center; gap:6px; flex-shrink:0; font-size:11px; color:var(--text-muted); font-variant-numeric:tabular-nums; }
   .cfg-rules-state-pill { display:inline-flex; align-items:center; height:17px; padding:0 6px; border-radius:999px; font-size:10.5px; font-weight:600; border:1px solid var(--border); background:var(--bg-canvas); color:var(--text-secondary); }
   .cfg-rules-empty { font-size:12px; color:var(--text-muted); padding:6px 2px; line-height:1.45; }
+  .cfg-skills-name { font-weight:700; color:var(--text); flex-shrink:0; }
+  .cfg-skills-desc { font-size:11.5px; color:var(--text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+  .app-update-ver-row { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--bg-elevated); }
+  .app-update-ver-title { font-size:13.5px; font-weight:700; color:var(--text); font-variant-numeric:tabular-nums; }
+  .app-update-asset-meta { font-size:12px; color:var(--text-secondary); font-family:var(--font-mono); word-break:break-all; }
+  .app-update-notes { max-height:160px; overflow-y:auto; white-space:pre-wrap; margin:0; font-size:12px; line-height:1.5; overscroll-behavior:contain; }
+  .app-update-status { font-size:12px; color:var(--text-secondary); min-height:18px; line-height:1.45; }
   .settings-system-panel .panel-scroll { padding:0; overflow:visible; }
   .settings-system-panel h3 { flex-direction:column; align-items:stretch; flex-wrap:nowrap; gap:8px; }
   .settings-system-panel h3 > .card-title-left { flex:none; width:100%; }
@@ -8740,6 +8747,22 @@
         <div class="cfg-rules-summary" id="cfg-rules-summary-badge">불러오는 중...</div>
         <div class="cfg-rules-list" id="cfg-rules-list"></div>
       </div>
+      <div class="cfg-rules-card" id="cfg-skills-card">
+        <div class="cfg-rules-head">
+          <div class="cfg-rules-title-wrap">
+            <svg class="solar-icon sm"><use href="#solar-layers"/></svg>
+            <span class="cfg-rules-title" id="cfg-skills-title">글로벌 &amp; 워크스페이스 스킬 (SKILL.md)</span>
+          </div>
+          <div class="cfg-rules-controls">
+            <button type="button" class="btn" id="btn-cfg-refresh-skills" style="height:24px; padding:0 8px; font-size:11.5px;" onclick="refreshSkillsStatusUi(true)">
+              <svg class="solar-icon sm"><use href="#solar-refresh"/></svg>
+              <span id="btn-cfg-refresh-skills-label">새로고침</span>
+            </button>
+          </div>
+        </div>
+        <div class="cfg-rules-summary" id="cfg-skills-summary-badge">불러오는 중...</div>
+        <div class="cfg-rules-list" id="cfg-skills-list"></div>
+      </div>
     </section>
     <section id="settings-account" class="settings-section" role="tabpanel" aria-labelledby="settings-tab-account" hidden>
     <!-- CheapAI OAuth & Account Quick Bar -->
@@ -9109,6 +9132,35 @@
       <div class="gh-loading-bar-fill"></div>
     </div>
     <div class="gh-loading-checklist" id="gh-loading-checklist"></div>
+  </div>
+</div>
+
+<!-- App Update Check & Apply Modal -->
+<div class="modal-backdrop" id="app-update-modal" onclick="if(event.target === this) closeAppUpdateModal()">
+  <div class="modal-card" style="width:480px; max-width:94vw; gap:12px;">
+    <div class="modal-hdr">
+      <div class="modal-title">
+        <svg class="solar-icon"><use href="#solar-refresh"/></svg>
+        <span id="app-update-modal-title">새 버전 업데이트</span>
+      </div>
+      <button type="button" class="btn ghost icon-only" onclick="closeAppUpdateModal()" title="닫기">
+        <svg class="solar-icon sm"><use href="#solar-close"/></svg>
+      </button>
+    </div>
+    <div class="app-update-ver-row">
+      <span class="app-update-ver-title" id="app-update-ver-summary">v1.0.5 → v1.0.6</span>
+      <span class="mono-badge" id="app-update-target-badge">win32-x64</span>
+    </div>
+    <div class="app-update-asset-meta" id="app-update-asset-meta"></div>
+    <pre class="code-block app-update-notes" id="app-update-notes"></pre>
+    <div class="app-update-status" id="app-update-status" role="status"></div>
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin-top:2px;">
+      <button type="button" class="btn ghost" id="btn-app-update-release" onclick="openAppUpdateReleasePage()">릴리스 페이지 열기 ↗</button>
+      <div style="display:flex; gap:6px;">
+        <button type="button" class="btn" id="btn-app-update-later" onclick="closeAppUpdateModal()">나중에</button>
+        <button type="button" class="btn primary" id="btn-app-update-apply" onclick="applyAppUpdateFromModal()">지금 다운로드 및 업데이트</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -11836,6 +11888,88 @@ async function setAutoLoadRulesEnabled(enabled) {
     if (input) input.disabled = false;
   }
 }
+
+let lastSkillsStatusPayload = null;
+function renderSkillsStatusUi(payload) {
+  const badgeEl = document.getElementById('cfg-skills-summary-badge');
+  const listEl = document.getElementById('cfg-skills-list');
+  if (!badgeEl || !listEl) return;
+  const isEn = currentUiLang === 'en';
+  const data = payload && typeof payload === 'object' ? payload : null;
+  if (!data) {
+    badgeEl.textContent = isEn ? 'Loading skills status...' : '스킬 상태 확인 중...';
+    listEl.innerHTML = '';
+    return;
+  }
+  const globalList = Array.isArray(data.globalSkills) ? data.globalSkills : [];
+  const wsList = Array.isArray(data.workspaceSkills) ? data.workspaceSkills : [];
+  const totalBytes = Number(data.totalBytes || 0);
+  badgeEl.textContent = isEn
+    ? `${globalList.length} global · ${wsList.length} workspace · ${formatRuleBytesCompact(totalBytes)}`
+    : `글로벌 ${globalList.length}개 · 워크스페이스 ${wsList.length}개 · ${formatRuleBytesCompact(totalBytes)}`;
+
+  const renderSkillRow = (s, scopeFallback) => {
+    const scopeRaw = String(s.scope || scopeFallback || 'workspace').toLowerCase();
+    const scopeTag = scopeRaw === 'user_global' || scopeRaw === 'global'
+      ? 'GLOBAL'
+      : (scopeRaw === 'ancestor' ? 'ANCESTOR' : 'WORKSPACE');
+    const name = String(s.name || 'skill');
+    const desc = String(s.description || '').trim();
+    const fullPath = String(s.path || '');
+    return `
+      <div class="cfg-rules-item" title="${escapeHtml(fullPath)}">
+        <div class="cfg-rules-item-left">
+          <span class="cfg-rules-scope-pill">${escapeHtml(scopeTag)}</span>
+          <span class="cfg-skills-name">${escapeHtml(name)}</span>
+          ${desc ? `<span class="cfg-skills-desc" title="${escapeHtml(desc)}">${escapeHtml(desc)}</span>` : ''}
+        </div>
+        <div class="cfg-rules-item-right">
+          <span>${escapeHtml(formatRuleBytesCompact(s.bytes))}</span>
+        </div>
+      </div>`;
+  };
+
+  const sections = [];
+  sections.push(`<div class="cfg-rules-group-title">${escapeHtml(isEn ? 'Global Skills (user_global)' : '글로벌 스킬 (user_global)')}</div>`);
+  if (globalList.length > 0) {
+    sections.push(globalList.map(s => renderSkillRow(s, 'user_global')).join(''));
+  } else {
+    sections.push(`<div class="cfg-rules-empty">${escapeHtml(isEn ? 'No global skills detected' : '감지된 글로벌 스킬 없음')}</div>`);
+  }
+
+  sections.push(`<div class="cfg-rules-group-title">${escapeHtml(isEn ? 'Project Workspace Skills (ancestor / workspace)' : '프로젝트 워크스페이스 스킬 (ancestor / workspace)')}</div>`);
+  const wsPath = String(data.workspacePath || '').trim();
+  if (!wsPath) {
+    sections.push(`<div class="cfg-rules-empty">${escapeHtml(isEn ? 'No project folder attached — loading global skills only' : '연결된 프로젝트 폴더 없음 — 글로벌 스킬만 적용 중')}</div>`);
+  } else if (wsList.length > 0) {
+    sections.push(`<div class="cfg-rules-empty" style="padding-top:0; padding-bottom:2px; font-family:var(--font-mono);" title="${escapeHtml(wsPath)}">${escapeHtml(wsPath)}</div>`);
+    sections.push(wsList.map(s => renderSkillRow(s, 'workspace')).join(''));
+  } else {
+    sections.push(`<div class="cfg-rules-empty">${escapeHtml(wsPath)} — ${escapeHtml(isEn ? 'No workspace skills detected' : '감지된 워크스페이스 스킬 없음')}</div>`);
+  }
+  listEl.innerHTML = sections.join('');
+}
+
+async function refreshSkillsStatusUi(showToast = false) {
+  const btn = document.getElementById('btn-cfg-refresh-skills');
+  if (btn) btn.disabled = true;
+  try {
+    const tid = typeof currentThreadId === 'string' ? currentThreadId : '';
+    const res = await api(`/api/skills/status?thread_id=${encodeURIComponent(tid)}`, 'GET');
+    if (res && res.ok !== false) {
+      lastSkillsStatusPayload = res;
+      renderSkillsStatusUi(res);
+      if (showToast && typeof showCustomToast === 'function') {
+        showCustomToast(currentUiLang === 'en' ? 'Skills status refreshed' : '스킬 목록을 새로고침했습니다.', 'SKILLS');
+      }
+    }
+  } catch (_) {
+    if (!lastSkillsStatusPayload) renderSkillsStatusUi(null);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 function selectSettingsTab(name) {
   if (!['general', 'account', 'system'].includes(name)) name = 'general';
   document.querySelectorAll('.settings-section').forEach(el => el.hidden = el.id !== 'settings-' + name);
@@ -11876,14 +12010,153 @@ async function showAppVersion() {
   const version = await api('/api/app/version');
   showCustomToast(version?.version ? `AllUse v${version.version} · ${version.os} / ${version.arch}` : '서버 버전을 확인하지 못했습니다.', '서버 버전');
 }
+let lastAppUpdateCheckResult = null;
+let appUpdateApplying = false;
+
+function formatUpdateBytes(bytes) {
+  const n = Number(bytes || 0);
+  if (!Number.isFinite(n) || n <= 0) return '';
+  if (n >= 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + ' MB';
+  if (n >= 1024) return Math.round(n / 1024) + ' KB';
+  return n + ' B';
+}
+
+function openAppUpdateModal(info) {
+  const modal = document.getElementById('app-update-modal');
+  if (!modal || !info) return;
+  lastAppUpdateCheckResult = info;
+  const isEn = currentUiLang === 'en';
+  const cur = String(info.current_version || '').replace(/^v/i, '');
+  const lat = String(info.latest_version || '').replace(/^v/i, '');
+  const verEl = document.getElementById('app-update-ver-summary');
+  const targetEl = document.getElementById('app-update-target-badge');
+  const metaEl = document.getElementById('app-update-asset-meta');
+  const notesEl = document.getElementById('app-update-notes');
+  const statusEl = document.getElementById('app-update-status');
+  const applyBtn = document.getElementById('btn-app-update-apply');
+  const laterBtn = document.getElementById('btn-app-update-later');
+
+  if (verEl) verEl.textContent = `v${cur} → v${lat}`;
+  if (targetEl) targetEl.textContent = String(info.target || [info.target_os, info.target_arch].filter(Boolean).join('-') || 'native');
+
+  const metaParts = [];
+  if (info.asset_name) metaParts.push(String(info.asset_name));
+  const sz = formatUpdateBytes(info.size);
+  if (sz) metaParts.push(sz);
+  if (info.sha256) metaParts.push(`SHA-256 ${String(info.sha256).slice(0, 12)}...`);
+  if (metaEl) metaEl.textContent = metaParts.join(' · ') || (isEn ? 'Release installer package' : '릴리스 설치 패키지');
+
+  if (notesEl) {
+    const rawNotes = String(info.release_notes || '').trim();
+    notesEl.textContent = rawNotes || (isEn ? 'No release notes provided.' : '등록된 릴리스 노트가 없습니다.');
+  }
+  if (statusEl) {
+    statusEl.textContent = info.download_url
+      ? (isEn ? 'Ready to download and verify installer.' : '다운로드 및 SHA-256 검증 후 업데이트를 시작할 수 있습니다.')
+      : (isEn ? 'No direct installer asset matched; open the release page.' : '직접 설치 파일이 매칭되지 않았습니다. 릴리스 페이지에서 내려받으세요.');
+  }
+  if (applyBtn) {
+    applyBtn.disabled = !info.download_url;
+    applyBtn.textContent = translateUiString('지금 다운로드 및 업데이트', currentUiLang);
+  }
+  if (laterBtn) laterBtn.disabled = false;
+  modal.classList.add('open');
+  if (typeof syncUiOverlayCutoutWithHost === 'function') syncUiOverlayCutoutWithHost();
+}
+
+function closeAppUpdateModal() {
+  if (appUpdateApplying) return;
+  const modal = document.getElementById('app-update-modal');
+  if (modal) modal.classList.remove('open');
+  if (typeof syncUiOverlayCutoutWithHost === 'function') syncUiOverlayCutoutWithHost();
+}
+
+function openAppUpdateReleasePage() {
+  const url = String(lastAppUpdateCheckResult?.release_url || 'https://github.com/akitect45/cheapai-alluse/releases/latest').trim();
+  if (typeof openCheapAiExternalUrl === 'function') void openCheapAiExternalUrl(url);
+}
+
+async function applyAppUpdateFromModal() {
+  if (appUpdateApplying || !lastAppUpdateCheckResult) return;
+  const info = lastAppUpdateCheckResult;
+  const isEn = currentUiLang === 'en';
+  const applyBtn = document.getElementById('btn-app-update-apply');
+  const laterBtn = document.getElementById('btn-app-update-later');
+  const statusEl = document.getElementById('app-update-status');
+  if (!info.download_url) {
+    openAppUpdateReleasePage();
+    return;
+  }
+  appUpdateApplying = true;
+  if (applyBtn) {
+    applyBtn.disabled = true;
+    applyBtn.textContent = isEn ? 'Downloading...' : '다운로드 중...';
+  }
+  if (laterBtn) laterBtn.disabled = true;
+  if (statusEl) statusEl.textContent = isEn ? 'Downloading and verifying SHA-256 checksum...' : '설치 파일 다운로드 및 SHA-256 무결성 검증 중...';
+  try {
+    const res = await api('/api/app/apply-update', 'POST', {
+      download_url: info.download_url,
+      sha256: info.sha256 || '',
+      file_name: info.asset_name || '',
+      silent: true
+    });
+    if (!res || res.ok === false || res.error) {
+      throw new Error(res?.error || (isEn ? 'Failed to apply update.' : '업데이트 적용에 실패했습니다.'));
+    }
+    if (res.already_latest) {
+      if (statusEl) statusEl.textContent = isEn ? 'Already on the latest version.' : '이미 최신 버전입니다.';
+      showCustomToast('최신 버전입니다.', '업데이트');
+      return;
+    }
+    if (res.launched) {
+      if (statusEl) {
+        statusEl.textContent = isEn
+          ? 'Installer launched. Follow or wait for the upgrade to finish.'
+          : '인스톨러를 실행했습니다. 안내에 따라 업데이트를 완료하세요.';
+      }
+      showCustomToast('업데이트 설치를 시작했습니다.', '업데이트');
+    } else if (res.downloaded_path) {
+      if (statusEl) {
+        statusEl.textContent = (isEn ? 'Verified download: ' : '검증 완료 저장 경로: ') + res.downloaded_path;
+      }
+    }
+  } catch (err) {
+    const msg = (err && err.message) ? err.message : String(err);
+    if (statusEl) statusEl.textContent = (isEn ? 'Update failed: ' : '업데이트 실패: ') + msg;
+    showCustomToast('업데이트 확인 실패: ' + msg, '업데이트');
+  } finally {
+    appUpdateApplying = false;
+    if (applyBtn) {
+      applyBtn.disabled = !info.download_url;
+      applyBtn.textContent = translateUiString('지금 다운로드 및 업데이트', currentUiLang);
+    }
+    if (laterBtn) laterBtn.disabled = false;
+  }
+}
+
 async function checkAppUpdate() {
   closeAppMenu();
   showCustomToast('최신 릴리스를 확인하고 있습니다.', '업데이트');
   const result = await api('/api/app/check-update');
-  if (!result || result.error) { showCustomToast('업데이트 확인 실패: ' + (result?.error || '서버에 연결할 수 없습니다.'), '업데이트'); return; }
-  const current = String(result.current_version || '').replace(/^v/, '');
-  const latest = String(result.latest_version || '').replace(/^v/, '');
-  showCustomToast(current === latest ? `최신 버전입니다 (v${current}).` : `설치 v${current} · 최신 릴리스 v${latest}`, '업데이트');
+  if (!result || result.ok === false || result.error) {
+    showCustomToast('업데이트 확인 실패: ' + (result?.error || '서버에 연결할 수 없습니다.'), '업데이트');
+    return;
+  }
+  const current = String(result.current_version || '').replace(/^v/i, '');
+  const latest = String(result.latest_version || '').replace(/^v/i, '');
+  const target = String(result.target || '').trim();
+  if (result.update_available) {
+    openAppUpdateModal(result);
+    return;
+  }
+  const suffix = target ? ` · ${target}` : '';
+  showCustomToast(
+    current === latest || !latest
+      ? `최신 버전입니다 (v${current}${suffix}).`
+      : `현재 v${current} · 릴리스 v${latest}${suffix}`,
+    '업데이트'
+  );
 }
 document.addEventListener('pointerdown', event => {
   if (!event.target.closest('#app-menu, #app-menu-trigger')) closeAppMenu();
@@ -11898,6 +12171,8 @@ document.addEventListener('keydown', event => {
     else return;
     if (event.key !== 'Tab') event.preventDefault();
     event.stopImmediatePropagation();
+  } else if (document.getElementById('app-update-modal')?.classList.contains('open')) {
+    if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); closeAppUpdateModal(); }
   } else if (modal.classList.contains('open')) {
     if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); closeApiSettingsModal(); document.getElementById('app-menu-trigger').focus(); }
     if (event.target.closest('.settings-tabs') && ['ArrowLeft','ArrowRight'].includes(event.key)) {
@@ -11927,6 +12202,7 @@ function openApiSettingsModal(section = 'general') {
   if (typeof refreshExternalOAuthUsage === 'function') refreshExternalOAuthUsage(false);
   refreshModelsFromConnectedBaseUrl({ notify: true, useModalInputs: false });
   if (typeof refreshRulesStatusUi === 'function') void refreshRulesStatusUi(false);
+  if (typeof refreshSkillsStatusUi === 'function') void refreshSkillsStatusUi(false);
   if (typeof syncUiOverlayCutoutWithHost === 'function') syncUiOverlayCutoutWithHost();
 }
 
@@ -13449,6 +13725,14 @@ const UI_KO_TO_EN_EXACT = {
   '로컬 모델은 별도 웹 사용량 대시보드가 없습니다.': 'Local models do not have a web usage dashboard.',
   '사용량 대시보드를 열 수 없습니다.': 'Could not open usage dashboard.',
   '자동 룰스 로드 (AGENTS.md · CLAUDE.md · GEMINI.md)': 'Auto-Loaded Rules (AGENTS.md · CLAUDE.md · GEMINI.md)',
+  '글로벌 & 워크스페이스 스킬 (SKILL.md)': 'Global & Workspace Skills (SKILL.md)',
+  '글로벌 &amp; 워크스페이스 스킬 (SKILL.md)': 'Global & Workspace Skills (SKILL.md)',
+  '새 버전 업데이트': 'Software Update Available',
+  '릴리스 페이지 열기 ↗': 'Open Release Page ↗',
+  '지금 다운로드 및 업데이트': 'Download & Update Now',
+  '나중에': 'Later',
+  '최신 버전입니다.': 'You are up to date.',
+  '업데이트 설치를 시작했습니다.': 'Started update installer.',
   '자동 주입': 'Auto Inject',
   '자동 새로고침': 'Auto Refresh',
   'GitHub 계정': 'GitHub Accounts',
@@ -13886,6 +14170,9 @@ async function initApp() {
     if (typeof applyAutoLoadRulesToggle === 'function') {
       applyAutoLoadRulesToggle(st.config.auto_load_user_rules !== false);
       void refreshRulesStatusUi(false);
+    }
+    if (typeof refreshSkillsStatusUi === 'function') {
+      void refreshSkillsStatusUi(false);
     }
     if (typeof applyGithubAutoRefreshState === 'function') {
       applyGithubAutoRefreshState(st.config.github_auto_refresh === true);
@@ -15599,6 +15886,7 @@ async function saveChatProject(pathOrPaths, allowEmpty = true) {
     closeChatProjectPicker(true);
     await loadThreads();
     if (typeof refreshRulesStatusUi === 'function') void refreshRulesStatusUi(false);
+    if (typeof refreshSkillsStatusUi === 'function') void refreshSkillsStatusUi(false);
   } finally {
     chatProjectPicker.saving = false;
     document.querySelectorAll('#chat-project-modal button').forEach(el => el.disabled = false);
@@ -15843,6 +16131,7 @@ async function selectThread(id) {
     rememberExpandedProjects();
   }
   if (typeof refreshRulesStatusUi === 'function') void refreshRulesStatusUi(false);
+  if (typeof refreshSkillsStatusUi === 'function') void refreshSkillsStatusUi(false);
   if (selectedThreadObj && selectedThreadObj.mode) {
     const modeSel = document.getElementById('chat-mode');
     if (modeSel && ['auto', 'crew', 'pentest', 'computer', 'browser'].includes(selectedThreadObj.mode)) {
@@ -24323,6 +24612,7 @@ function syncUiOverlayCutoutWithHost() {
     const lightboxModal = document.getElementById('media-lightbox-modal');
     const delModal = document.getElementById('media-delete-confirm-modal');
     const apiModal = document.getElementById('api-settings-modal');
+    const updateModal = document.getElementById('app-update-modal');
     const rolePop = document.getElementById('img-send-video-popover');
     const selectPop = document.getElementById('custom-select-popover');
     const ctxMenu = document.getElementById('custom-context-menu');
@@ -24337,6 +24627,9 @@ function syncUiOverlayCutoutWithHost() {
       radius = 0;
     } else if (apiModal && apiModal.classList.contains('open')) {
       activeEl = apiModal;
+      radius = 0;
+    } else if (updateModal && updateModal.classList.contains('open')) {
+      activeEl = updateModal;
       radius = 0;
     } else if (rolePop && rolePop.classList.contains('open')) {
       activeEl = rolePop;
