@@ -9004,7 +9004,7 @@
       </button>
 
       <div style="display:flex; justify-content:space-between; align-items:center; padding-top:8px; border-top:1px solid var(--border); margin-top:2px;">
-        <button class="btn ghost" style="font-size:12.5px; height:26px; padding:0 8px;" onclick="openCheapAiExternalUrl('https://cheapai.im/api/dashboard')">CheapAI 대시보드 열기 ↗</button>
+        <button class="btn ghost" style="font-size:12.5px; height:26px; padding:0 8px;" onclick="openCheapAiExternalUrl('https://cheapai.im/api/dashboard#usage')">CheapAI 대시보드 열기 ↗</button>
         <div style="display:flex; gap:6px;">
           <button class="btn ghost" style="font-size:12.5px; height:26px; padding:0 8px;" onclick="closeCheapAiAuthOverlay(); openApiSettingsModal()">
             <svg class="solar-icon sm"><use href="#solar-settings"/></svg>
@@ -11960,8 +11960,11 @@ function updateProviderPillAuthBadge(cfg, auth) {
   const baseUrlEl = document.getElementById('cfg-base-url');
   const explicitWebOrigin = (cfg && (cfg.web_origin || cfg.webOrigin)) || (auth && (auth.webOrigin || auth.web_origin)) || '';
   if (explicitWebOrigin) {
-    window.cheapaiWebOrigin = String(explicitWebOrigin).trim();
-    if (baseUrlEl) baseUrlEl.dataset.webOrigin = window.cheapaiWebOrigin;
+    const cleanOrigin = typeof isPublicWebOriginUrl === 'function' && isPublicWebOriginUrl(explicitWebOrigin)
+      ? String(explicitWebOrigin).trim().replace(/\/+$/, '')
+      : 'https://cheapai.im';
+    window.cheapaiWebOrigin = cleanOrigin;
+    if (baseUrlEl) baseUrlEl.dataset.webOrigin = cleanOrigin;
   }
 
   const prov = (cfg && cfg.provider_name) || 'cheapai';
@@ -13443,6 +13446,8 @@ const UI_KO_TO_EN_EXACT = {
   '새 대화 시작': 'Fresh context',
   '디렉터 맥락 분기': 'Fork director context',
   '사용량 관리': 'Manage Usage',
+  '로컬 모델은 별도 웹 사용량 대시보드가 없습니다.': 'Local models do not have a web usage dashboard.',
+  '사용량 대시보드를 열 수 없습니다.': 'Could not open usage dashboard.',
   '자동 룰스 로드 (AGENTS.md · CLAUDE.md · GEMINI.md)': 'Auto-Loaded Rules (AGENTS.md · CLAUDE.md · GEMINI.md)',
   '자동 주입': 'Auto Inject',
   '자동 새로고침': 'Auto Refresh',
@@ -18222,6 +18227,11 @@ async function saveModelConfig() {
     if (esel) syncCustomSelectTrigger(esel);
   }
   if (typeof renderComposerOAuthUsageUi === 'function') renderComposerOAuthUsageUi();
+  if (typeof renderUsageTip === 'function') renderUsageTip();
+  if (typeof usagePopOpen !== 'undefined' && usagePopOpen && typeof renderUsagePop === 'function') {
+    renderUsagePop();
+    if (typeof placeUsagePop === 'function') placeUsagePop();
+  }
   await api('/api/config', 'POST', { model, effort });
 }
 
@@ -30251,15 +30261,37 @@ function recalcVideoStudioVCreditCost() {
 }
 
 const USAGE_RING_CIRC = 2 * Math.PI * 9.25;
-const USAGE_MANAGE_URL = 'https://cheapai.im/api/dashboard';
+const USAGE_MANAGE_URL = 'https://cheapai.im/api/dashboard#usage';
+function isPublicWebOriginUrl(rawUrl) {
+  const trimmed = String(rawUrl || '').trim().replace(/\/+$/, '');
+  if (!trimmed) return false;
+  try {
+    const u = new URL(trimmed.includes('://') ? trimmed : 'https://' + trimmed);
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return false;
+    const h = u.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    if (!h || h === 'localhost' || h === '127.0.0.1' || h === '0.0.0.0' || h === '::1' || h.endsWith('.localhost')) {
+      return false;
+    }
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+function getActiveChatModelId() {
+  return String(
+    document.getElementById('model-select')?.value ||
+    document.getElementById('cfg-model-id')?.value ||
+    ''
+  ).trim();
+}
 function getCheapAiUsageManageUrl() {
   const rawOrigin = String(
     window.cheapaiWebOrigin ||
     document.getElementById('cfg-base-url')?.dataset?.webOrigin ||
     ''
   ).trim();
-  if (rawOrigin) {
-    return rawOrigin.replace(/\/+$/, '') + '/api/dashboard';
+  if (isPublicWebOriginUrl(rawOrigin)) {
+    return rawOrigin.replace(/\/+$/, '') + '/api/dashboard#usage';
   }
   try {
     const base = String(document.getElementById('cfg-base-url')?.value || '').trim();
@@ -30267,17 +30299,70 @@ function getCheapAiUsageManageUrl() {
       const u = new URL(base);
       const host = u.hostname.toLowerCase();
       if (host === 'api.cheapai.im' || host === 'cheapai.im' || host.endsWith('.cheapai.im')) {
-        return 'https://cheapai.im/api/dashboard';
+        return 'https://cheapai.im/api/dashboard#usage';
       }
-      if (host === '127.0.0.1' || host === 'localhost') {
-        return u.origin + '/api/dashboard';
+      if (isPublicWebOriginUrl(u.origin)) {
+        return u.origin + '/api/dashboard#usage';
       }
     }
   } catch (_) {}
   return USAGE_MANAGE_URL;
 }
-function openCheapAiUsageManage() {
-  return openCheapAiExternalUrl(getCheapAiUsageManageUrl());
+function resolveActiveUsageDashboardFallback(activeModel = getActiveChatModelId()) {
+  const lowerModel = String(activeModel || '').trim().toLowerCase();
+  const lowerBase = String(document.getElementById('cfg-base-url')?.value || '').trim().toLowerCase();
+  const lowerProv = String(document.getElementById('cfg-provider')?.value || '').trim().toLowerCase();
+
+  if (lowerModel.startsWith('openai-oauth/')) {
+    return { provider_kind: 'openai_oauth', label: 'ChatGPT / Codex', url: 'https://chatgpt.com/codex/settings/usage', model: activeModel };
+  }
+  if (lowerModel.startsWith('claude-oauth/')) {
+    return { provider_kind: 'claude_oauth', label: 'Claude', url: 'https://claude.ai/settings/usage', model: activeModel };
+  }
+  if (lowerBase.includes('api.openai.com') || (lowerProv === 'openai' && !lowerBase.includes('cheapai.im'))) {
+    return { provider_kind: 'openai_api', label: 'OpenAI Platform', url: 'https://platform.openai.com/usage', model: activeModel };
+  }
+  if (lowerBase.includes('api.anthropic.com') || ((lowerProv === 'anthropic' || lowerProv === 'claude') && !lowerBase.includes('cheapai.im'))) {
+    return { provider_kind: 'anthropic_api', label: 'Anthropic Console', url: 'https://console.anthropic.com/settings/usage', model: activeModel };
+  }
+  if (lowerBase.includes('openrouter.ai')) {
+    return { provider_kind: 'openrouter', label: 'OpenRouter', url: 'https://openrouter.ai/activity', model: activeModel };
+  }
+  if (lowerBase.includes('generativelanguage.googleapis.com')) {
+    return { provider_kind: 'google_ai', label: 'Google AI Studio', url: 'https://aistudio.google.com/apikey', model: activeModel };
+  }
+  if (lowerBase.includes('api.deepseek.com')) {
+    return { provider_kind: 'deepseek', label: 'DeepSeek', url: 'https://platform.deepseek.com/usage', model: activeModel };
+  }
+  if (lowerBase.includes('api.x.ai')) {
+    return { provider_kind: 'xai', label: 'xAI Console', url: 'https://console.x.ai', model: activeModel };
+  }
+  if (lowerBase && !isPublicWebOriginUrl(lowerBase) && lowerProv !== 'cheapai') {
+    return { provider_kind: 'local', label: 'Local Model', url: '', model: activeModel };
+  }
+  return { provider_kind: 'cheapai', label: 'CheapAI', url: getCheapAiUsageManageUrl(), model: activeModel };
+}
+async function openCheapAiUsageManage() {
+  const activeModel = getActiveChatModelId();
+  let target = null;
+  try {
+    const res = await api(`/api/app/usage-dashboard?model=${encodeURIComponent(activeModel)}`, 'GET');
+    if (res && res.ok !== false && typeof res.provider_kind === 'string') {
+      target = res;
+    }
+  } catch (_) {}
+  if (!target) {
+    target = resolveActiveUsageDashboardFallback(activeModel);
+  }
+  const url = String(target.url || '').trim();
+  if (target.provider_kind === 'local' || !url || !isPublicWebOriginUrl(url)) {
+    if (typeof showCustomToast === 'function') {
+      showCustomToast('로컬 모델은 별도 웹 사용량 대시보드가 없습니다.', 'USAGE');
+    }
+    if (typeof openApiSettingsModal === 'function') openApiSettingsModal('account');
+    return;
+  }
+  return openCheapAiExternalUrl(url);
 }
 let usageSnapshot = { state: 'loading' };
 let usagePopOpen = false;
@@ -30385,10 +30470,28 @@ function renderUsagePop() {
     `</div><span class="usage-pop-value">${escapeHtml(value)}</span></div>`
   );
   let action = 'manage';
+  const activeOAuth = typeof getActiveOAuthProviderFromModel === 'function' ? getActiveOAuthProviderFromModel() : '';
+  const activeOAuthConnected = Boolean(
+    activeOAuth &&
+    typeof externalOAuthState !== 'undefined' &&
+    externalOAuthState.providers &&
+    externalOAuthState.providers[activeOAuth] &&
+    externalOAuthState.providers[activeOAuth].connected
+  );
+  const fallbackTarget = resolveActiveUsageDashboardFallback();
+  const hasNonCheapAiTarget = fallbackTarget && fallbackTarget.provider_kind !== 'cheapai' && fallbackTarget.provider_kind !== 'local' && Boolean(fallbackTarget.url);
   if (snap.state === 'signedOut') {
-    head.textContent = 'CheapAI 계정이 연결되지 않았습니다';
-    rows.push('<div class="usage-pop-note">로그인하면 남은 한도와 크레딧을 여기서 바로 볼 수 있습니다.</div>');
-    action = 'login';
+    if (activeOAuthConnected) {
+      head.textContent = activeOAuth === 'openai' ? '사용량 출처: OpenAI OAuth' : '사용량 출처: Claude OAuth';
+      action = 'manage';
+    } else if (hasNonCheapAiTarget) {
+      head.textContent = `사용량 출처: ${fallbackTarget.label}`;
+      action = 'manage';
+    } else {
+      head.textContent = 'CheapAI 계정이 연결되지 않았습니다';
+      rows.push('<div class="usage-pop-note">로그인하면 남은 한도와 크레딧을 여기서 바로 볼 수 있습니다.</div>');
+      action = 'login';
+    }
   } else if (snap.state === 'failed') {
     head.textContent = '사용량을 불러오지 못했습니다';
     rows.push('<div class="usage-pop-note">네트워크나 로그인 상태를 확인한 뒤 다시 시도해 주세요.</div>');
@@ -33718,6 +33821,11 @@ function ingestExternalOAuthStatus(payload, eventType = '') {
   }
   renderExternalOAuthCards();
   renderComposerOAuthUsageUi();
+  if (typeof renderUsageTip === 'function') renderUsageTip();
+  if (typeof usagePopOpen !== 'undefined' && usagePopOpen && typeof renderUsagePop === 'function') {
+    renderUsagePop();
+    if (typeof placeUsagePop === 'function') placeUsagePop();
+  }
   if (typeof renderUsageTip === 'function') renderUsageTip();
   if (typeof usagePopOpen !== 'undefined' && usagePopOpen && typeof renderUsagePop === 'function') renderUsagePop();
 }
