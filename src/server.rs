@@ -38,6 +38,7 @@ use crate::dpi_win32::enumerate_monitors;
 use crate::vault::VaultIdentity;
 use anyhow::Result;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -576,6 +577,449 @@ pub fn resolve_usage_dashboard_target(cfg: &AppConfig, model_opt: Option<&str>) 
         "url": url,
         "model": active_model,
     })
+}
+
+pub fn host_release_target() -> (&'static str, &'static str, String) {
+    let os = match std::env::consts::OS {
+        "windows" => "win32",
+        "macos" => "darwin",
+        "linux" => "linux",
+        other => other,
+    };
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "x64",
+        "aarch64" => "arm64",
+        other => other,
+    };
+    (os, arch, format!("{os}-{arch}"))
+}
+
+pub fn compare_semver(a: &str, b: &str) -> std::cmp::Ordering {
+    fn parse_parts(raw: &str) -> ([u64; 3], String) {
+        let trimmed = raw.trim().trim_start_matches(['v', 'V']);
+        let no_build = trimmed.split('+').next().unwrap_or("");
+        let (core, pre) = match no_build.split_once('-') {
+            Some((c, p)) => (c, p.to_ascii_lowercase()),
+            None => (no_build, String::new()),
+        };
+        let mut nums = [0u64; 3];
+        for (i, part) in core.split('.').take(3).enumerate() {
+            nums[i] = part.trim().parse::<u64>().unwrap_or(0);
+        }
+        (nums, pre)
+    }
+    let (a_nums, a_pre) = parse_parts(a);
+    let (b_nums, b_pre) = parse_parts(b);
+    match a_nums.cmp(&b_nums) {
+        std::cmp::Ordering::Equal => match (a_pre.is_empty(), b_pre.is_empty()) {
+            (true, true) => std::cmp::Ordering::Equal,
+            (true, false) => std::cmp::Ordering::Greater,
+            (false, true) => std::cmp::Ordering::Less,
+            (false, false) => a_pre.cmp(&b_pre),
+        },
+        ord => ord,
+    }
+}
+
+pub fn is_trusted_update_download_url(raw_url: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(raw_url.trim()) else {
+        return false;
+    };
+    let host = url.host_str().unwrap_or("").to_ascii_lowercase();
+    if std::env::var("ALLUSE_ALLOW_TEST_UPDATE_ORIGIN")
+        .is_ok_and(|v| v.trim() == "1")
+        && url.scheme() == "http"
+        && (host == "127.0.0.1" || host == "localhost")
+    {
+        return true;
+    }
+    url.scheme() == "https"
+        && (host == "github.com"
+            || host.ends_with(".github.com")
+            || host == "githubusercontent.com"
+            || host.ends_with(".githubusercontent.com"))
+}
+
+fn sanitize_update_filename(raw: &str, fallback_ext: &str) -> String {
+    let base = std::path::Path::new(raw.trim())
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .trim();
+    let cleaned: String = base
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if cleaned.is_empty() || cleaned == "." || cleaned == ".." {
+        format!("AllUse-Update{fallback_ext}")
+    } else {
+        cleaned
+    }
+}
+
+async fn fetch_update_manifest_info() -> Result<Value> {
+    const DEFAULT_MANIFEST_URL: &str =
+        "https://github.com/akitect45/cheapai-alluse/releases/latest/download/updates-manifest.json";
+    const DEFAULT_GITHUB_API_URL: &str =
+        "https://api.github.com/repos/akitect45/cheapai-alluse/releases/latest";
+
+    let current_ver = env!("CARGO_PKG_VERSION").trim_start_matches(['v', 'V']);
+    let (target_os, target_arch, target_slug) = host_release_target();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()?;
+    let user_agent = format!("AllUse/{current_ver}");
+
+    let manifest_url = std::env::var("ALLUSE_UPDATE_MANIFEST_URL")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| DEFAULT_MANIFEST_URL.to_string());
+
+    if let Ok(resp) = client
+        .get(&manifest_url)
+        .header("User-Agent", &user_agent)
+        .header("Accept", "application/json")
+        .send()
+        .await
+    {
+        if resp.status().is_success() {
+            if let Ok(manifest) = resp.json::<Value>().await {
+                let latest_raw = manifest
+                    .get("latestVersion")
+                    .or_else(|| manifest.get("version"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .trim();
+                let latest_ver = latest_raw.trim_start_matches(['v', 'V']).to_string();
+                if !latest_ver.is_empty() {
+                    let slot = manifest
+                        .get("files")
+                        .and_then(|f| f.get(target_os))
+                        .and_then(|o| o.get(target_arch));
+                    let download_url = slot
+                        .and_then(|s| s.get("url"))
+                        .and_then(Value::as_str)
+                        .or_else(|| {
+                            slot.is_none()
+                                .then(|| manifest.get("downloadUrl").and_then(Value::as_str))
+                                .flatten()
+                        })
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+                    let sha256 = slot
+                        .and_then(|s| s.get("sha256"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+                    let size = slot.and_then(|s| s.get("size")).and_then(Value::as_u64).unwrap_or(0);
+                    let asset_name = slot
+                        .and_then(|s| s.get("fileName"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+                    let release_notes = manifest
+                        .get("releaseNotes")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+                    let mandatory = manifest
+                        .get("mandatory")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    let update_available =
+                        compare_semver(&latest_ver, current_ver) == std::cmp::Ordering::Greater;
+                    let release_url = format!(
+                        "https://github.com/akitect45/cheapai-alluse/releases/tag/v{latest_ver}"
+                    );
+                    return Ok(json!({
+                        "ok": true,
+                        "source": "manifest",
+                        "current_version": current_ver,
+                        "latest_version": latest_ver,
+                        "update_available": update_available,
+                        "target": target_slug,
+                        "target_os": target_os,
+                        "target_arch": target_arch,
+                        "asset_name": asset_name,
+                        "download_url": download_url,
+                        "sha256": sha256,
+                        "size": size,
+                        "release_url": release_url,
+                        "release_notes": release_notes,
+                        "mandatory": mandatory,
+                    }));
+                }
+            }
+        }
+    }
+
+    let api_url = std::env::var("ALLUSE_UPDATE_GITHUB_API_URL")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| DEFAULT_GITHUB_API_URL.to_string());
+    let release: Value = client
+        .get(&api_url)
+        .header("User-Agent", &user_agent)
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+
+    let latest_ver = release
+        .get("tag_name")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .trim_start_matches(['v', 'V'])
+        .to_string();
+    let release_url = release
+        .get("html_url")
+        .and_then(Value::as_str)
+        .unwrap_or("https://github.com/akitect45/cheapai-alluse/releases/latest")
+        .to_string();
+    let release_notes = release
+        .get("body")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let matched_asset = release
+        .get("assets")
+        .and_then(Value::as_array)
+        .and_then(|arr| {
+            arr.iter().find(|a| {
+                let name = a
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
+                name.contains(&target_slug)
+                    && (name.ends_with(".exe")
+                        || name.ends_with(".dmg")
+                        || name.ends_with(".run"))
+            })
+        });
+    let asset_name = matched_asset
+        .and_then(|a| a.get("name").and_then(Value::as_str))
+        .unwrap_or("")
+        .to_string();
+    let download_url = matched_asset
+        .and_then(|a| a.get("browser_download_url").and_then(Value::as_str))
+        .unwrap_or("")
+        .to_string();
+    let size = matched_asset
+        .and_then(|a| a.get("size").and_then(Value::as_u64))
+        .unwrap_or(0);
+    let update_available =
+        !latest_ver.is_empty() && compare_semver(&latest_ver, current_ver) == std::cmp::Ordering::Greater;
+
+    Ok(json!({
+        "ok": true,
+        "source": "github_api",
+        "current_version": current_ver,
+        "latest_version": latest_ver,
+        "update_available": update_available,
+        "target": target_slug,
+        "target_os": target_os,
+        "target_arch": target_arch,
+        "asset_name": asset_name,
+        "download_url": download_url,
+        "sha256": "",
+        "size": size,
+        "release_url": release_url,
+        "release_notes": release_notes,
+        "mandatory": false,
+    }))
+}
+
+async fn apply_app_update(body: &Value) -> Result<Value> {
+    let dry_run = json_opt_bool(body.get("dry_run")).unwrap_or(false);
+    let silent = json_opt_bool(body.get("silent")).unwrap_or(false);
+    let req_url = body
+        .get("download_url")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let req_sha = body
+        .get("sha256")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let req_name = body
+        .get("file_name")
+        .or_else(|| body.get("asset_name"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+
+    let (download_url, expected_sha, asset_name, latest_version) = if req_url.is_empty() {
+        let info = fetch_update_manifest_info().await?;
+        let update_avail = info
+            .get("update_available")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let dl = info
+            .get("download_url")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if !update_avail {
+            return Ok(json!({
+                "ok": true,
+                "already_latest": true,
+                "current_version": info["current_version"],
+                "latest_version": info["latest_version"],
+                "launched": false,
+            }));
+        }
+        (
+            dl,
+            info.get("sha256")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string(),
+            info.get("asset_name")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string(),
+            info.get("latest_version")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string(),
+        )
+    } else {
+        (req_url, req_sha, req_name, String::new())
+    };
+
+    anyhow::ensure!(
+        !download_url.is_empty() && is_trusted_update_download_url(&download_url),
+        "Untrusted or missing update download URL"
+    );
+
+    let url_tail = reqwest::Url::parse(&download_url)
+        .ok()
+        .and_then(|u| {
+            u.path_segments()
+                .and_then(|mut segs| segs.next_back().map(|s| s.to_string()))
+        })
+        .unwrap_or_default();
+    let fallback_ext = if cfg!(windows) {
+        ".exe"
+    } else if cfg!(target_os = "macos") {
+        ".dmg"
+    } else {
+        ".run"
+    };
+    let safe_name = sanitize_update_filename(
+        if !asset_name.is_empty() {
+            &asset_name
+        } else {
+            &url_tail
+        },
+        fallback_ext,
+    );
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()?;
+    let bytes = client
+        .get(&download_url)
+        .header("User-Agent", format!("AllUse/{}", env!("CARGO_PKG_VERSION")))
+        .send()
+        .await?
+        .error_for_status()?
+        .bytes()
+        .await?;
+
+    anyhow::ensure!(!bytes.is_empty(), "Downloaded update payload is empty");
+
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes);
+    let computed_sha = format!("{:x}", hasher.finalize());
+    let sha_verified = if !expected_sha.is_empty() {
+        anyhow::ensure!(
+            computed_sha.eq_ignore_ascii_case(&expected_sha),
+            "Update SHA-256 verification failed (expected {expected_sha}, got {computed_sha})"
+        );
+        true
+    } else {
+        false
+    };
+
+    let updates_dir = std::env::temp_dir().join("alluse-updates");
+    std::fs::create_dir_all(&updates_dir)?;
+    let dest_path = updates_dir.join(&safe_name);
+    let tmp_path = updates_dir.join(format!("{safe_name}.{}.part", std::process::id()));
+    std::fs::write(&tmp_path, &bytes)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o755));
+    }
+    if std::fs::rename(&tmp_path, &dest_path).is_err() {
+        std::fs::write(&dest_path, &bytes)?;
+        let _ = std::fs::remove_file(&tmp_path);
+    }
+
+    let mut launched = false;
+    if !dry_run {
+        #[cfg(windows)]
+        {
+            if safe_name.to_ascii_lowercase().ends_with(".exe") {
+                let mut cmd = std::process::Command::new(&dest_path);
+                if silent {
+                    cmd.arg("--silent");
+                }
+                cmd.spawn()?;
+                launched = true;
+            }
+        }
+        #[cfg(target_os = "macos")]
+        {
+            std::process::Command::new("open").arg(&dest_path).spawn()?;
+            launched = true;
+        }
+        #[cfg(target_os = "linux")]
+        {
+            if safe_name.to_ascii_lowercase().ends_with(".run") {
+                std::process::Command::new(&dest_path).spawn()?;
+                launched = true;
+            }
+        }
+    }
+
+    Ok(json!({
+        "ok": true,
+        "dry_run": dry_run,
+        "latest_version": latest_version,
+        "file_name": safe_name,
+        "downloaded_path": dest_path.to_string_lossy().to_string(),
+        "bytes": bytes.len(),
+        "sha256": computed_sha,
+        "sha256_verified": sha_verified,
+        "launched": launched,
+    }))
 }
 
 pub fn update_config(patch: Value) -> Result<AppConfig> {
@@ -1256,14 +1700,8 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
             "os": std::env::consts::OS,
             "arch": std::env::consts::ARCH,
         })),
-        ("GET", "/api/app/check-update") => {
-            let release: Value = reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(15)).build()?
-                .get("https://api.github.com/repos/akitect45/cheapai-alluse/releases/latest")
-                .header("User-Agent", "AllUse").send().await?
-                .error_for_status()?.json().await?;
-            Ok(json!({ "current_version": env!("CARGO_PKG_VERSION"), "latest_version": release["tag_name"] }))
-        }
+        ("GET", "/api/app/check-update") => fetch_update_manifest_info().await,
+        ("POST", "/api/app/apply-update") => apply_app_update(&body).await,
         ("GET", "/api/app/usage-dashboard") => {
             let cfg = get_config();
             let model_opt = q.get("model").map(|s| s.as_str());
@@ -6679,5 +7117,144 @@ mod http_security_tests {
             .expect("GET /api/status");
         assert_eq!(st["config"]["onboarding_completed"], true);
         assert_eq!(st["config"]["web_origin"], crate::config::DEFAULT_WEB_ORIGIN);
+    }
+
+    #[tokio::test]
+    async fn app_check_update_reads_manifest_matches_target_and_verifies_apply_update_dry_run() {
+        static UPDATE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = UPDATE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        assert_eq!(compare_semver("1.0.6", "1.0.5"), std::cmp::Ordering::Greater);
+        assert_eq!(compare_semver("v1.0.5", "1.0.5"), std::cmp::Ordering::Equal);
+        assert_eq!(compare_semver("1.0.10", "1.0.9"), std::cmp::Ordering::Greater);
+        assert_eq!(compare_semver("1.0.5-rc.1", "1.0.5"), std::cmp::Ordering::Less);
+
+        assert!(is_trusted_update_download_url(
+            "https://github.com/akitect45/cheapai-alluse/releases/download/v1.0.6/AllUse-Setup-1.0.6-win32-x64.exe"
+        ));
+        assert!(is_trusted_update_download_url(
+            "https://release-assets.githubusercontent.com/some/asset.exe"
+        ));
+        assert!(!is_trusted_update_download_url("https://evil.example.com/setup.exe"));
+        assert!(!is_trusted_update_download_url("http://github.com/setup.exe"));
+
+        let payload_bytes = b"MOCK_ALLUSE_INSTALLER_PAYLOAD_106";
+        let mut h = Sha256::new();
+        h.update(payload_bytes);
+        let payload_sha = format!("{:x}", h.finalize());
+
+        let (target_os, target_arch, target_slug) = host_release_target();
+        let asset_name = format!("AllUse-Setup-9.9.9-{target_slug}.exe");
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let manifest_url = format!("http://127.0.0.1:{port}/updates-manifest.json");
+        let download_url = format!("http://127.0.0.1:{port}/{asset_name}");
+
+        let manifest_json = json!({
+            "productName": "CheapAI AllUse",
+            "latestVersion": "9.9.9",
+            "version": "9.9.9",
+            "releaseNotes": "Bug fixes",
+            "mandatory": false,
+            "files": {
+                target_os: {
+                    target_arch: {
+                        "url": download_url,
+                        "sha256": payload_sha,
+                        "size": payload_bytes.len(),
+                        "fileName": asset_name,
+                    }
+                }
+            }
+        })
+        .to_string();
+
+        let srv = tokio::spawn(async move {
+            for _ in 0..4 {
+                let Ok((mut stream, _)) = listener.accept().await else {
+                    break;
+                };
+                let manifest_clone = manifest_json.clone();
+                let asset_clone = asset_name.clone();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 2048];
+                    let n = stream.read(&mut buf).await.unwrap_or(0);
+                    let req = String::from_utf8_lossy(&buf[..n]);
+                    if req.starts_with("GET /updates-manifest.json") {
+                        let resp = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                            manifest_clone.len(),
+                            manifest_clone
+                        );
+                        let _ = stream.write_all(resp.as_bytes()).await;
+                    } else if req.starts_with(&format!("GET /{asset_clone}")) {
+                        let hdr = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            payload_bytes.len()
+                        );
+                        let _ = stream.write_all(hdr.as_bytes()).await;
+                        let _ = stream.write_all(payload_bytes).await;
+                    } else {
+                        let _ = stream
+                            .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                            .await;
+                    }
+                });
+            }
+        });
+
+        unsafe {
+            std::env::set_var("ALLUSE_UPDATE_MANIFEST_URL", &manifest_url);
+            std::env::set_var("ALLUSE_ALLOW_TEST_UPDATE_ORIGIN", "1");
+        }
+
+        let check_res = route_api("GET", "/api/app/check-update", "", json!({}))
+            .await
+            .expect("GET /api/app/check-update");
+        assert_eq!(check_res["ok"], true);
+        assert_eq!(check_res["source"], "manifest");
+        assert_eq!(check_res["latest_version"], "9.9.9");
+        assert_eq!(check_res["update_available"], true);
+        assert_eq!(check_res["target"], target_slug);
+        assert_eq!(check_res["sha256"], payload_sha);
+        assert_eq!(check_res["download_url"], download_url);
+
+        let dry_res = route_api(
+            "POST",
+            "/api/app/apply-update",
+            "",
+            json!({ "dry_run": true }),
+        )
+        .await
+        .expect("POST /api/app/apply-update dry_run");
+        assert_eq!(dry_res["ok"], true);
+        assert_eq!(dry_res["dry_run"], true);
+        assert_eq!(dry_res["sha256_verified"], true);
+        assert_eq!(dry_res["launched"], false);
+        assert_eq!(dry_res["bytes"], payload_bytes.len());
+        let downloaded_path = dry_res["downloaded_path"].as_str().unwrap();
+        assert!(std::path::Path::new(downloaded_path).is_file());
+        let _ = std::fs::remove_file(downloaded_path);
+
+        // SHA-256 mismatch must fail cleanly
+        let bad_sha = route_api(
+            "POST",
+            "/api/app/apply-update",
+            "",
+            json!({
+                "download_url": download_url,
+                "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+                "dry_run": true
+            }),
+        )
+        .await;
+        assert!(bad_sha.is_err());
+
+        unsafe {
+            std::env::remove_var("ALLUSE_UPDATE_MANIFEST_URL");
+            std::env::remove_var("ALLUSE_ALLOW_TEST_UPDATE_ORIGIN");
+        }
+        srv.abort();
     }
 }
