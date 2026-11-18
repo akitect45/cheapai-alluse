@@ -2333,9 +2333,18 @@ pub fn build_system_prompt(cfg: &AppConfig, mode: &str, thread_id: &str) -> Stri
     } else {
         format!("\n\n{user_rules_block}")
     };
+    let skills_block = crate::skills::render_skills_for_prompt(
+        (!attached_ws.is_empty()).then_some(attached_ws.as_str()),
+        true,
+    );
+    let skills_section = if skills_block.is_empty() {
+        String::new()
+    } else {
+        format!("\n\n{skills_block}")
+    };
 
     format!(
-        r#"You are **AllUse**, a dedicated native cross-platform AI Assistant ({platform_badge}, os=`{os_name}`, arch=`{arch_name}`) with FULL AUTHORITY over this user's personal computer and embedded browser.{user_rules_section}
+        r#"You are **AllUse**, a dedicated native cross-platform AI Assistant ({platform_badge}, os=`{os_name}`, arch=`{arch_name}`) with FULL AUTHORITY over this user's personal computer and embedded browser.{user_rules_section}{skills_section}
 
 ### Hardware & Display Topology on This Computer
 - Host Platform: {platform_badge} (OS: `{os_name}`, Arch: `{arch_name}`, Project Root: `{proj_root}`)
@@ -15672,5 +15681,71 @@ mod config_tool_redaction_tests {
         let _ = crate::db::delete_thread(&t_crew.id);
         let _ = crate::db::delete_thread(&t_fb.id);
         srv_handle.abort();
+    }
+
+    #[test]
+    fn system_prompt_injects_global_and_workspace_skills_with_crew_inheritance() {
+        let tmp = std::env::temp_dir().join(format!(
+            "alluse_prompt_skills_{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let home = tmp.join("home");
+        let ws = tmp.join("projects").join("ws");
+        std::fs::create_dir_all(home.join(".gemini").join("config").join("skills").join("global-skill")).unwrap();
+        std::fs::create_dir_all(ws.join(".alluse").join("skills").join("local-skill")).unwrap();
+        std::fs::write(
+            home.join(".gemini").join("config").join("skills").join("global-skill").join("SKILL.md"),
+            "---\nname: global-skill\ndescription: GLOBAL_SKILL_DESC_XYZ\n---\n# Global\n",
+        ).unwrap();
+        std::fs::write(
+            ws.join(".alluse").join("skills").join("local-skill").join("SKILL.md"),
+            "---\nname: local-skill\ndescription: WORKSPACE_SKILL_DESC_123\n---\n# Local\n",
+        ).unwrap();
+
+        unsafe {
+            std::env::set_var("ALLUSE_GLOBAL_SKILLS_HOME", &home);
+        }
+
+        let cfg = crate::config::AppConfig::default();
+        let t_unattached = crate::db::create_thread("Unattached Skill Chat", "auto", "gpt-6-astra", "low").unwrap();
+        let p_unattached = super::build_system_prompt(&cfg, "auto", &t_unattached.id);
+        assert!(p_unattached.contains("<skills>"));
+        assert!(p_unattached.contains("GLOBAL_SKILL_DESC_XYZ"));
+        assert!(!p_unattached.contains("WORKSPACE_SKILL_DESC_123"));
+
+        let t_root = crate::db::create_thread_with_workspace(
+            "Crew Skill Root",
+            "crew",
+            "gpt-6-astra",
+            "low",
+            ws.to_str().unwrap(),
+        )
+        .unwrap();
+        let (member_rec, _) = crate::crew::add_single_crew_member(
+            &t_root.id,
+            "director",
+            "skill-worker",
+            "worker",
+            "use workspace skills",
+            "",
+            "",
+            "inherit",
+            false,
+            0,
+            None,
+            &cfg,
+            false,
+        )
+        .unwrap();
+        let p_worker = super::build_system_prompt(&cfg, "crew_worker", &member_rec.thread_id);
+        assert!(p_worker.contains("GLOBAL_SKILL_DESC_XYZ"));
+        assert!(p_worker.contains("WORKSPACE_SKILL_DESC_123"));
+
+        let _ = crate::db::delete_thread(&t_unattached.id);
+        let _ = crate::db::delete_thread(&t_root.id);
+        unsafe {
+            std::env::remove_var("ALLUSE_GLOBAL_SKILLS_HOME");
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

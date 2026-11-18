@@ -4631,6 +4631,7 @@ pub fn render_crew_prompt_context(thread_id: &str) -> String {
   3. 작업 완료 후에는 `@검수크루` (또는 `@verifier`)에게 검증을 요청하거나, 이미 검증 크루 역할(`verifier`)이라면 독립적으로 빌드·테스트·파일을 직접 검증한 뒤 `@director`에게 최종 요약 보고(`kind: "verify"` 또는 `"deliverable"`)를 남기세요.
   4. 중간 상태 보고나 단순 진행 공유로 `@director`를 호출하지 마세요. `@director` 호출은 오직 **검증 완료된 최종 산출물 전달** 또는 **복구 불가 오류·사용자 의사결정이 필요한 블로커 발생** 시에만 사용하세요.
   5. 동료 응답이 필요할 때는 `crew_wait`로 대기하세요. 대기 중에는 턴을 즉시 깔끔하게 종료해 토큰 소모 0으로 대기하며, 매칭 포스트 도착 시 자동 기상됩니다 (폴링 루프 금지).
+  6. 상단 `<skills>` 목록에 작업과 일치하는 스킬이 있으면 진행 전 `fs_read_file`로 해당 `SKILL.md`를 먼저 읽고 절차를 따르세요.
 "#,
             m.name,
             m.display_name,

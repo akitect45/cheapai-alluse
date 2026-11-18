@@ -27,6 +27,7 @@ pub mod rules;
 pub mod search;
 pub mod self_heal;
 pub mod server;
+pub mod skills;
 pub mod vault;
 pub mod web_guidance;
 pub mod win32_ffi;

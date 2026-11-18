@@ -2503,6 +2503,27 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
             ))
         }
 
+        ("GET", "/api/skills/status") => {
+            let q_ws = q
+                .get("workspace")
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            let q_tid = q
+                .get("thread_id")
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            let resolved_ws = q_ws.or_else(|| {
+                q_tid
+                    .as_deref()
+                    .map(crate::crew::effective_workspace_for_thread)
+                    .filter(|s| !s.is_empty())
+            });
+            Ok(crate::skills::inspect_skills_status_json(
+                resolved_ws.as_deref(),
+                true,
+            ))
+        }
+
         // ─────────────────────────────────────────────────────────────────────
         // External OAuth (OpenAI ChatGPT/Codex & Anthropic Claude)
         // ─────────────────────────────────────────────────────────────────────
@@ -7256,5 +7277,45 @@ mod http_security_tests {
             std::env::remove_var("ALLUSE_ALLOW_TEST_UPDATE_ORIGIN");
         }
         srv.abort();
+    }
+
+    #[tokio::test]
+    async fn api_skills_status_route_returns_global_and_workspace_skills() {
+        let tmp = std::env::temp_dir().join(format!(
+            "alluse_srv_skills_{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let home = tmp.join("home");
+        let ws = tmp.join("projects").join("business");
+        std::fs::create_dir_all(home.join(".agents").join("skills").join("g-skill")).unwrap();
+        std::fs::create_dir_all(ws.join(".alluse").join("skills").join("w-skill")).unwrap();
+        std::fs::write(
+            home.join(".agents").join("skills").join("g-skill").join("SKILL.md"),
+            "---\nname: g-skill\ndescription: Global test skill\n---\n# G\n",
+        ).unwrap();
+        std::fs::write(
+            ws.join(".alluse").join("skills").join("w-skill").join("SKILL.md"),
+            "---\nname: w-skill\ndescription: Workspace test skill\n---\n# W\n",
+        ).unwrap();
+
+        unsafe {
+            std::env::set_var("ALLUSE_GLOBAL_SKILLS_HOME", &home);
+        }
+
+        let query = format!("workspace={}", urlencoding::encode(ws.to_str().unwrap()));
+        let res = route_api("GET", "/api/skills/status", &query, json!({}))
+            .await
+            .expect("GET /api/skills/status");
+        assert_eq!(res["ok"], true);
+        assert_eq!(res["enabled"], true);
+        assert_eq!(res["globalSkills"].as_array().unwrap().len(), 1);
+        assert_eq!(res["workspaceSkills"].as_array().unwrap().len(), 1);
+        assert_eq!(res["globalSkills"][0]["name"], "g-skill");
+        assert_eq!(res["workspaceSkills"][0]["name"], "w-skill");
+
+        unsafe {
+            std::env::remove_var("ALLUSE_GLOBAL_SKILLS_HOME");
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
