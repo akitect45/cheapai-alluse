@@ -980,6 +980,39 @@ pub fn classify_and_parse_models_payload(
     (chat_models, img_models, vid_models)
 }
 
+async fn request_models_payload(base: &str, key: &str) -> Option<(u16, Option<Value>)> {
+    if base.is_empty() {
+        return None;
+    }
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .ok()?;
+    let mut request = client.get(format!("{}/models", base.trim_end_matches('/')));
+    if !is_masked_api_key(key) {
+        request = request.bearer_auth(key);
+    }
+    let response = request.send().await.ok()?;
+    Some((response.status().as_u16(), response.json().await.ok()))
+}
+
+/// Lists only chat models confirmed by a connected provider's current catalog.
+pub async fn fetch_subagent_models(cfg: &AppConfig) -> Vec<ModelInfo> {
+    let base = normalize_llm_base_url(&cfg.base_url);
+    let (endpoint, oauth_models) = tokio::join!(
+        request_models_payload(&base, cfg.api_key.trim()),
+        crate::oauth::fetch_callable_catalog_models(),
+    );
+    let mut models = Vec::new();
+    if let Some((status, Some(payload))) = endpoint
+        && (200..300).contains(&status)
+    {
+        models = classify_and_parse_models_payload(&payload, &cfg.provider_name).0;
+        models.retain(|m| !crate::config::is_oauth_model_id(&m.id));
+    }
+    crate::config::merge_models_preserving_composite(models, oauth_models)
+}
+
 pub async fn fetch_media_models_catalog_for(
     cfg: &AppConfig,
     base_override: Option<&str>,
@@ -1001,28 +1034,14 @@ pub async fn fetch_media_models_catalog_for(
     let mut endpoint_ok = false;
     let mut http_status: u16 = 0;
 
-    if !base.is_empty() {
-        if let Ok(client) = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(8))
-            .build()
-        {
-            let models_url = format!("{}/models", base.trim_end_matches('/'));
-            let mut req = client.get(&models_url);
-            if !is_masked_api_key(key) {
-                req = req.bearer_auth(key);
-            }
-            if let Ok(resp) = req.send().await {
-                http_status = resp.status().as_u16();
-                endpoint_ok = resp.status().is_success();
-                if let Ok(val) = resp.json::<Value>().await {
-                    let (cm, im, vm) = classify_and_parse_models_payload(&val, &cfg.provider_name);
-                    chat_models = cm;
-                    img_models = im;
-                    vid_models = vm;
-                    if endpoint_ok {
-                        remember_video_model_costs(&vid_models);
-                    }
-                }
+    if let Some((status, payload)) = request_models_payload(&base, key).await {
+        http_status = status;
+        endpoint_ok = (200..300).contains(&status);
+        if let Some(value) = payload {
+            (chat_models, img_models, vid_models) =
+                classify_and_parse_models_payload(&value, &cfg.provider_name);
+            if endpoint_ok {
+                remember_video_model_costs(&vid_models);
             }
         }
     }

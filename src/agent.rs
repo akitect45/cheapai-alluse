@@ -2304,6 +2304,13 @@ pub fn build_system_prompt(cfg: &AppConfig, mode: &str, thread_id: &str) -> Stri
     } else {
         "### Hierarchical Agent Tree & Shared Board Context"
     };
+    let subagent_model_instruction = if is_crew_mode {
+        String::new()
+    } else if cfg.subagent_model.trim().is_empty() {
+        "\n   - If delegation is appropriate and the user allows it, call `subagent_models` first. Choose a model from the returned catalog for each task and pass its exact ID to `subagent_spawn`. When the catalog is empty, proceed directly if possible.".to_string()
+    } else {
+        "\n   - When the user allows delegation, call `subagent_spawn` directly with no model override. AllUse applies the user's saved subagent model and verifies its availability.".to_string()
+    };
     let attached_ws = {
         let ws = crate::crew::effective_workspace_for_thread(thread_id);
         if !ws.is_empty() {
@@ -2430,7 +2437,7 @@ pub fn build_system_prompt(cfg: &AppConfig, mode: &str, thread_id: &str) -> Stri
 {}
 {}
 "#,
-        orchestration_section,
+        format_args!("{orchestration_section}{subagent_model_instruction}"),
         cfg.provider_name,
         cfg.base_url,
         cfg.model,
@@ -3892,6 +3899,14 @@ pub fn tool_definitions() -> Vec<Value> {
         json!({
             "type": "function",
             "function": {
+                "name": "subagent_models",
+                "description": "List the currently callable chat models before choosing a subagent model in Auto mode. Use the exact returned IDs.",
+                "parameters": { "type": "object", "properties": {} }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
                 "name": "subagent_spawn",
                 "description": "Spawn a hierarchical child subagent under the current agent path (`/root/<name>` or `/root/<parent>/<child>`, max depth 3, max 8 active / 24 total per tree) or reuse an existing subagent at the same path. Supports role specialization (`explorer`, `planner`, `worker`, `verifier`, `browser`, `computer`), custom `role_instructions`, `fork_turns` context inheritance, and either synchronous wait (`wait: true`) or parallel background execution (`wait: false` + `subagent_wait` / Parent Auto-Wake).",
                 "parameters": {
@@ -3908,7 +3923,7 @@ pub fn tool_definitions() -> Vec<Value> {
                         "role_instructions": { "type": "string", "description": "Optional custom system instructions appended to the built-in role directive" },
                         "title": { "type": "string", "description": "Optional display title for the subagent thread" },
                         "mode": { "type": "string", "enum": ["auto", "computer", "browser", "allscript"], "description": "Optional execution mode override" },
-                        "model": { "type": "string", "description": "Optional LLM model override" },
+                        "model": { "type": "string", "description": "In Auto mode, use an exact ID returned by subagent_models. Omit when a fixed model is configured." },
                         "effort": { "type": "string", "description": "Optional reasoning effort override ('low', 'medium', 'high', 'xhigh', 'ultra')" },
                         "fork_turns": { "type": "integer", "default": 2, "description": "Number of recent parent user/assistant turns to copy into the child thread as initial context (0 to start clean)" },
                         "reuse_if_exists": { "type": "boolean", "default": true, "description": "Reuse an existing subagent at the same `/root/...` path in this tree if present" },
@@ -5559,6 +5574,23 @@ pub async fn execute_physical_opencode_flow(
 /// Executes a single tool call by name and JSON arguments, returning `(json_result, optional_png_b64)`.
 fn is_artex_tool(name: &str) -> bool {
     name.starts_with("artex_") || name.starts_with("pentest_")
+}
+
+async fn resolve_subagent_model(cfg: &AppConfig, requested: &str) -> Result<String> {
+    let fixed = cfg.subagent_model.trim();
+    let requested = if fixed.is_empty() { requested } else { fixed };
+    let model = crate::config::normalize_model_id(requested, &cfg.provider_name);
+    let models = crate::media::fetch_subagent_models(cfg).await;
+    if models.iter().any(|entry| entry.id == model) {
+        return Ok(model.to_string());
+    }
+    if models.is_empty() {
+        return Err(anyhow!("No callable subagent model is available in the current model catalog"));
+    }
+    if !fixed.is_empty() {
+        return Err(anyhow!("The configured subagent model '{}' is unavailable. Select an available model or Auto in Settings.", model));
+    }
+    Err(anyhow!("Subagent model '{}' is unavailable. Call subagent_models and choose a listed model.", model))
 }
 
 pub async fn execute_tool_call(
@@ -9783,6 +9815,11 @@ async fn execute_tool_call_inner(
             }
         }
 
+        "subagent_models" => {
+            let models = crate::media::fetch_subagent_models(cfg).await;
+            Ok((json!({ "ok": true, "models": models }), None))
+        }
+
         "subagent_spawn" | "spawn_subagent" | "spawn_agent" => {
             let task = args
                 .get("task")
@@ -9828,12 +9865,6 @@ async fn execute_tool_call_inner(
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .trim();
-            let model_override = if model_override_raw.is_empty() {
-                String::new()
-            } else {
-                crate::config::normalize_model_id(model_override_raw, &cfg.provider_name)
-                    .to_string()
-            };
             let effort_override_raw = args
                 .get("effort")
                 .and_then(|v| v.as_str())
@@ -9847,6 +9878,31 @@ async fn execute_tool_call_inner(
             let fork_turns = json_u64(args.get("fork_turns")).unwrap_or(2).min(20) as usize;
             let reuse_if_exists = json_bool(args.get("reuse_if_exists")).unwrap_or(true);
             let wait = json_bool(args.get("wait")).unwrap_or(false);
+
+            let mut reusable = None;
+            if reuse_if_exists
+                && let Some(parent) = crate::db::get_thread_by_id_or_path(thread_id, "self")?
+            {
+                let path = crate::db::normalize_agent_path(
+                    &parent.agent_path, name_or_path, &crate::db::normalize_agent_role(role),
+                );
+                reusable = crate::db::get_thread_by_id_or_path(thread_id, &path)?;
+            }
+            // Reusing an active child sends a message without starting a model call.
+            let model_override = if reusable.as_ref().is_some_and(|child| {
+                get_active_thread_stream(&child.id).is_some()
+                    || matches!(child.agent_status.as_str(), "running" | "waiting")
+            }) {
+                String::new()
+            } else {
+                let requested = if model_override_raw.is_empty() {
+                    reusable.as_ref().map(|child| child.model.as_str())
+                        .filter(|model| !model.is_empty()).unwrap_or(&cfg.model)
+                } else {
+                    model_override_raw
+                };
+                resolve_subagent_model(cfg, requested).await?
+            };
 
             let (mut child_thread, reused) = crate::db::spawn_subagent_thread(
                 thread_id,
@@ -12666,6 +12722,9 @@ pub async fn run_agent_turn_with_attachments(
     }
     let is_crew_worker = crate::crew::is_crew_worker_thread(&thread_id)
         || mode.eq_ignore_ascii_case("crew_worker");
+    if !is_crew_worker && thread_meta.as_ref().is_some_and(|thread| thread.depth > 0) {
+        cfg.model = resolve_subagent_model(&cfg, &cfg.model).await?;
+    }
     let _ = crate::db::update_thread_agent_status(&thread_id, "running");
     if let Some(ref me) = thread_meta && !is_crew_worker {
         emit_event(
@@ -12858,6 +12917,9 @@ pub async fn run_agent_turn_with_attachments(
             && (mode.eq_ignore_ascii_case("crew")
                 || crate::crew::is_crew_mode_enabled(&thread_id));
         let mut tools = tool_definitions();
+        if !cfg.subagent_model.trim().is_empty() {
+            tools.retain(|tool| tool["function"]["name"] != "subagent_models");
+        }
         if !cfg.artex_enabled {
             tools.retain(|tool| !is_artex_tool(tool["function"]["name"].as_str().unwrap_or_default()));
         }
@@ -12873,6 +12935,7 @@ pub async fn run_agent_turn_with_attachments(
                 !matches!(
                     tool["function"]["name"].as_str().unwrap_or_default(),
                     "subagent_spawn"
+                        | "subagent_models"
                         | "subagent_message"
                         | "subagent_wait"
                         | "subagent_control"
@@ -13786,6 +13849,40 @@ mod config_tool_redaction_tests {
     use crate::db::{AllScriptRecord, RoutineItem};
     use crate::vault::VaultIdentity;
     use serde_json::{Value, json};
+
+    #[tokio::test]
+    async fn subagent_model_selection_uses_the_live_catalog_and_honors_fixed_preference() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let bodies = [
+                r#"{"data":[{"id":"verified-model"}]}"#,
+                r#"{"data":[{"id":"verified-model"}]}"#,
+                r#"{"data":[{"id":"verified-model"}]}"#,
+                r#"{"data":[{"id":"new-model"}]}"#,
+            ];
+            for body in bodies {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut request = [0; 2048];
+                let n = stream.read(&mut request).await.unwrap();
+                assert!(request[..n].starts_with(b"GET /v1/models "));
+                let response = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                stream.write_all(response.as_bytes()).await.unwrap();
+            }
+        });
+        let mut cfg = crate::config::AppConfig {
+            base_url: format!("http://{address}/v1"),
+            models: vec![crate::config::ModelInfo { id: "retired-model".into(), ..Default::default() }],
+            ..Default::default()
+        };
+        assert!(super::resolve_subagent_model(&cfg, "retired-model").await.is_err());
+        assert_eq!(super::resolve_subagent_model(&cfg, "verified-model").await.unwrap(), "verified-model");
+        cfg.subagent_model = "verified-model".into();
+        assert_eq!(super::resolve_subagent_model(&cfg, "retired-model").await.unwrap(), "verified-model");
+        assert!(super::resolve_subagent_model(&cfg, "new-model").await.is_err());
+        server.await.unwrap();
+    }
 
     #[tokio::test]
     async fn chat_workspace_routes_file_tools_and_shell_without_global_cwd_changes() {

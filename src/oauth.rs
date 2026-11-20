@@ -568,6 +568,14 @@ async fn post_claude_oauth_json(
 }
 
 pub async fn fetch_connected_catalog_models_with_remote() -> Vec<crate::config::ModelInfo> {
+    fetch_connected_catalog_models(true).await
+}
+
+pub async fn fetch_callable_catalog_models() -> Vec<crate::config::ModelInfo> {
+    fetch_connected_catalog_models(false).await
+}
+
+async fn fetch_connected_catalog_models(include_defaults: bool) -> Vec<crate::config::ModelInfo> {
     let mut out = Vec::new();
     let now = now_unix_secs();
 
@@ -579,7 +587,7 @@ pub async fn fetch_connected_catalog_models_with_remote() -> Vec<crate::config::
             .filter(|(ts, list)| now.saturating_sub(*ts) < MODELS_CACHE_TTL_SECS && !list.is_empty())
             .map(|(_, list)| list.clone());
 
-        if let Some(list) = cached_fresh {
+        if let Some(list) = cached_fresh.filter(|_| include_defaults) {
             out.extend(list);
         } else {
             let mut oa_models = Vec::new();
@@ -657,8 +665,11 @@ pub async fn fetch_connected_catalog_models_with_remote() -> Vec<crate::config::
                     }
                 }
             }
-            if oa_models.is_empty() {
+            if !include_defaults {
+                out.extend(oa_models);
+            } else if oa_models.is_empty() {
                 oa_models = default_model_infos_for(OAuthProvider::Openai);
+                out.extend(oa_models);
             } else {
                 for def in default_model_infos_for(OAuthProvider::Openai) {
                     if seen.insert(def.id.clone()) {
@@ -669,8 +680,8 @@ pub async fn fetch_connected_catalog_models_with_remote() -> Vec<crate::config::
                     .lock()
                     .unwrap()
                     .insert(OAuthProvider::Openai, (now, oa_models.clone()));
+                out.extend(oa_models);
             }
-            out.extend(oa_models);
         }
     }
 
@@ -682,7 +693,7 @@ pub async fn fetch_connected_catalog_models_with_remote() -> Vec<crate::config::
             .filter(|(ts, list)| now.saturating_sub(*ts) < MODELS_CACHE_TTL_SECS && !list.is_empty())
             .map(|(_, list)| list.clone());
 
-        if let Some(list) = cached_fresh {
+        if let Some(list) = cached_fresh.filter(|_| include_defaults) {
             out.extend(list);
         } else {
             let mut cl_models = Vec::new();
@@ -739,16 +750,18 @@ pub async fn fetch_connected_catalog_models_with_remote() -> Vec<crate::config::
                     }
                 }
             }
-            for def in default_model_infos_for(OAuthProvider::Claude) {
-                if seen.insert(def.id.clone()) {
-                    cl_models.push(def);
+            if include_defaults {
+                for def in default_model_infos_for(OAuthProvider::Claude) {
+                    if seen.insert(def.id.clone()) {
+                        cl_models.push(def);
+                    }
                 }
-            }
-            if remote_ok {
-                MODELS_CACHE
-                    .lock()
-                    .unwrap()
-                    .insert(OAuthProvider::Claude, (now, cl_models.clone()));
+                if remote_ok {
+                    MODELS_CACHE
+                        .lock()
+                        .unwrap()
+                        .insert(OAuthProvider::Claude, (now, cl_models.clone()));
+                }
             }
             out.extend(cl_models);
         }

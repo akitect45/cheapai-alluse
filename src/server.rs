@@ -1743,6 +1743,7 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
                     "auth_source": cfg.auth_source,
                     "web_origin": crate::media::resolve_cheapai_web_origin(&cfg, None),
                     "model": cfg.model,
+                    "subagent_model": cfg.subagent_model,
                     "effort": cfg.effort,
                     "skin": cfg.skin,
                     "language": cfg.language,
@@ -1776,6 +1777,12 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
                 ));
             }
             Ok(val)
+        }
+
+        ("GET", "/api/subagents/models") => {
+            let cfg = get_config();
+            let models = crate::media::fetch_subagent_models(&cfg).await;
+            Ok(json!({ "ok": true, "configuredModel": cfg.subagent_model, "models": models }))
         }
 
         ("POST", "/api/config") => {
@@ -1827,6 +1834,7 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
                 "ai_self_heal_enabled": updated.ai_self_heal_enabled,
                 "artex_enabled": updated.artex_enabled,
                 "auto_load_user_rules": updated.auto_load_user_rules,
+                "subagent_model": updated.subagent_model,
                 "github_auto_refresh": updated.github_auto_refresh,
                 "onboarding_completed": updated.onboarding_completed,
                 "models": crate::config::merge_models_preserving_composite(
@@ -1843,6 +1851,7 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
                 "provider_name": if credential_preserved { cfg.provider_name.as_str() } else { DEFAULT_PROVIDER },
                 "base_url": if credential_preserved { cfg.base_url.as_str() } else { DEFAULT_BASE_URL },
                 "model": DEFAULT_MODEL,
+                "subagent_model": "",
                 "effort": DEFAULT_EFFORT,
                 "default_image_model": crate::config::default_image_model(),
                 "default_video_model": crate::config::default_video_model(),
@@ -1877,6 +1886,7 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
                 "ai_self_heal_enabled": updated.ai_self_heal_enabled,
                 "artex_enabled": updated.artex_enabled,
                 "auto_load_user_rules": updated.auto_load_user_rules,
+                "subagent_model": updated.subagent_model,
                 "github_auto_refresh": updated.github_auto_refresh,
                 "onboarding_completed": updated.onboarding_completed,
                 "models": crate::config::merge_models_preserving_composite(

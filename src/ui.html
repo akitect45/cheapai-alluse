@@ -8836,13 +8836,19 @@
       </div>
     </div>
     <div class="field-group">
+      <label class="field-label" id="cfg-subagent-model-label" for="cfg-subagent-model">서브에이전트 모델</label>
+      <select id="cfg-subagent-model" disabled>
+        <option value="">자동</option>
+      </select>
+    </div>
+    <div class="field-group">
       <div class="settings-url-head">
         <span class="field-label">API Base URL (연결된 서버의 /models 에서 모델 목록 자동 동기화)</span>
         <span id="cfg-models-sync-badge" class="mono-badge" style="font-size:12px;">/models 대기 중</span>
       </div>
       <div class="settings-url-row">
         <input id="cfg-base-url" value="https://api.cheapai.im/v1" placeholder="https://api.cheapai.im/v1" style="font-family:var(--font-mono);" />
-        <button class="btn primary" id="btn-cfg-refresh-models" onclick="refreshModelsFromConnectedBaseUrl({ notify: true, useModalInputs: true })">
+        <button class="btn primary" id="btn-cfg-refresh-models" onclick="refreshModelsFromConnectedBaseUrl({ notify: true, useModalInputs: true }); refreshSubagentModelOptions()">
           <svg class="solar-icon sm"><use href="#solar-refresh"/></svg>
           <span>모델 새로고침</span>
         </button>
@@ -12052,6 +12058,7 @@ function selectSettingsTab(name) {
     const active = el.id === 'settings-tab-' + name;
     el.setAttribute('aria-selected', String(active)); el.tabIndex = active ? 0 : -1;
   });
+  if (name === 'account') void refreshSubagentModelOptions();
   if (name === 'system') {
     loadHealPanel();
     const bar = document.querySelector('#panel-heal .sector-bar');
@@ -12849,11 +12856,41 @@ function toggleApiKeyVisibility() {
   }
 }
 
+let subagentModelRefresh = 0;
+
+async function refreshSubagentModelOptions() {
+  const select = document.getElementById('cfg-subagent-model');
+  if (!select) return;
+  const revision = ++subagentModelRefresh;
+  const res = await api('/api/subagents/models');
+  if (revision !== subagentModelRefresh || !res?.ok) return;
+  const isEn = currentUiLang === 'en';
+  document.getElementById('cfg-subagent-model-label').textContent = isEn ? 'Subagent model' : '서브에이전트 모델';
+  const saved = String(res.configuredModel || '');
+  const selected = select.dataset.saved !== undefined && select.value !== select.dataset.saved
+    ? select.value : saved;
+  const options = [new Option(isEn ? 'Auto' : '자동', '')];
+  const models = Array.isArray(res.models) ? res.models : [];
+  models.forEach(model => {
+    if (model.id) options.push(new Option(model.name || model.id, model.id));
+  });
+  if (selected && !options.some(option => option.value === selected)) {
+    const unavailable = new Option(`${selected} (${isEn ? 'Unavailable' : '사용 불가'})`, selected);
+    unavailable.disabled = true;
+    options.push(unavailable);
+  }
+  select.replaceChildren(...options);
+  select.dataset.saved = saved;
+  select.value = selected;
+  select.disabled = false;
+}
+
 async function saveApiSettings() {
   const provider_name = document.getElementById('cfg-provider').value.trim() || 'cheapai';
   const base_url = document.getElementById('cfg-base-url').value.trim() || 'https://api.cheapai.im/v1';
   const api_key = apiKeyForRequest();
   const model = document.getElementById('cfg-model-id').value.trim() || document.getElementById('model-select').value;
+  const subagentModel = document.getElementById('cfg-subagent-model');
   const effort = document.getElementById('effort-select').value;
   const aiSelfHealEl = document.getElementById('cfg-ai-self-heal');
   const ai_self_heal_enabled = aiSelfHealEl ? !!aiSelfHealEl.checked : true;
@@ -12866,6 +12903,7 @@ async function saveApiSettings() {
     base_url,
     api_key,
     model,
+    ...(subagentModel?.dataset.saved !== undefined ? { subagent_model: subagentModel.value } : {}),
     effort,
     ai_self_heal_enabled,
     default_image_model,
@@ -12876,6 +12914,10 @@ async function saveApiSettings() {
   });
   if (res && res.ok) {
     applyPublicApiKeyState(res, true);
+    if (subagentModel && typeof res.subagent_model === 'string') {
+      subagentModel.dataset.saved = res.subagent_model;
+      void refreshSubagentModelOptions();
+    }
     const effModel = res.model || model;
     updateProviderPillAuthBadge(res, null);
     document.getElementById('api-test-status').textContent = `[Saved] ${provider_name} | ${base_url} | chat=${effModel} | img=${res.default_image_model || default_image_model || '(auto)'} | vid=${res.default_video_model || default_video_model || '(auto)'}`;
@@ -12899,6 +12941,11 @@ async function saveApiSettings() {
 async function resetDefaultApiConfig() {
   const res = await api('/api/config/reset-default', 'POST', {});
   if (res && res.ok) {
+    const subagentModel = document.getElementById('cfg-subagent-model');
+    if (subagentModel) {
+      delete subagentModel.dataset.saved;
+      void refreshSubagentModelOptions();
+    }
     const defModel = res.model || '';
     const defEffort = res.effort || 'xhigh';
     document.getElementById('cfg-provider').value = res.provider_name || 'cheapai';
