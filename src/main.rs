@@ -1,4 +1,5 @@
 #![recursion_limit = "512"]
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 //! AllUse — Pure Native Windows 11 ARM64 (`0xAA64`) Personal Computer Use & Embedded Browser Use Engine.
 //!
 //! Architecture:
@@ -2253,13 +2254,97 @@ fn build_cli_doctor_report() -> Value {
     })
 }
 
+/// Returns `true` when `alluse` is invoked in a CLI / headless / verification mode that prints
+/// terminal output and should attach to its parent Windows console if stdio is not redirected.
+/// Default desktop GUI launches return `false` so no console window is ever allocated or attached.
+fn is_cli_console_invocation(args: &[String], web_mode_env: bool) -> bool {
+    if web_mode_env {
+        return true;
+    }
+    if extract_run_asl_target(args).is_some() {
+        return true;
+    }
+    args.iter().skip(1).any(|a| {
+        matches!(
+            a.as_str(),
+            "--help"
+                | "-h"
+                | "--version"
+                | "-V"
+                | "--doctor"
+                | "--verify"
+                | "--heal"
+                | "--opencode-demo"
+                | "--auto-verify-gui"
+                | "--web"
+                | "--server"
+                | "--headless"
+                | "--no-open"
+        )
+    })
+}
+
+#[cfg(windows)]
+fn is_usable_win32_std_handle(handle: crate::win32_ffi::HANDLE) -> bool {
+    let invalid = (-1isize) as crate::win32_ffi::HANDLE;
+    if handle.is_null() || handle == invalid {
+        return false;
+    }
+    unsafe { crate::win32_ffi::GetFileType(handle) != crate::win32_ffi::FILE_TYPE_UNKNOWN }
+}
+
+/// On Windows release builds (`windows_subsystem = "windows"`), GUI launches never spawn a console
+/// window. When invoked from a terminal with CLI flags, attach to the parent console only for
+/// unattached stdio handles while preserving any already-redirected pipe or file handles.
+#[cfg(windows)]
+fn attach_parent_console_if_cli(args: &[String]) {
+    let web_mode_env = std::env::var("ALLUSE_WEB_MODE")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    if !is_cli_console_invocation(args, web_mode_env) {
+        return;
+    }
+    unsafe {
+        let orig_in = crate::win32_ffi::GetStdHandle(crate::win32_ffi::STD_INPUT_HANDLE);
+        let orig_out = crate::win32_ffi::GetStdHandle(crate::win32_ffi::STD_OUTPUT_HANDLE);
+        let orig_err = crate::win32_ffi::GetStdHandle(crate::win32_ffi::STD_ERROR_HANDLE);
+
+        let in_valid = is_usable_win32_std_handle(orig_in);
+        let out_valid = is_usable_win32_std_handle(orig_out);
+        let err_valid = is_usable_win32_std_handle(orig_err);
+
+        if out_valid && err_valid {
+            return;
+        }
+
+        if crate::win32_ffi::AttachConsole(crate::win32_ffi::ATTACH_PARENT_PROCESS) != 0 {
+            if in_valid {
+                let _ =
+                    crate::win32_ffi::SetStdHandle(crate::win32_ffi::STD_INPUT_HANDLE, orig_in);
+            }
+            if out_valid {
+                let _ =
+                    crate::win32_ffi::SetStdHandle(crate::win32_ffi::STD_OUTPUT_HANDLE, orig_out);
+            }
+            if err_valid {
+                let _ =
+                    crate::win32_ffi::SetStdHandle(crate::win32_ffi::STD_ERROR_HANDLE, orig_err);
+            }
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn attach_parent_console_if_cli(_args: &[String]) {}
+
 fn main() -> Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+    attach_parent_console_if_cli(&args);
+
     crate::self_heal::install_panic_and_crash_guard();
     crate::dpi_win32::ensure_process_on_default_desktop();
     crate::dpi_win32::attach_current_thread_to_default_desktop();
     init_per_monitor_dpi_v2();
-
-    let args: Vec<String> = std::env::args().collect();
 
     if args.iter().any(|a| a == "--help" || a == "-h") {
         println!("{}", format_cli_help_text());
@@ -4854,6 +4939,39 @@ mod tests {
         assert_eq!(parse_cdp_coord(Some(&json!("-150.2pt"))), -150);
         assert_eq!(parse_cdp_coord(Some(&json!("NaN"))), 0);
         assert_eq!(parse_cdp_coord(Some(&json!(1e30))), 0);
+    }
+
+    #[test]
+    fn test_cli_console_invocation_detects_cli_and_preserves_gui_default() {
+        assert!(!is_cli_console_invocation(&["alluse.exe".into()], false));
+        assert!(!is_cli_console_invocation(
+            &["alluse.exe".into(), "--unknown-flag".into()],
+            false
+        ));
+        assert!(is_cli_console_invocation(&["alluse.exe".into()], true));
+        for flag in [
+            "--version",
+            "-V",
+            "--help",
+            "-h",
+            "--doctor",
+            "--verify",
+            "--heal",
+            "--opencode-demo",
+            "--auto-verify-gui",
+            "--web",
+            "--server",
+            "--headless",
+            "--no-open",
+            "--run-asl",
+            "--run-asl=latest",
+            "--asl:demo",
+        ] {
+            assert!(
+                is_cli_console_invocation(&["alluse.exe".into(), flag.into()], false),
+                "expected CLI console attachment for flag {flag}"
+            );
+        }
     }
 
     #[test]
