@@ -310,6 +310,8 @@ pub struct AppConfig {
     pub artex_enabled: bool,
     #[serde(default = "default_auto_load_user_rules")]
     pub auto_load_user_rules: bool,
+    /// Canonical paths excluded individually from automatic rule injection.
+    pub disabled_user_rule_paths: Vec<String>,
     /// Empty selects a callable model for each delegated task automatically.
     pub subagent_model: String,
     #[serde(default)]
@@ -401,6 +403,7 @@ impl Default for AppConfig {
             ai_self_heal_enabled: DEFAULT_AI_SELF_HEAL_ENABLED,
             artex_enabled: true,
             auto_load_user_rules: true,
+            disabled_user_rule_paths: Vec::new(),
             subagent_model: String::new(),
             github_auto_refresh: false,
             onboarding_completed: false,

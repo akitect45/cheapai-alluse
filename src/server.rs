@@ -1023,10 +1023,14 @@ async fn apply_app_update(body: &Value) -> Result<Value> {
 }
 
 pub fn update_config(patch: Value) -> Result<AppConfig> {
+    update_config_with(|cfg| config_with_patch(cfg, patch))
+}
+
+fn update_config_with(update: impl FnOnce(&AppConfig) -> Result<AppConfig>) -> Result<AppConfig> {
     let mut cfg = SHARED_CONFIG
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let updated = config_with_patch(&cfg, patch)?;
+    let updated = update(&cfg)?;
     updated.save()?;
     *cfg = updated.clone();
     drop(cfg);
@@ -2510,7 +2514,26 @@ async fn route_api(method: &str, path: &str, query_str: &str, body: Value) -> Re
             Ok(crate::rules::inspect_rules_status_json(
                 resolved_ws.as_deref(),
                 cfg.auto_load_user_rules,
+                &cfg.disabled_user_rule_paths,
             ))
+        }
+
+        ("POST", "/api/rules/selection") => {
+            let path_key = body.get("pathKey").and_then(Value::as_str)
+                .filter(|path| std::path::Path::new(path).is_absolute())
+                .ok_or_else(|| anyhow::anyhow!("A rule pathKey is required"))?;
+            let selected = body.get("selected").and_then(Value::as_bool)
+                .ok_or_else(|| anyhow::anyhow!("A rule selection is required"))?;
+            update_config_with(|cfg| {
+                let mut cfg = cfg.clone();
+                let paths = &mut cfg.disabled_user_rule_paths;
+                paths.retain(|path| path != path_key);
+                if !selected {
+                    paths.push(path_key.to_string());
+                }
+                Ok(cfg)
+            })?;
+            Ok(json!({ "ok": true, "selected": selected }))
         }
 
         ("GET", "/api/skills/status") => {

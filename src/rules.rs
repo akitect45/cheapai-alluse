@@ -22,6 +22,8 @@ pub struct LoadedRuleEntry {
     pub scope: String, // "user_global" | "ancestor" | "workspace"
     pub label: String,
     pub path: String,
+    pub path_key: String,
+    pub selected: bool,
     pub bytes: usize,
     pub inlined: bool,
     pub truncated: bool,
@@ -208,7 +210,12 @@ fn parse_frontmatter(raw: &str) -> (String, String, Option<String>, Vec<String>)
 }
 
 /// Expands single-level markdown `@[label](path)` include references safely.
-fn expand_single_level_includes(body: &str, base_dir: &Path, workspace_dir: Option<&Path>) -> String {
+fn expand_single_level_includes(
+    body: &str,
+    base_dir: &Path,
+    workspace_dir: Option<&Path>,
+    excluded: &HashSet<&str>,
+) -> String {
     let mut out = String::with_capacity(body.len());
     let mut idx = 0;
     let bytes = body.as_bytes();
@@ -242,6 +249,10 @@ fn expand_single_level_includes(body: &str, base_dir: &Path, workspace_dir: Opti
                                 }
                             };
                             if resolved.is_file() {
+                                if excluded.contains(canonical_path_key(&resolved).as_str()) {
+                                    idx = next_idx;
+                                    continue;
+                                }
                                 if let Ok(inc_raw) = std::fs::read_to_string(&resolved) {
                                     let inc_clean = normalize_rule_text(&inc_raw);
                                     if !inc_clean.is_empty() {
@@ -416,7 +427,9 @@ fn collect_workspace_candidates(ws: &Path, home: &Path) -> Vec<CandidateRule> {
     out
 }
 
-pub fn resolve_rules(workspace_opt: Option<&str>, enabled: bool) -> RulesResolution {
+pub fn resolve_rules(
+    workspace_opt: Option<&str>, enabled: bool, disabled_paths: &[String],
+) -> RulesResolution {
     let clean_ws = workspace_opt
         .map(str::trim)
         .filter(|s| !s.is_empty())
@@ -461,6 +474,7 @@ pub fn resolve_rules(workspace_opt: Option<&str>, enabled: bool) -> RulesResolut
     }
 
     let mut seen_paths: HashSet<String> = HashSet::new();
+    let excluded: HashSet<&str> = disabled_paths.iter().map(String::as_str).collect();
     let mut seen_hashes: HashSet<String> = HashSet::new();
     let mut used_budget_bytes: usize = 0;
     let mut global_rules = Vec::new();
@@ -469,7 +483,18 @@ pub fn resolve_rules(workspace_opt: Option<&str>, enabled: bool) -> RulesResolut
 
     for cand in candidates {
         let pkey = canonical_path_key(&cand.path);
-        if !seen_paths.insert(pkey) {
+        if !seen_paths.insert(pkey.clone()) {
+            continue;
+        }
+        let display_path = clean_display_path(&cand.path);
+        let label = cand.preferred_label.unwrap_or_else(|| display_path.clone());
+        let entries = if cand.scope == "user_global" { &mut global_rules } else { &mut workspace_rules };
+        if excluded.contains(pkey.as_str()) {
+            entries.push(LoadedRuleEntry {
+                scope: cand.scope.to_string(), label, path: display_path, path_key: pkey,
+                selected: false, bytes: 0, inlined: false, truncated: false,
+                trigger: String::new(), rendered_body: String::new(),
+            });
             continue;
         }
         let Ok(raw) = std::fs::read_to_string(&cand.path) else {
@@ -490,6 +515,7 @@ pub fn resolve_rules(workspace_opt: Option<&str>, enabled: bool) -> RulesResolut
             &normalize_rule_text(&body_raw),
             cand.path.parent().unwrap_or(&home),
             ws_path_buf.as_deref(),
+            &excluded,
         );
         let normalized_body = normalize_rule_text(&expanded);
         if normalized_body.is_empty() && description.is_empty() {
@@ -504,9 +530,6 @@ pub fn resolve_rules(workspace_opt: Option<&str>, enabled: bool) -> RulesResolut
         if !seen_hashes.insert(sha256_hex(&hash_input)) {
             continue;
         }
-
-        let display_path = clean_display_path(&cand.path);
-        let label = cand.preferred_label.unwrap_or_else(|| display_path.clone());
 
         let (capped_body, truncated) =
             truncate_on_line_boundary(&normalized_body, PER_FILE_RULE_MAX_BYTES, &display_path);
@@ -538,21 +561,18 @@ pub fn resolve_rules(workspace_opt: Option<&str>, enabled: bool) -> RulesResolut
         let bytes = rendered_body.len();
         rendered_tags.push(format!("<RULE[{label}]>\n{rendered_body}\n</RULE[{label}]>"));
 
-        let entry = LoadedRuleEntry {
+        entries.push(LoadedRuleEntry {
             scope: cand.scope.to_string(),
             label,
             path: display_path,
+            path_key: pkey,
+            selected: true,
             bytes,
             inlined,
             truncated: inlined && truncated,
             trigger,
             rendered_body,
-        };
-        if cand.scope == "user_global" {
-            global_rules.push(entry);
-        } else {
-            workspace_rules.push(entry);
-        }
+        });
     }
 
     let prompt_block = if rendered_tags.is_empty() {
@@ -564,7 +584,7 @@ pub fn resolve_rules(workspace_opt: Option<&str>, enabled: bool) -> RulesResolut
         )
     };
 
-    let total_files = global_rules.len() + workspace_rules.len();
+    let total_files = global_rules.iter().chain(&workspace_rules).filter(|rule| rule.selected).count();
     let total_bytes: usize = global_rules
         .iter()
         .chain(workspace_rules.iter())
@@ -585,12 +605,12 @@ pub fn resolve_rules(workspace_opt: Option<&str>, enabled: bool) -> RulesResolut
     }
 }
 
-pub fn render_user_rules_for_prompt(workspace_opt: Option<&str>, enabled: bool) -> String {
-    resolve_rules(workspace_opt, enabled).prompt_block
+pub fn render_user_rules_for_prompt(workspace_opt: Option<&str>, enabled: bool, disabled_paths: &[String]) -> String {
+    resolve_rules(workspace_opt, enabled, disabled_paths).prompt_block
 }
 
-pub fn inspect_rules_status_json(workspace_opt: Option<&str>, enabled: bool) -> Value {
-    let res = resolve_rules(workspace_opt, enabled);
+pub fn inspect_rules_status_json(workspace_opt: Option<&str>, enabled: bool, disabled_paths: &[String]) -> Value {
+    let res = resolve_rules(workspace_opt, enabled, disabled_paths);
     json!({
         "ok": true,
         "enabled": res.enabled,
@@ -649,7 +669,7 @@ mod tests {
         }
 
         // 1. Unattached chat -> global rules only
-        let unattached = resolve_rules(None, true);
+        let unattached = resolve_rules(None, true, &[]);
         assert_eq!(unattached.workspace_path, "");
         assert_eq!(unattached.global_rules.len(), 4);
         assert!(unattached.workspace_rules.is_empty());
@@ -659,7 +679,7 @@ mod tests {
         assert!(!unattached.prompt_block.contains("ANCESTOR PROJECTS RULE"));
 
         // 2. Attached c:\projects\business -> ancestor -> workspace order + progressive disclosure
-        let attached = resolve_rules(Some(business.to_str().unwrap()), true);
+        let attached = resolve_rules(Some(business.to_str().unwrap()), true, &[]);
         assert_eq!(attached.global_rules.len(), 4);
         assert_eq!(attached.workspace_rules.len(), 6);
         assert_eq!(attached.workspace_rules[0].scope, "ancestor");
@@ -673,8 +693,17 @@ mod tests {
         assert!(attached.prompt_block.contains("Only for special deploys"));
         assert!(!attached.prompt_block.contains("HIDDEN BODY"));
 
-        // 3. Disabled toggle returns empty prompt_block
-        let disabled = resolve_rules(Some(business.to_str().unwrap()), false);
+        // A deselected rule stays in the inspector and is excluded even from includes.
+        let gemini = home.join(".gemini").join("GEMINI.md");
+        std::fs::write(business.join("AGENTS.md"), format!("WORKSPACE BUSINESS AGENTS\n@[Gemini]({})", gemini.display())).unwrap();
+        let filtered = resolve_rules(Some(business.to_str().unwrap()), true, &[canonical_path_key(&gemini)]);
+        assert_eq!(filtered.total_files, attached.total_files - 1);
+        assert!(filtered.global_rules.iter().any(|rule| rule.path_key == canonical_path_key(&gemini) && !rule.selected));
+        assert!(!filtered.prompt_block.contains("GLOBAL GEMINI RULE"));
+        assert!(filtered.prompt_block.contains("GLOBAL CLAUDE RULE"));
+
+        // The master toggle still disables the whole prompt block.
+        let disabled = resolve_rules(Some(business.to_str().unwrap()), false, &[]);
         assert!(!disabled.enabled);
         assert!(disabled.prompt_block.is_empty());
 
@@ -711,7 +740,7 @@ mod tests {
         unsafe {
             std::env::set_var("ALLUSE_GLOBAL_RULES_HOME", &home);
         }
-        let res = resolve_rules(Some(ws.to_str().unwrap()), true);
+        let res = resolve_rules(Some(ws.to_str().unwrap()), true, &[]);
         assert!(res.global_rules[0].truncated);
         assert!(res.global_rules[0].bytes <= PER_FILE_RULE_MAX_BYTES);
         assert!(res.total_bytes <= TOTAL_RULES_BUDGET_BYTES + 2_048);

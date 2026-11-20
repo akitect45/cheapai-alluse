@@ -2334,6 +2334,7 @@ pub fn build_system_prompt(cfg: &AppConfig, mode: &str, thread_id: &str) -> Stri
     let user_rules_block = crate::rules::render_user_rules_for_prompt(
         (!attached_ws.is_empty()).then_some(attached_ws.as_str()),
         cfg.auto_load_user_rules,
+        &cfg.disabled_user_rule_paths,
     );
     let user_rules_section = if user_rules_block.is_empty() {
         String::new()

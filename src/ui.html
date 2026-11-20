@@ -6163,6 +6163,9 @@
   .cfg-rules-group-title { font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.04em; margin-top:2px; }
   .cfg-rules-item { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 8px; border-radius:7px; border:1px solid var(--border-subtle); background:var(--bg-input); font-size:11.5px; min-width:0; }
   .cfg-rules-item-left { display:flex; align-items:center; gap:7px; min-width:0; flex:1; }
+  .cfg-rule-choice { display:flex; align-items:center; gap:7px; min-width:0; min-height:28px; cursor:pointer; }
+  .cfg-rule-choice input { margin:0; flex-shrink:0; }
+  .cfg-rule-choice input:focus-visible { outline:2px solid var(--text); outline-offset:2px; }
   .cfg-rules-scope-pill { display:inline-flex; align-items:center; height:17px; padding:0 6px; border-radius:999px; font-family:var(--font-mono); font-size:10px; font-weight:700; background:var(--bg-hover); border:1px solid var(--border); color:var(--text-secondary); flex-shrink:0; }
   .cfg-rules-path { font-family:var(--font-mono); font-size:11.5px; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .cfg-rules-item-right { display:inline-flex; align-items:center; gap:6px; flex-shrink:0; font-size:11px; color:var(--text-muted); font-variant-numeric:tabular-nums; }
@@ -8759,7 +8762,7 @@
           </div>
         </div>
         <div class="cfg-rules-summary" id="cfg-rules-summary-badge">불러오는 중...</div>
-        <div class="cfg-rules-list" id="cfg-rules-list"></div>
+        <div class="cfg-rules-list" id="cfg-rules-list" onchange="setRuleSelection(this, event)"></div>
       </div>
       <div class="cfg-rules-card" id="cfg-skills-card">
         <div class="cfg-rules-head">
@@ -11878,6 +11881,8 @@ function renderRulesStatusUi(payload) {
 
   const globalList = Array.isArray(data.globalRules) ? data.globalRules : [];
   const wsList = Array.isArray(data.workspaceRules) ? data.workspaceRules : [];
+  const globalSelected = globalList.filter(rule => rule.selected !== false).length;
+  const workspaceSelected = wsList.filter(rule => rule.selected !== false).length;
   const estTok = Number(data.estimatedTokens || 0);
   const budgetTok = Number(data.budgetTokens || 20000);
 
@@ -11885,8 +11890,8 @@ function renderRulesStatusUi(payload) {
     badgeEl.textContent = isEn ? 'Disabled' : '비활성화됨';
   } else {
     badgeEl.textContent = isEn
-      ? `${globalList.length} global · ${wsList.length} workspace · ~${estTok.toLocaleString()} / ${budgetTok.toLocaleString()} tok`
-      : `글로벌 ${globalList.length}개 · 워크스페이스 ${wsList.length}개 · 약 ${estTok.toLocaleString()} / ${budgetTok.toLocaleString()} tok`;
+      ? `${globalSelected}/${globalList.length} global · ${workspaceSelected}/${wsList.length} workspace · ~${estTok.toLocaleString()} / ${budgetTok.toLocaleString()} tok`
+      : `글로벌 ${globalSelected}/${globalList.length}개 · 워크스페이스 ${workspaceSelected}/${wsList.length}개 · 약 ${estTok.toLocaleString()} / ${budgetTok.toLocaleString()} tok`;
   }
 
   const renderRuleRow = (r, scopeFallback) => {
@@ -11895,18 +11900,20 @@ function renderRulesStatusUi(payload) {
       ? 'GLOBAL'
       : (scopeRaw === 'ancestor' ? 'ANCESTOR' : 'WORKSPACE');
     const fullPath = String(r.path || r.label || '');
+    const selected = r.selected !== false;
     const inlined = r.inlined !== false;
-    const statusTxt = inlined
+    const statusTxt = !selected ? (isEn ? 'Excluded' : '제외됨') : inlined
       ? (r.truncated ? (isEn ? 'Trimmed' : '일부 절단') : (isEn ? 'Applied' : '적용됨'))
       : (isEn ? 'Pointer' : '포인터');
     return `
       <div class="cfg-rules-item">
-        <div class="cfg-rules-item-left">
+        <label class="cfg-rules-item-left cfg-rule-choice">
+          <input type="checkbox" data-rule-path-key="${escapeHtml(r.pathKey || '')}" ${selected ? 'checked' : ''} ${r.pathKey ? '' : 'disabled'} />
           <span class="cfg-rules-scope-pill">${escapeHtml(scopeTag)}</span>
           <span class="cfg-rules-path" title="${escapeHtml(fullPath)}">${escapeHtml(fullPath)}</span>
-        </div>
+        </label>
         <div class="cfg-rules-item-right">
-          <span>${escapeHtml(formatRuleBytesCompact(r.bytes))}</span>
+          ${selected ? `<span>${escapeHtml(formatRuleBytesCompact(r.bytes))}</span>` : ''}
           <span class="cfg-rules-state-pill">${escapeHtml(statusTxt)}</span>
         </div>
       </div>`;
@@ -11933,12 +11940,16 @@ function renderRulesStatusUi(payload) {
   listEl.innerHTML = sections.join('');
 }
 
+let rulesStatusRevision = 0;
+
 async function refreshRulesStatusUi(showToast = false) {
+  const revision = ++rulesStatusRevision;
   const btn = document.getElementById('btn-cfg-refresh-rules');
   if (btn) btn.disabled = true;
   try {
     const tid = typeof currentThreadId === 'string' ? currentThreadId : '';
     const res = await api(`/api/rules/status?thread_id=${encodeURIComponent(tid)}`, 'GET');
+    if (revision !== rulesStatusRevision) return;
     if (res && res.ok !== false) {
       lastRulesStatusPayload = res;
       if (typeof res.enabled === 'boolean') applyAutoLoadRulesToggle(res.enabled);
@@ -11948,9 +11959,27 @@ async function refreshRulesStatusUi(showToast = false) {
       }
     }
   } catch (_) {
-    if (!lastRulesStatusPayload) renderRulesStatusUi(null);
+    if (revision === rulesStatusRevision && !lastRulesStatusPayload) renderRulesStatusUi(null);
   } finally {
-    if (btn) btn.disabled = false;
+    if (btn && revision === rulesStatusRevision) btn.disabled = false;
+  }
+}
+
+async function setRuleSelection(list, event) {
+  const input = event.target;
+  const pathKey = input.dataset.rulePathKey;
+  if (!pathKey || !list.contains(input)) return;
+  const selected = input.checked;
+  input.disabled = true;
+  try {
+    const result = await api('/api/rules/selection', 'POST', { pathKey, selected });
+    if (!result?.ok) throw new Error(result?.error || (currentUiLang === 'en' ? 'Could not save rule selection.' : '룰 선택을 저장하지 못했습니다.'));
+    await refreshRulesStatusUi(false);
+  } catch (error) {
+    input.checked = !selected;
+    showCustomToast(error.message, 'RULES');
+  } finally {
+    input.disabled = false;
   }
 }
 
