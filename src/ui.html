@@ -18039,7 +18039,8 @@ function handleChatMarkdownLinkClick(ev, url) {
     return false;
   }
   if (/^https?:\/\//i.test(cleanUrl)) {
-    api('/api/browser/action', 'POST', { action: 'navigate', url: cleanUrl }).then(() => {
+    const sid = typeof getActiveBrowserSessionId === 'function' ? getActiveBrowserSessionId() : currentThreadId;
+    (typeof ensureBrowserSplitOpenForUser === 'function' ? ensureBrowserSplitOpenForUser(sid) : Promise.resolve()).then(() => api('/api/browser/action', 'POST', { action: 'navigate', session_id: sid, url: cleanUrl })).then(() => {
       refreshBrowserBarState();
     }).catch(() => {});
     const stLine = document.getElementById('status-line');
@@ -19570,6 +19571,31 @@ async function refreshBrowserBarState() {
   const sid = getActiveBrowserSessionId();
   const st = await api('/api/browser/state?session_id=' + encodeURIComponent(sid));
   renderBrowserBar(st);
+}
+
+async function ensureBrowserSplitOpenForUser(sessionId = null) {
+  const sid = sessionId || getActiveBrowserSessionId();
+  if (typeof currentSplitOpen !== 'undefined' && currentSplitOpen) {
+    return;
+  }
+  if (typeof isStudioPanelMounted === 'function' && isStudioPanelMounted()) {
+    const tab = typeof getCurrentWorkspaceTab === 'function' ? getCurrentWorkspaceTab() : null;
+    if (tab) {
+      tab.split_mode = '1';
+      tab.slots[0] = 'chat';
+      workspaceState.focused_slot = 0;
+      tab.focused_slot = 0;
+      applyCurrentWorkspaceTabLayout(false);
+      renderWorkspaceTabsBar();
+      persistWorkspaceStateDebounced();
+    }
+  }
+  const res = await api('/api/browser/action', 'POST', {
+    action: 'set_split',
+    session_id: sid,
+    open: true
+  });
+  renderBrowserBar(res);
 }
 
 async function toggleBrowserSplit() {
@@ -21337,7 +21363,9 @@ async function executeCustomWidget(idx) {
   const w = normalizeClientWidgetSpec(rawW);
   const kind = String(w.action_kind || 'prompt').trim().toLowerCase();
   if (kind === 'url' || kind === 'open_url' || kind === 'navigate' || kind === 'web' || kind === 'browser') {
-    await api('/api/browser/action', 'POST', { action: 'navigate', url: w.payload });
+    const sid = typeof getActiveBrowserSessionId === 'function' ? getActiveBrowserSessionId() : currentThreadId;
+    if (typeof ensureBrowserSplitOpenForUser === 'function') await ensureBrowserSplitOpenForUser(sid);
+    await api('/api/browser/action', 'POST', { action: 'navigate', session_id: sid, url: w.payload });
     await refreshBrowserBarState();
   } else if (kind === 'allscript' || kind === 'asl' || kind === 'script') {
     const stLine = document.getElementById('status-line');
@@ -31424,7 +31452,7 @@ function openVPassRechargeInBrowser() {
   if (typeof navigateBrowserTab === 'function') {
     if (typeof toggleBrowserSplit === 'function') {
       const shell = document.getElementById('left-split-shell');
-      if (shell && !shell.classList.contains('browser-open')) toggleBrowserSplit();
+      if (typeof ensureBrowserSplitOpenForUser === 'function') { void ensureBrowserSplitOpenForUser(); } else if (shell && !shell.classList.contains('browser-open')) { toggleBrowserSplit(); }
     }
     navigateBrowserTab(url);
   } else {
