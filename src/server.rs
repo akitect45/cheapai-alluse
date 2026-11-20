@@ -987,9 +987,11 @@ async fn apply_app_update(body: &Value) -> Result<Value> {
         #[cfg(windows)]
         {
             if safe_name.to_ascii_lowercase().ends_with(".exe") {
+                use std::os::windows::process::CommandExt;
                 let mut cmd = std::process::Command::new(&dest_path);
                 if silent {
                     cmd.arg("--silent");
+                    cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
                 }
                 cmd.spawn()?;
                 launched = true;

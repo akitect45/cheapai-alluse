@@ -143,6 +143,13 @@ pub const TokenIntegrityLevel: u32 = 25;
 // DPAPI
 pub const CRYPTPROTECT_UI_FORBIDDEN: DWORD = 0x1;
 
+// Console / Standard Handles (Windows GUI subsystem CLI attachment)
+pub const ATTACH_PARENT_PROCESS: DWORD = 0xFFFF_FFFF;
+pub const STD_INPUT_HANDLE: DWORD = (-10i32) as DWORD;
+pub const STD_OUTPUT_HANDLE: DWORD = (-11i32) as DWORD;
+pub const STD_ERROR_HANDLE: DWORD = (-12i32) as DWORD;
+pub const FILE_TYPE_UNKNOWN: DWORD = 0x0000;
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct POINT {
@@ -540,6 +547,9 @@ unsafe extern "system" {
     pub fn WaitForSingleObject(hHandle: HANDLE, dwMilliseconds: DWORD) -> DWORD;
     pub fn GetExitCodeProcess(hProcess: HANDLE, lpExitCode: *mut DWORD) -> BOOL;
     pub fn GetStdHandle(nStdHandle: DWORD) -> HANDLE;
+    pub fn SetStdHandle(nStdHandle: DWORD, hHandle: HANDLE) -> BOOL;
+    pub fn GetFileType(hFile: HANDLE) -> DWORD;
+    pub fn AttachConsole(dwProcessId: DWORD) -> BOOL;
     pub fn GlobalMemoryStatusEx(lpBuffer: *mut MEMORYSTATUSEX) -> BOOL;
     pub fn GetDiskFreeSpaceExW(
         lpDirectoryName: *const u16,
