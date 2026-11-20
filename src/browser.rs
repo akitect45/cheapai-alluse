@@ -2450,13 +2450,6 @@ pub(crate) fn prepare_js_rpc_body(js_body: &str) -> String {
     trimmed.to_string()
 }
 
-pub(crate) async fn ensure_browser_split_open() {
-    if !get_cached_browser_state().split_open {
-        let _ = browser_set_split(true, None).await;
-        tokio::time::sleep(Duration::from_millis(80)).await;
-    }
-}
-
 fn extract_string_arg_and_rest(call_tail: &str) -> Option<(String, &str)> {
     let trimmed = call_tail.trim_start();
     let quote = trimmed.chars().next()?;
@@ -3819,7 +3812,6 @@ pub async fn browser_new_tab(url: &str) -> Result<Value> {
     {
         check_ssrf_url(&target)?;
     }
-    let _ = browser_set_split(true, None).await;
     let session_id = current_browser_session_id();
     let res = send_gui_request(
         |reply| BrowserGuiRequest::NewTab {
@@ -3867,7 +3859,6 @@ pub async fn browser_new_tab(url: &str) -> Result<Value> {
 
 pub async fn browser_switch_tab(tab_id: &str) -> Result<Value> {
     check_takeover_allowed()?;
-    ensure_browser_split_open().await;
     let norm_tid = normalize_tab_id(tab_id);
     let session_id = current_browser_session_id();
     let res = send_gui_request(
@@ -4094,8 +4085,6 @@ pub async fn browser_navigate(url: &str, wait_ms: u64) -> Result<Value> {
     {
         check_ssrf_url(&target)?;
     }
-    // Ensure the embedded browser split pane is visible when navigating
-    let _ = browser_set_split(true, None).await;
     let session_id = current_browser_session_id();
     let nav_res = send_gui_request(
         |reply| BrowserGuiRequest::Navigate {
@@ -4140,7 +4129,6 @@ pub async fn browser_navigate(url: &str, wait_ms: u64) -> Result<Value> {
 
 pub async fn browser_history_nav(direction: &str) -> Result<Value> {
     check_takeover_allowed()?;
-    ensure_browser_split_open().await;
     let norm_dir = match direction.trim().to_ascii_lowercase().as_str() {
         "refresh" | "reload" => "reload",
         "forward" | "next" | "goforward" => "forward",
@@ -4173,7 +4161,6 @@ pub async fn browser_history_nav(direction: &str) -> Result<Value> {
 }
 
 pub async fn browser_snapshot(include_offscreen: bool, annotate_som: bool) -> Result<Value> {
-    ensure_browser_split_open().await;
     let js = format!(
         "return window.__ALLUSE__.snapshot({{ includeOffscreen: {}, annotateSoM: {} }});",
         include_offscreen, annotate_som
@@ -4510,7 +4497,6 @@ pub fn search_body_text_unicode_safe(
 /// Evaluates `window.__ALLUSE__.extractSchema(schema)` (with inline fallback) to extract structured
 /// JSON data (`key[]` for arrays, `selector@attr` for attributes) and merges tab metadata.
 pub async fn browser_extract(schema: &Value) -> Result<Value> {
-    ensure_browser_split_open().await;
     ensure_agent_injected().await;
     let schema_obj = schema.get("schema").unwrap_or(schema);
     let schema_json = serde_json::to_string(schema_obj).unwrap_or_else(|_| "{}".to_string());
@@ -4606,7 +4592,6 @@ pub async fn browser_markdown(max_chars: usize) -> Result<Value> {
     } else {
         max_chars.clamp(200, 32_000)
     };
-    ensure_browser_split_open().await;
     ensure_agent_injected().await;
     let js = if is_web_mode_active() {
         format!("return window.__ALLUSE__.toMarkdown({{\"maxChars\": {clamped}}});")
@@ -4686,7 +4671,6 @@ pub async fn browser_links(internal_only: bool, limit: usize) -> Result<Value> {
     } else {
         limit.clamp(1, 500)
     };
-    ensure_browser_split_open().await;
     ensure_agent_injected().await;
     let js = if is_web_mode_active() {
         format!(
@@ -4740,7 +4724,6 @@ pub async fn browser_links(internal_only: bool, limit: usize) -> Result<Value> {
 
 /// Inspects all `<form>` elements and their interactive fields on the active page (`window.__ALLUSE__.detectForms()`).
 pub async fn browser_detect_forms() -> Result<Value> {
-    ensure_browser_split_open().await;
     ensure_agent_injected().await;
     let js = if is_web_mode_active() {
         "return window.__ALLUSE__.detectForms();".to_string()
@@ -4829,7 +4812,6 @@ pub async fn browser_search_page(
     } else {
         limit.clamp(1, 100)
     };
-    ensure_browser_split_open().await;
     ensure_agent_injected().await;
     let opts_json = json!({
         "query": query,
@@ -4903,7 +4885,6 @@ pub async fn browser_wait(
     } else {
         timeout_ms.clamp(50, 30_000)
     };
-    ensure_browser_split_open().await;
     ensure_agent_injected().await;
 
     let sel = selector.map(str::trim).filter(|s| !s.is_empty());
@@ -5039,7 +5020,6 @@ pub async fn browser_wait(
 /// Exports full browser session storage state: combines CDP `Network.getAllCookies` (when available)
 /// with `window.__ALLUSE__.exportStorageState()` into `{ ok: true, url, origin, cookies, origins: [{ origin, localStorage, sessionStorage }] }`.
 pub async fn browser_get_storage_state() -> Result<Value> {
-    ensure_browser_split_open().await;
     ensure_agent_injected().await;
 
     let mut cdp_cookies: Vec<Value> = Vec::new();
@@ -5164,7 +5144,6 @@ pub async fn browser_get_storage_state() -> Result<Value> {
 /// and populates `localStorage` + `sessionStorage` via `window.__ALLUSE__.importStorageState(state)`.
 pub async fn browser_set_storage_state(state: &Value) -> Result<Value> {
     check_takeover_allowed()?;
-    ensure_browser_split_open().await;
     ensure_agent_injected().await;
 
     let inner_state = state.get("state").unwrap_or(state);
@@ -5270,7 +5249,6 @@ pub async fn browser_set_storage_state(state: &Value) -> Result<Value> {
 
 pub async fn browser_cdp_call(method: &str, params: Value) -> Result<Value> {
     check_takeover_allowed()?;
-    ensure_browser_split_open().await;
     let clean_method = method.trim().to_string();
     if clean_method.is_empty() {
         bail!("CDP method cannot be empty");
@@ -5399,7 +5377,6 @@ pub(crate) fn parse_click_xy_target(target: &str) -> Option<(i32, i32)> {
 
 pub async fn browser_click(target: &str) -> Result<Value> {
     check_takeover_allowed()?;
-    ensure_browser_split_open().await;
     if let Some((x, y)) = parse_click_xy_target(target) {
         return browser_click_xy(x, y).await;
     }
@@ -5409,7 +5386,6 @@ pub async fn browser_click(target: &str) -> Result<Value> {
 
 pub async fn browser_click_xy(x: i32, y: i32) -> Result<Value> {
     check_takeover_allowed()?;
-    ensure_browser_split_open().await;
     let js = format!("return await window.__ALLUSE__.clickAtPoint({x}, {y});");
     eval_in_active_tab(&js, 8000).await
 }
@@ -5539,7 +5515,6 @@ pub(crate) fn extract_fill_form_pairs(fields_val: Option<&Value>) -> Vec<(String
 
 pub async fn browser_fill(target: &str, value: &str, submit_enter: bool) -> Result<Value> {
     check_takeover_allowed()?;
-    ensure_browser_split_open().await;
     let js = format!(
         "return await window.__ALLUSE__.fillTarget({target:?}, {value:?}, {submit_enter});"
     );
@@ -5549,7 +5524,6 @@ pub async fn browser_fill(target: &str, value: &str, submit_enter: bool) -> Resu
 /// Batch-fills multiple fields in a single turn.
 pub async fn browser_fill_form(fields: &[(String, String)], submit_last: bool) -> Result<Value> {
     check_takeover_allowed()?;
-    ensure_browser_split_open().await;
     let mut results = Vec::new();
     let mut filled_count = 0usize;
     for (idx, (target, val)) in fields.iter().enumerate() {
@@ -5864,7 +5838,6 @@ pub(crate) fn normalize_browser_press_key(
 
 pub async fn browser_press_key(key: &str) -> Result<Value> {
     check_takeover_allowed()?;
-    ensure_browser_split_open().await;
     ensure_agent_injected().await;
     let (norm_key, code, key_code, ctrl_key, shift_key, alt_key, meta_key) =
         normalize_browser_press_key(key);
@@ -5976,7 +5949,6 @@ pub async fn browser_press_key(key: &str) -> Result<Value> {
 
 pub async fn browser_scroll(dx: i32, dy: i32) -> Result<Value> {
     check_takeover_allowed()?;
-    ensure_browser_split_open().await;
     let js = format!(
         r#"
         const se = document.scrollingElement || document.documentElement || document.body;
@@ -6021,7 +5993,6 @@ pub async fn browser_scroll(dx: i32, dy: i32) -> Result<Value> {
 }
 
 pub async fn browser_screenshot(annotate_som: bool) -> Result<Value> {
-    ensure_browser_split_open().await;
     if annotate_som {
         let _ = eval_in_active_tab("window.__ALLUSE__.renderSoM();", 3000).await;
         tokio::time::sleep(Duration::from_millis(80)).await;
@@ -6147,7 +6118,6 @@ pub(crate) fn resolve_autofill_identity<'a>(
 
 /// Zero-Leak Vault Identity Autofill.
 pub async fn browser_autofill_identity(selector: Option<&str>) -> Result<Value> {
-    ensure_browser_split_open().await;
     let identities = list_identities()?;
     let Some(profile) = resolve_autofill_identity(&identities, selector) else {
         bail!("No identity profiles found in Vault");
@@ -6161,7 +6131,6 @@ pub async fn browser_autofill_identity(selector: Option<&str>) -> Result<Value> 
 /// Zero-Leak Vault Payment Card Autofill (decrypts DPAPI card in Rust, injects into embedded browser DOM,
 /// and returns only masked confirmation without leaking PAN/CVV to LLM transcript).
 pub async fn browser_autofill_card(selector: Option<&str>) -> Result<Value> {
-    ensure_browser_split_open().await;
     let card = get_card_decrypted(selector)?;
     let payload = serde_json::to_string(&card)?;
     let js = format!("return await window.__ALLUSE__.autofillCard({payload});");
@@ -6238,7 +6207,6 @@ fn resolve_autofill_login(
 
 /// Zero-Leak Vault Login + Live RFC 6238 TOTP Autofill.
 pub async fn browser_autofill_login(selector: &str) -> Result<Value> {
-    ensure_browser_split_open().await;
     let state = get_cached_browser_state();
     let active_url = state
         .tabs
@@ -6352,7 +6320,6 @@ fn normalize_secret_selector(selector: &str) -> String {
 /// editable input/textarea in the active browser tab (or first visible matching/password/text input),
 /// and returns only masked confirmation metadata.
 pub async fn browser_autofill_secret(selector: &str) -> Result<Value> {
-    ensure_browser_split_open().await;
     let norm_sel = normalize_secret_selector(selector);
     let sec = get_secret_decrypted(&norm_sel)?;
     let sec_id = sec
@@ -6655,11 +6622,6 @@ pub fn capture_webview_hwnd_png(hwnd: HWND) -> Result<(u32, u32, String)> {
     }
     #[cfg(windows)]
     unsafe {
-        let self_hwnd = crate::cua::get_self_hwnd() as HWND;
-        if !self_hwnd.is_null() && (IsIconic(self_hwnd) != 0 || GetForegroundWindow() != self_hwnd)
-        {
-            crate::cua::force_show_and_focus_hwnd(self_hwnd);
-        }
         let mut rect = RECT::default();
         if GetWindowRect(hwnd, &mut rect) == 0 {
             return render_synthetic_browser_viewport_png(1280, 800);
@@ -6681,6 +6643,12 @@ pub fn capture_webview_hwnd_png(hwnd: HWND) -> Result<(u32, u32, String)> {
         {
             crate::cua::capture_window_surface_rgba(hwnd, raw_w, raw_h)
         } else {
+            let self_hwnd = crate::cua::get_self_hwnd() as HWND;
+            if !self_hwnd.is_null()
+                && (IsIconic(self_hwnd) != 0 || GetForegroundWindow() != self_hwnd)
+            {
+                crate::cua::force_show_and_focus_hwnd(self_hwnd);
+            }
             let cw = (right - left).max(16) as u32;
             let ch = (bottom - top).max(16) as u32;
             capture_desktop_region_rgba(left, top, cw, ch)

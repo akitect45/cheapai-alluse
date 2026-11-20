@@ -877,6 +877,35 @@ fn compute_layout_rects_physical(
     }
 }
 
+/// Computes the initial physical `Rect` for creating or ensuring an embedded browser tab WebView.
+/// When the right-hand split browser sidebar is closed (`!split_open`) or the session is a
+/// background session, places the WebView offscreen at full desktop viewport dimensions so
+/// background browsing renders realistic responsive layouts without opening the sidebar.
+fn compute_browser_webview_rect(
+    phys_width: u32,
+    phys_height: u32,
+    scale_factor: f64,
+    split_open: bool,
+    split_ratio: f32,
+) -> Rect {
+    if split_open {
+        return compute_layout_rects_physical(
+            phys_width,
+            phys_height,
+            scale_factor,
+            true,
+            split_ratio,
+        )
+        .1;
+    }
+    let m = compute_split_geometry_physical(phys_width, phys_height, scale_factor, split_ratio);
+    let hidden_x = (m.w.max(3840) + 2048) as i32;
+    Rect {
+        position: WryPhysPos::new(hidden_x, 0).into(),
+        size: WryPhysSize::new(m.actual_browser_w.max(320), m.actual_browser_h.max(240)).into(),
+    }
+}
+
 pub(crate) fn resolve_tab_index(
     tabs: &[(String, String, String)],
     active_tab_id: &str,
@@ -1964,7 +1993,6 @@ fn register_web_mode_gui_dispatcher() {
                     active: true,
                 });
                 st.active_tab_id = tid.clone();
-                st.split_open = true;
                 crate::browser::update_cached_browser_state_for_session(&session_id, st.clone());
                 crate::browser::web_mode_sync_tab_url_for_session(&session_id, &tid, &norm_url);
                 let st = crate::browser::get_cached_browser_state_for_session(&session_id);
@@ -1993,7 +2021,6 @@ fn register_web_mode_gui_dispatcher() {
                         t.active = t.id == target_id;
                     }
                 }
-                st.split_open = true;
                 crate::browser::update_cached_browser_state_for_session(&session_id, st.clone());
                 crate::agent::emit_event(
                     "browser_update",
@@ -2063,7 +2090,6 @@ fn register_web_mode_gui_dispatcher() {
                     t.url = norm_url.clone();
                     t.title = norm_url.clone();
                 }
-                st.split_open = true;
                 crate::browser::update_cached_browser_state_for_session(&session_id, st.clone());
                 crate::browser::web_mode_sync_tab_url_for_session(&session_id, &active_id, &norm_url);
                 let st = crate::browser::get_cached_browser_state_for_session(&session_id);
@@ -3384,11 +3410,12 @@ fn main() -> Result<()> {
                     let target_sid = crate::browser::normalize_browser_session_id(&session_id);
                     let norm_url = crate::browser::normalize_url(&url);
                     let win_sz = effective_layout_window_size(&window, saved_normal_bounds.1);
-                    let (_, browser_rect) = compute_layout_rects_physical(
+                    let tab_visible = split_open && target_sid == ui_session_id;
+                    let browser_rect = compute_browser_webview_rect(
                         win_sz.width,
                         win_sz.height,
                         window.scale_factor(),
-                        split_open,
+                        tab_visible,
                         split_ratio,
                     );
                     let s_idx = match ensure_embedded_browser_session(
@@ -3420,6 +3447,9 @@ fn main() -> Result<()> {
                         gtk_fixed.as_ref(),
                     ) {
                         Ok(wv) => {
+                            if !tab_visible {
+                                let _ = wv.set_visible(false);
+                            }
                             if session_takeover {
                                 let _ = wv.evaluate_script(
                                     "window.__ALLUSE__ && window.__ALLUSE__.setTakeover(true);",
@@ -3456,12 +3486,6 @@ fn main() -> Result<()> {
                                 last_active_tick: tick,
                             });
                             sessions[s_idx].active_tab_id = tid;
-                            if target_sid == ui_session_id && !split_open {
-                                split_open = true;
-                                let _ = crate::server::update_config(serde_json::json!({
-                                    "split_browser_open": true
-                                }));
-                            }
                             let st = sync_sessions_visibility_and_bounds(
                                 &ui_webview,
                                 &sessions,
@@ -3493,11 +3517,11 @@ fn main() -> Result<()> {
                 } => {
                     let target_sid = crate::browser::normalize_browser_session_id(&session_id);
                     let win_sz = effective_layout_window_size(&window, saved_normal_bounds.1);
-                    let (_, browser_rect) = compute_layout_rects_physical(
+                    let browser_rect = compute_browser_webview_rect(
                         win_sz.width,
                         win_sz.height,
                         window.scale_factor(),
-                        split_open,
+                        split_open && target_sid == ui_session_id,
                         split_ratio,
                     );
                     if let Ok(s_idx) = ensure_embedded_browser_session(
@@ -3526,12 +3550,6 @@ fn main() -> Result<()> {
                             sessions[s_idx].active_tab_id = sessions[s_idx].tabs[idx].id.clone();
                         }
                     }
-                    if target_sid == ui_session_id && !split_open {
-                        split_open = true;
-                        let _ = crate::server::update_config(serde_json::json!({
-                            "split_browser_open": true
-                        }));
-                    }
                     let st = sync_sessions_visibility_and_bounds(
                         &ui_webview,
                         &sessions,
@@ -3558,11 +3576,11 @@ fn main() -> Result<()> {
                 } => {
                     let target_sid = crate::browser::normalize_browser_session_id(&session_id);
                     let win_sz = effective_layout_window_size(&window, saved_normal_bounds.1);
-                    let (_, browser_rect) = compute_layout_rects_physical(
+                    let browser_rect = compute_browser_webview_rect(
                         win_sz.width,
                         win_sz.height,
                         window.scale_factor(),
-                        split_open,
+                        split_open && target_sid == ui_session_id,
                         split_ratio,
                     );
                     if let Ok(s_idx) = ensure_embedded_browser_session(
@@ -3632,11 +3650,11 @@ fn main() -> Result<()> {
                     let target_sid = crate::browser::normalize_browser_session_id(&session_id);
                     let norm_url = crate::browser::normalize_url(&url);
                     let win_sz = effective_layout_window_size(&window, saved_normal_bounds.1);
-                    let (_, browser_rect) = compute_layout_rects_physical(
+                    let browser_rect = compute_browser_webview_rect(
                         win_sz.width,
                         win_sz.height,
                         window.scale_factor(),
-                        split_open,
+                        split_open && target_sid == ui_session_id,
                         split_ratio,
                     );
                     if let Ok(s_idx) = ensure_embedded_browser_session(
@@ -3656,12 +3674,6 @@ fn main() -> Result<()> {
                             t.last_active_tick = next_embedded_activity_tick();
                             let _ = t.webview.load_url(&norm_url);
                         }
-                    }
-                    if target_sid == ui_session_id && !split_open {
-                        split_open = true;
-                        let _ = crate::server::update_config(serde_json::json!({
-                            "split_browser_open": true
-                        }));
                     }
                     let st = sync_sessions_visibility_and_bounds(
                         &ui_webview,
@@ -3775,11 +3787,11 @@ fn main() -> Result<()> {
                 } => {
                     let target_sid = crate::browser::normalize_browser_session_id(&session_id);
                     let win_sz = effective_layout_window_size(&window, saved_normal_bounds.1);
-                    let (_, browser_rect) = compute_layout_rects_physical(
+                    let browser_rect = compute_browser_webview_rect(
                         win_sz.width,
                         win_sz.height,
                         window.scale_factor(),
-                        split_open,
+                        split_open && target_sid == ui_session_id,
                         split_ratio,
                     );
                     let _ = ensure_embedded_browser_session(
@@ -3791,29 +3803,6 @@ fn main() -> Result<()> {
                         #[cfg(target_os = "linux")]
                         gtk_fixed.as_ref(),
                     );
-                    if target_sid == ui_session_id && !split_open {
-                        split_open = true;
-                        let _ = crate::server::update_config(serde_json::json!({
-                            "split_browser_open": true
-                        }));
-                        let st = sync_sessions_visibility_and_bounds(
-                            &ui_webview,
-                            &sessions,
-                            &ui_session_id,
-                            &target_sid,
-                            window.inner_size(),
-                            window.scale_factor(),
-                            split_open,
-                            split_ratio,
-                            auto_zoom,
-                            user_zoom,
-                            split_dragging,
-                        );
-                        crate::agent::emit_event(
-                            "browser_update",
-                            serde_json::to_value(&st).unwrap_or(Value::Null),
-                        );
-                    }
                     if let Some(sess) = sessions.iter().find(|s| s.session_id == target_sid)
                         && let Some(t) = sess.tabs.iter().find(|t| t.id == sess.active_tab_id)
                     {
@@ -3834,11 +3823,11 @@ fn main() -> Result<()> {
                 } => {
                     let target_sid = crate::browser::normalize_browser_session_id(&session_id);
                     let win_sz = effective_layout_window_size(&window, saved_normal_bounds.1);
-                    let (_, browser_rect) = compute_layout_rects_physical(
+                    let browser_rect = compute_browser_webview_rect(
                         win_sz.width,
                         win_sz.height,
                         window.scale_factor(),
-                        split_open,
+                        split_open && target_sid == ui_session_id,
                         split_ratio,
                     );
                     let _ = ensure_embedded_browser_session(
@@ -3873,11 +3862,11 @@ fn main() -> Result<()> {
                 } => {
                     let target_sid = crate::browser::normalize_browser_session_id(&session_id);
                     let win_sz = effective_layout_window_size(&window, saved_normal_bounds.1);
-                    let (_, browser_rect) = compute_layout_rects_physical(
+                    let browser_rect = compute_browser_webview_rect(
                         win_sz.width,
                         win_sz.height,
                         window.scale_factor(),
-                        split_open,
+                        split_open && target_sid == ui_session_id,
                         split_ratio,
                     );
                     let _ = ensure_embedded_browser_session(
@@ -3891,31 +3880,6 @@ fn main() -> Result<()> {
                     );
                     let method_trim = method.trim();
                     let method_low = method_trim.to_ascii_lowercase();
-                    if target_sid == ui_session_id && !split_open {
-                        split_open = true;
-                        let _ = crate::server::update_config(serde_json::json!({
-                            "split_browser_open": true
-                        }));
-                        if method_low != "page.navigate" {
-                            let st = sync_sessions_visibility_and_bounds(
-                                &ui_webview,
-                                &sessions,
-                                &ui_session_id,
-                                &target_sid,
-                                window.inner_size(),
-                                window.scale_factor(),
-                                split_open,
-                                split_ratio,
-                                auto_zoom,
-                                user_zoom,
-                                split_dragging,
-                            );
-                            crate::agent::emit_event(
-                                "browser_update",
-                                serde_json::to_value(&st).unwrap_or(Value::Null),
-                            );
-                        }
-                    }
                     let Some(s_idx) = sessions.iter().position(|s| s.session_id == target_sid)
                     else {
                         let _ = reply.send(Err(anyhow!("No active browser session")));
@@ -4080,11 +4044,11 @@ fn main() -> Result<()> {
                 } => {
                     let target_sid = crate::browser::normalize_browser_session_id(&session_id);
                     let win_sz = effective_layout_window_size(&window, saved_normal_bounds.1);
-                    let (_, browser_rect) = compute_layout_rects_physical(
+                    let browser_rect = compute_browser_webview_rect(
                         win_sz.width,
                         win_sz.height,
                         window.scale_factor(),
-                        split_open,
+                        split_open && target_sid == ui_session_id,
                         split_ratio,
                     );
                     let _ = ensure_embedded_browser_session(
@@ -4096,29 +4060,6 @@ fn main() -> Result<()> {
                         #[cfg(target_os = "linux")]
                         gtk_fixed.as_ref(),
                     );
-                    if target_sid == ui_session_id && !split_open {
-                        split_open = true;
-                        let _ = crate::server::update_config(serde_json::json!({
-                            "split_browser_open": true
-                        }));
-                        let st = sync_sessions_visibility_and_bounds(
-                            &ui_webview,
-                            &sessions,
-                            &ui_session_id,
-                            &target_sid,
-                            window.inner_size(),
-                            window.scale_factor(),
-                            split_open,
-                            split_ratio,
-                            auto_zoom,
-                            user_zoom,
-                            split_dragging,
-                        );
-                        crate::agent::emit_event(
-                            "browser_update",
-                            serde_json::to_value(&st).unwrap_or(Value::Null),
-                        );
-                    }
                     if let Some(sess) = sessions.iter().find(|s| s.session_id == target_sid)
                         && let Some(t) = sess.tabs.iter().find(|t| t.id == sess.active_tab_id)
                     {
@@ -4135,7 +4076,7 @@ fn main() -> Result<()> {
                                 true,
                                 split_ratio,
                             );
-                            if target_sid != ui_session_id {
+                            if target_sid != ui_session_id || !split_open {
                                 apply_webview_bounds(&t.webview, b_rect, scale, true);
                                 let _ = t.webview.set_visible(true);
                             }
@@ -4174,7 +4115,7 @@ fn main() -> Result<()> {
                                 bh,
                                 scale,
                             );
-                            if target_sid != ui_session_id {
+                            if target_sid != ui_session_id || !split_open {
                                 let _ = sync_sessions_visibility_and_bounds(
                                     &ui_webview,
                                     &sessions,
@@ -5090,5 +5031,85 @@ mod tests {
             !js_low.contains("color-scheme") && !js_low.contains("force-dark"),
             "BROWSER_AGENT_JS must never inject forced dark-mode or color-scheme overrides into third-party sites"
         );
+    }
+
+    #[test]
+    fn test_compute_browser_webview_rect_preserves_full_viewport_offscreen_when_closed() {
+        let hidden = compute_browser_webview_rect(1600, 900, 1.0, false, 0.48);
+        let (hx, hy, hw, hh) = rect_to_physical_xywh(&hidden, 1.0);
+        assert!(hx >= 5888, "hidden browser webview must be offscreen, got x={hx}");
+        assert_eq!(hy, 0);
+        assert!(hw >= 700, "hidden browser webview must keep desktop width, got w={hw}");
+        assert!(hh >= 700, "hidden browser webview must keep desktop height, got h={hh}");
+
+        let visible = compute_browser_webview_rect(1600, 900, 1.0, true, 0.48);
+        let (vx, vy, vw, vh) = rect_to_physical_xywh(&visible, 1.0);
+        assert!(vx > 0 && vx < 1600);
+        assert_eq!(vy, 102);
+        assert_eq!(vw, hw);
+        assert_eq!(vh, hh);
+    }
+
+    #[test]
+    fn test_background_browser_actions_do_not_auto_open_closed_split_pane() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime");
+        rt.block_on(async {
+            register_web_mode_gui_dispatcher();
+            let sid = "thread-bg-no-autoopen-test";
+            crate::browser::with_browser_session(sid, async {
+                let closed = crate::browser::browser_set_split(false, None)
+                    .await
+                    .expect("close split");
+                assert_eq!(closed.get("split_open").and_then(|v| v.as_bool()), Some(false));
+                assert!(!crate::browser::get_cached_browser_state().split_open);
+
+                let nav = crate::browser::browser_navigate("about:blank", 10)
+                    .await
+                    .expect("background navigate");
+                assert_eq!(nav.get("split_open").and_then(|v| v.as_bool()), Some(false));
+                assert!(!crate::browser::get_cached_browser_state().split_open);
+
+                let tab = crate::browser::browser_new_tab("about:blank")
+                    .await
+                    .expect("background new_tab");
+                assert_eq!(tab.get("split_open").and_then(|v| v.as_bool()), Some(false));
+                assert!(!crate::browser::get_cached_browser_state().split_open);
+
+                let switched = crate::browser::browser_switch_tab("tab-1")
+                    .await
+                    .expect("background switch_tab");
+                assert_eq!(switched.get("split_open").and_then(|v| v.as_bool()), Some(false));
+                assert!(!crate::browser::get_cached_browser_state().split_open);
+
+                let hist = crate::browser::browser_history_nav("reload")
+                    .await
+                    .expect("background history_nav");
+                assert_eq!(hist.get("split_open").and_then(|v| v.as_bool()), Some(false));
+                assert!(!crate::browser::get_cached_browser_state().split_open);
+
+                let snap = crate::browser::browser_snapshot(false, false)
+                    .await
+                    .expect("background snapshot");
+                assert_eq!(snap.get("split_open").and_then(|v| v.as_bool()), Some(false));
+                assert!(!crate::browser::get_cached_browser_state().split_open);
+
+                let _shot = crate::browser::browser_screenshot(false)
+                    .await
+                    .expect("background screenshot");
+                assert!(!crate::browser::get_cached_browser_state().split_open);
+
+                // Explicit manual user toggle / foreground SetSplit still opens the sidebar normally
+                let opened = crate::browser::browser_set_split(true, None)
+                    .await
+                    .expect("manual open split");
+                assert_eq!(opened.get("split_open").and_then(|v| v.as_bool()), Some(true));
+                assert!(crate::browser::get_cached_browser_state().split_open);
+            })
+            .await;
+            let _ = crate::browser::browser_close_session(sid).await;
+        });
     }
 }

@@ -3665,7 +3665,6 @@ pub async fn execute_custom_tool(
             Ok(serde_json::to_value(rep)?)
         }
         "browser_js" => {
-            crate::browser::ensure_browser_split_open().await;
             let args_json = serde_json::to_string(effective_args)?;
             let body_js = interpolate_custom_tool_template(&spec.body, &sorted_pairs, false);
             let inner_body = crate::browser::prepare_js_rpc_body(&body_js);
